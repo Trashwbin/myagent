@@ -172,12 +172,12 @@ Support two first-class formats in v0:
 Do not build a provider marketplace. The internal boundary should be small:
 
 ```ts
-type ProviderKind = "openai" | "anthropic"
+type ProviderKind = "openai" | "anthropic";
 
 type ModelEvent =
   | { type: "text_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: unknown }
-  | { type: "stop"; reason: "end_turn" | "tool_use" | "length" }
+  | { type: "stop"; reason: "end_turn" | "tool_use" | "length" };
 ```
 
 The session loop should only understand `ModelEvent`. Each provider adapter is

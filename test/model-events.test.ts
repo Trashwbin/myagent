@@ -32,8 +32,14 @@ describe("ModelEvent / FakeProvider", () => {
 
   it("supports multi-turn event sets", async () => {
     const provider = new FakeProvider([
-      [{ type: "text_delta", text: "turn 1" }, { type: "stop", reason: "end_turn" }],
-      [{ type: "text_delta", text: "turn 2" }, { type: "stop", reason: "end_turn" }],
+      [
+        { type: "text_delta", text: "turn 1" },
+        { type: "stop", reason: "end_turn" },
+      ],
+      [
+        { type: "text_delta", text: "turn 2" },
+        { type: "stop", reason: "end_turn" },
+      ],
     ]);
 
     const t1: ModelEvent[] = [];

@@ -54,7 +54,7 @@ Internal stream boundary:
 type ModelEvent =
   | { type: "text_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: unknown }
-  | { type: "stop"; reason: "end_turn" | "tool_use" | "length" }
+  | { type: "stop"; reason: "end_turn" | "tool_use" | "length" };
 ```
 
 The session loop only depends on `ModelEvent`. Each provider adapter translates
@@ -80,11 +80,11 @@ Each tool should expose:
 
 ```ts
 type ToolDefinition = {
-  name: string
-  description: string
-  inputSchema: z.ZodType
-  execute(input: unknown, context: ToolContext): Promise<ToolResult>
-}
+  name: string;
+  description: string;
+  inputSchema: z.ZodType;
+  execute(input: unknown, context: ToolContext): Promise<ToolResult>;
+};
 ```
 
 ## Permission Layer
