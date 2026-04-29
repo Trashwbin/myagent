@@ -67,6 +67,7 @@ export class OpenAICompatibleProvider implements Provider {
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseUrl,
+      defaultHeaders: { "User-Agent": "myagent/0.0.1" },
     });
   }
 
@@ -77,6 +78,7 @@ export class OpenAICompatibleProvider implements Provider {
     const params: OpenAI.ChatCompletionCreateParamsStreaming = {
       model: this.config.model,
       messages: openaiMessages,
+      max_tokens: 4096,
       stream: true,
     };
     if (openaiTools) {

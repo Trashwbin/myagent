@@ -79,8 +79,10 @@ export class AnthropicCompatibleProvider implements Provider {
 
   constructor(private config: ProviderConfig) {
     this.client = new Anthropic({
-      apiKey: config.apiKey,
+      apiKey: config.authToken ? undefined : config.apiKey,
+      authToken: config.authToken,
       baseURL: config.baseUrl,
+      defaultHeaders: { "User-Agent": "myagent/0.0.1" },
     });
   }
 

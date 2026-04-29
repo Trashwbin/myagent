@@ -49,8 +49,11 @@ program
       });
     } else if (options.provider === "anthropic") {
       const apiKey = process.env.MYAGENT_API_KEY;
-      if (!apiKey) {
-        console.error("MYAGENT_API_KEY is required for anthropic provider");
+      const authToken = process.env.MYAGENT_AUTH_TOKEN;
+      if (!apiKey && !authToken) {
+        console.error(
+          "MYAGENT_API_KEY or MYAGENT_AUTH_TOKEN is required for anthropic provider",
+        );
         process.exit(1);
       }
       provider = new AnthropicCompatibleProvider({
@@ -58,6 +61,7 @@ program
         model: options.model || process.env.MYAGENT_MODEL || "claude-sonnet-4-5",
         baseUrl: process.env.MYAGENT_BASE_URL,
         apiKey,
+        authToken,
       });
     } else {
       console.error(

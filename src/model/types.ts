@@ -24,4 +24,5 @@ export type ProviderConfig = {
   model: string;
   baseUrl?: string;
   apiKey?: string;
+  authToken?: string;
 };

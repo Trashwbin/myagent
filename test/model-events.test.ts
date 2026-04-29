@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { FakeProvider } from "../src/model/fake.js";
-import type { ModelEvent } from "../src/model/types.js";
+import type { ModelEvent, ProviderConfig } from "../src/model/types.js";
 
 describe("ModelEvent / FakeProvider", () => {
   it("emits events in order", async () => {
@@ -74,5 +74,16 @@ describe("ModelEvent / FakeProvider", () => {
       name: "bash",
       input: { command: "echo hi" },
     });
+  });
+
+  it("supports bearer auth token provider config", () => {
+    const config: ProviderConfig = {
+      provider: "anthropic",
+      model: "claude-haiku-4-5-20251001",
+      baseUrl: "https://example.test",
+      authToken: "token",
+    };
+
+    expect(config.authToken).toBe("token");
   });
 });
