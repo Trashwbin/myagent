@@ -6,6 +6,7 @@ const ALLOWED_BASH_COMMANDS = [
   "git status",
   "git diff",
   "rg ",
+  "grep ",
   "pnpm test",
   "npm test",
   "echo ",
