@@ -1,12 +1,28 @@
 import type { Provider } from "../model/provider.js";
+import type { ToolSchema } from "../model/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { checkPermission } from "../permission/rules.js";
 import type { ApprovalMode } from "../permission/rules.js";
 import type { Message } from "./message.js";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 export type SessionResult = {
   transcript: Message[];
 };
+
+function buildToolSchemas(registry: ToolRegistry): ToolSchema[] {
+  return registry.list().map((t) => {
+    const { $schema, ...parameters } = zodToJsonSchema(t.inputSchema) as Record<
+      string,
+      unknown
+    >;
+    return {
+      name: t.name,
+      description: t.description,
+      parameters,
+    };
+  });
+}
 
 export async function runSession(
   provider: Provider,
@@ -17,12 +33,13 @@ export async function runSession(
   const messages = [...initialMessages];
   const transcript = [...initialMessages];
   const maxTurns = options.maxTurns ?? 10;
+  const toolSchemas = buildToolSchemas(registry);
 
   for (let turn = 0; turn < maxTurns; turn++) {
     let assistantText = "";
     const toolCalls: Array<{ id: string; name: string; input: unknown }> = [];
 
-    for await (const event of provider.stream(messages)) {
+    for await (const event of provider.stream(messages, toolSchemas)) {
       switch (event.type) {
         case "text_delta":
           assistantText += event.text;

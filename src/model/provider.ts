@@ -1,6 +1,6 @@
-import type { ModelEvent, Message } from "./types.js";
+import type { ModelEvent, Message, ToolSchema } from "./types.js";
 
 export interface Provider {
   readonly name: string;
-  stream(messages: Message[]): AsyncGenerator<ModelEvent>;
+  stream(messages: Message[], tools?: ToolSchema[]): AsyncGenerator<ModelEvent>;
 }

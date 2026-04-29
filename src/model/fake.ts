@@ -7,7 +7,10 @@ export class FakeProvider implements Provider {
 
   constructor(private eventSets: ModelEvent[][]) {}
 
-  async *stream(_messages: Message[]): AsyncGenerator<ModelEvent> {
+  async *stream(
+    _messages: Message[],
+    _tools?: import("./types.js").ToolSchema[],
+  ): AsyncGenerator<ModelEvent> {
     const events = this.eventSets[this.callIndex] ?? [
       { type: "stop", reason: "end_turn" as const },
     ];

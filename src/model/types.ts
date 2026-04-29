@@ -11,6 +11,12 @@ export type Message = {
   toolCalls?: Array<{ id: string; name: string; input: unknown }>;
 };
 
+export type ToolSchema = {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+};
+
 export type ProviderKind = "openai" | "anthropic";
 
 export type ProviderConfig = {
