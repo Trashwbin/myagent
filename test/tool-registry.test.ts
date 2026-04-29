@@ -1,0 +1,46 @@
+import { describe, it, expect } from "vitest";
+import { ToolRegistry } from "../src/tools/registry.js";
+import { readFileTool } from "../src/tools/read.js";
+import { searchTool } from "../src/tools/search.js";
+import { editFileTool } from "../src/tools/edit.js";
+import { bashTool } from "../src/tools/bash.js";
+
+describe("ToolRegistry", () => {
+  it("registers and finds all four built-in tools", () => {
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+    registry.register(searchTool);
+    registry.register(editFileTool);
+    registry.register(bashTool);
+
+    expect(registry.get("read_file")).toBe(readFileTool);
+    expect(registry.get("search")).toBe(searchTool);
+    expect(registry.get("edit_file")).toBe(editFileTool);
+    expect(registry.get("bash")).toBe(bashTool);
+  });
+
+  it("returns undefined for unknown tools", () => {
+    const registry = new ToolRegistry();
+    expect(registry.get("nonexistent")).toBeUndefined();
+  });
+
+  it("lists all registered tools", () => {
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+    registry.register(bashTool);
+
+    const list = registry.list();
+    expect(list).toHaveLength(2);
+    expect(list.map((t) => t.name)).toEqual(["read_file", "bash"]);
+  });
+
+  it("all tools have name, description, inputSchema, and execute", () => {
+    const tools = [readFileTool, searchTool, editFileTool, bashTool];
+    for (const tool of tools) {
+      expect(tool.name).toBeTruthy();
+      expect(tool.description).toBeTruthy();
+      expect(tool.inputSchema).toBeDefined();
+      expect(typeof tool.execute).toBe("function");
+    }
+  });
+});
