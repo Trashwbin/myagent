@@ -16,6 +16,7 @@ export type ApprovalRequest = {
 
 export type SessionState = {
   id: string;
+  /** Canonical workspace root — not process.cwd(). All tools resolve paths relative to this. */
   cwd: string;
   messages: Message[];
 };

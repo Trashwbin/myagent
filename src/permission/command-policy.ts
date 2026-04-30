@@ -100,6 +100,21 @@ const READ_ONLY_PREFIXES = [
   "pnpm run test",
 ];
 
+// --- Workspace escape detection ---
+
+const WORKSPACE_ESCAPE_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /~/, label: "home path (~)" },
+  { pattern: /\.\./, label: "parent path (..)" },
+  { pattern: /(?:^|\s)\/[^\s]/, label: "absolute path" },
+];
+
+function hasWorkspaceEscape(command: string): string | undefined {
+  for (const { pattern, label } of WORKSPACE_ESCAPE_PATTERNS) {
+    if (pattern.test(command)) return label;
+  }
+  return undefined;
+}
+
 export function analyzeCommand(command: string): CommandPolicyResult {
   const normalized = command.trim();
 
@@ -138,9 +153,17 @@ export function analyzeCommand(command: string): CommandPolicyResult {
     }
   }
 
-  // Layer 4: Read-only commands
+  // Layer 4: Read-only commands with workspace boundary check
   for (const prefix of READ_ONLY_PREFIXES) {
     if (normalized.startsWith(prefix) || normalized === prefix) {
+      const escape = hasWorkspaceEscape(normalized);
+      if (escape) {
+        return {
+          effect: "read",
+          decision: "ask",
+          reason: `command references path outside workspace or uses ${escape}`,
+        };
+      }
       return { effect: "read", decision: "allow", reason: "read-only command" };
     }
   }

@@ -122,3 +122,35 @@ describe("command policy: unknown → ask", () => {
     expect(r.decision).toBe("ask");
   });
 });
+
+describe("command policy: workspace escape → ask", () => {
+  const escapeCases: Array<[string, string]> = [
+    ["ls ~", "home path"],
+    ["ls ~/Documents", "home path"],
+    ["cat ~/.ssh/config", "home path"],
+    ["ls /Users/zt-user", "absolute path"],
+    ["cat /etc/passwd", "absolute path"],
+    ["find /Users/zt-user/code -name .env", "absolute path"],
+    ["cat ../secret.txt", "parent path"],
+    ["find .. -name .env", "parent path"],
+    ["ls -la ../../etc", "parent path"],
+  ];
+
+  for (const [cmd, label] of escapeCases) {
+    it(`asks for ${label}: ${cmd}`, () => {
+      const r = analyzeCommand(cmd);
+      expect(r.decision).toBe("ask");
+      expect(r.reason).toContain("outside workspace");
+    });
+  }
+
+  it("allows find with relative . path", () => {
+    const r = analyzeCommand("find . -name .env");
+    expect(r.decision).toBe("allow");
+  });
+
+  it("allows ls with workspace-relative path", () => {
+    const r = analyzeCommand("ls src/lib");
+    expect(r.decision).toBe("allow");
+  });
+});
