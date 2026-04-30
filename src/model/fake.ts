@@ -1,4 +1,5 @@
 import type { Provider } from "./provider.js";
+import type { ProviderStreamOptions } from "./provider.js";
 import type { ModelEvent, Message } from "./types.js";
 
 export class FakeProvider implements Provider {
@@ -10,6 +11,7 @@ export class FakeProvider implements Provider {
   async *stream(
     _messages: Message[],
     _tools?: import("./types.js").ToolSchema[],
+    _options?: ProviderStreamOptions,
   ): AsyncGenerator<ModelEvent> {
     const events = this.eventSets[this.callIndex] ?? [
       { type: "stop", reason: "end_turn" as const },

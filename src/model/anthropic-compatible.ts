@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Provider } from "./provider.js";
+import type { ProviderStreamOptions } from "./provider.js";
 import type { ModelEvent, Message, ProviderConfig, ToolSchema } from "./types.js";
 
 type StopReason = "end_turn" | "tool_use" | "length";
@@ -86,7 +87,11 @@ export class AnthropicCompatibleProvider implements Provider {
     });
   }
 
-  async *stream(messages: Message[], tools?: ToolSchema[]): AsyncGenerator<ModelEvent> {
+  async *stream(
+    messages: Message[],
+    tools?: ToolSchema[],
+    options?: ProviderStreamOptions,
+  ): AsyncGenerator<ModelEvent> {
     const anthropicMessages = convertMessages(messages);
     const anthropicTools = convertTools(tools);
 
@@ -96,6 +101,9 @@ export class AnthropicCompatibleProvider implements Provider {
       max_tokens: 8192,
       stream: true,
     };
+    if (options?.systemPrompt) {
+      params.system = options.systemPrompt;
+    }
     if (anthropicTools) {
       params.tools = anthropicTools;
     }

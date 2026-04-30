@@ -190,4 +190,40 @@ describe("OpenAI convertMessages", () => {
       { type: "stop", reason: "tool_use" },
     ]);
   });
+
+  it("sends system prompt as first OpenAI message", async () => {
+    const provider = new OpenAICompatibleProvider({
+      provider: "openai",
+      model: "test-model",
+      apiKey: "test-key",
+    });
+    let capturedParams: any;
+
+    (provider as any).client = {
+      chat: {
+        completions: {
+          create: async (params: any) => {
+            capturedParams = params;
+            return chunks([
+              {
+                choices: [{ delta: {}, finish_reason: "stop" }],
+              },
+            ]);
+          },
+        },
+      },
+    };
+
+    await collectEvents(
+      provider.stream([{ role: "user", content: "hello" }], undefined, {
+        systemPrompt: "system rules",
+      }),
+    );
+
+    expect(capturedParams.messages[0]).toEqual({
+      role: "system",
+      content: "system rules",
+    });
+    expect(capturedParams.messages[1]).toEqual({ role: "user", content: "hello" });
+  });
 });

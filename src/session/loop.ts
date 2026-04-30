@@ -6,6 +6,7 @@ import type { ApprovalMode } from "../permission/rules.js";
 import type { Message } from "./message.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { createCheckpoint } from "../workspace/checkpoint.js";
+import { buildSystemPrompt } from "./system-prompt.js";
 
 export type ApprovalRequest = {
   toolName: string;
@@ -57,12 +58,13 @@ export async function runSession(
   const transcript = [...initialMessages];
   const maxTurns = options.maxTurns ?? 10;
   const toolSchemas = buildToolSchemas(registry);
+  const systemPrompt = buildSystemPrompt(options.cwd);
 
   for (let turn = 0; turn < maxTurns; turn++) {
     let assistantText = "";
     const toolCalls: Array<{ id: string; name: string; input: unknown }> = [];
 
-    for await (const event of provider.stream(messages, toolSchemas)) {
+    for await (const event of provider.stream(messages, toolSchemas, { systemPrompt })) {
       switch (event.type) {
         case "text_delta":
           assistantText += event.text;

@@ -1,5 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { convertMessages } from "../src/model/anthropic-compatible.js";
+import {
+  AnthropicCompatibleProvider,
+  convertMessages,
+} from "../src/model/anthropic-compatible.js";
+
+async function* chunks(items: unknown[]) {
+  yield* items;
+}
+
+async function collectEvents(stream: AsyncGenerator<unknown>): Promise<unknown[]> {
+  const events: unknown[] = [];
+  for await (const event of stream) events.push(event);
+  return events;
+}
 
 describe("Anthropic convertMessages", () => {
   it("converts user message", () => {
@@ -118,5 +131,37 @@ describe("Anthropic convertMessages", () => {
     expect(result[3].role).toBe("assistant");
     expect(result[4].role).toBe("user");
     expect(result[5].role).toBe("assistant");
+  });
+
+  it("sends system prompt in Anthropic message params", async () => {
+    const provider = new AnthropicCompatibleProvider({
+      provider: "anthropic",
+      model: "test-model",
+      apiKey: "test-key",
+    });
+    let capturedParams: any;
+
+    (provider as any).client = {
+      messages: {
+        stream: (params: any) => {
+          capturedParams = params;
+          return chunks([
+            {
+              type: "message_delta",
+              delta: { stop_reason: "end_turn" },
+            },
+          ]);
+        },
+      },
+    };
+
+    await collectEvents(
+      provider.stream([{ role: "user", content: "hello" }], undefined, {
+        systemPrompt: "system rules",
+      }),
+    );
+
+    expect(capturedParams.system).toBe("system rules");
+    expect(capturedParams.messages).toEqual([{ role: "user", content: "hello" }]);
   });
 });

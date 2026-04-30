@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { Provider } from "./provider.js";
+import type { ProviderStreamOptions } from "./provider.js";
 import type { ModelEvent, Message, ProviderConfig, ToolSchema } from "./types.js";
 
 type StopReason = "end_turn" | "tool_use" | "length";
@@ -71,13 +72,19 @@ export class OpenAICompatibleProvider implements Provider {
     });
   }
 
-  async *stream(messages: Message[], tools?: ToolSchema[]): AsyncGenerator<ModelEvent> {
+  async *stream(
+    messages: Message[],
+    tools?: ToolSchema[],
+    options?: ProviderStreamOptions,
+  ): AsyncGenerator<ModelEvent> {
     const openaiMessages = convertMessages(messages);
     const openaiTools = convertTools(tools);
 
     const params: OpenAI.ChatCompletionCreateParamsStreaming = {
       model: this.config.model,
-      messages: openaiMessages,
+      messages: options?.systemPrompt
+        ? [{ role: "system", content: options.systemPrompt }, ...openaiMessages]
+        : openaiMessages,
       max_tokens: 4096,
       stream: true,
     };

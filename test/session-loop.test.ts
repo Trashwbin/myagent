@@ -5,11 +5,42 @@ import { readFileTool } from "../src/tools/read.js";
 import { editFileTool } from "../src/tools/edit.js";
 import { bashTool } from "../src/tools/bash.js";
 import { runSession } from "../src/session/loop.js";
+import type { Provider } from "../src/model/provider.js";
+import type { ModelEvent, Message, ToolSchema } from "../src/model/types.js";
+import type { ProviderStreamOptions } from "../src/model/provider.js";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 describe("Session loop", () => {
+  it("passes the system prompt to the provider", async () => {
+    let capturedOptions: ProviderStreamOptions | undefined;
+    const provider: Provider = {
+      name: "capture",
+      async *stream(
+        _messages: Message[],
+        _tools?: ToolSchema[],
+        options?: ProviderStreamOptions,
+      ): AsyncGenerator<ModelEvent> {
+        capturedOptions = options;
+        yield { type: "text_delta", text: "ok" };
+        yield { type: "stop", reason: "end_turn" };
+      },
+    };
+
+    await runSession(provider, new ToolRegistry(), [{ role: "user", content: "hi" }], {
+      cwd: "/tmp/myagent-workspace",
+      approval: "auto",
+    });
+
+    expect(capturedOptions?.systemPrompt).toContain(
+      "The workspace root is: /tmp/myagent-workspace",
+    );
+    expect(capturedOptions?.systemPrompt).toContain(
+      "Modify existing files only with edit_file",
+    );
+  });
+
   it("consumes text_delta events", async () => {
     const provider = new FakeProvider([
       [
