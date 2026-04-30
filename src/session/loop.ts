@@ -31,17 +31,40 @@ export type SessionOptions = {
   approval: ApprovalMode;
   maxTurns?: number;
   approvalHandler?: (request: ApprovalRequest) => Promise<"allow" | "deny">;
+  onEvent?: (event: TurnEvent) => void | Promise<void>;
 };
 
 export type TurnOptions = {
   approval: ApprovalMode;
   maxTurns?: number;
   approvalHandler?: (request: ApprovalRequest) => Promise<"allow" | "deny">;
+  onEvent?: (event: TurnEvent) => void | Promise<void>;
 };
 
 export type SessionResult = {
   transcript: Message[];
 };
+
+export type TurnEvent =
+  | { type: "assistant_text_delta"; text: string }
+  | { type: "tool_call"; id: string; name: string; input: unknown }
+  | { type: "assistant_message"; message: Message }
+  | {
+      type: "tool_approval_required";
+      id: string;
+      name: string;
+      input: unknown;
+      reason: string;
+    }
+  | {
+      type: "tool_approval_decision";
+      id: string;
+      name: string;
+      decision: "allow" | "deny";
+    }
+  | { type: "tool_started"; id: string; name: string; input: unknown }
+  | { type: "tool_result"; message: Message }
+  | { type: "turn_finished" };
 
 function buildToolSchemas(registry: ToolRegistry): ToolSchema[] {
   return registry.list().map((t) => {
@@ -77,6 +100,7 @@ async function runAgentLoop(
   const maxTurns = options.maxTurns ?? 10;
   const toolSchemas = buildToolSchemas(registry);
   const systemPrompt = buildSystemPrompt(cwd);
+  const onEvent = options.onEvent;
 
   for (let turn = 0; turn < maxTurns; turn++) {
     let assistantText = "";
@@ -88,9 +112,17 @@ async function runAgentLoop(
       switch (event.type) {
         case "text_delta":
           assistantText += event.text;
+          if (onEvent) await onEvent({ type: "assistant_text_delta", text: event.text });
           break;
         case "tool_call":
           toolCalls.push({ id: event.id, name: event.name, input: event.input });
+          if (onEvent)
+            await onEvent({
+              type: "tool_call",
+              id: event.id,
+              name: event.name,
+              input: event.input,
+            });
           break;
         case "stop":
           break;
@@ -104,6 +136,7 @@ async function runAgentLoop(
     };
     messages.push(assistantMsg);
     newMessages.push(assistantMsg);
+    if (onEvent) await onEvent({ type: "assistant_message", message: assistantMsg });
 
     if (toolCalls.length === 0) break;
 
@@ -127,14 +160,32 @@ async function runAgentLoop(
           };
           messages.push(msg);
           newMessages.push(msg);
+          if (onEvent) await onEvent({ type: "tool_result", message: msg });
           continue;
         }
+
+        if (onEvent)
+          await onEvent({
+            type: "tool_approval_required",
+            id: tc.id,
+            name: tc.name,
+            input: tc.input,
+            reason: decision.reason,
+          });
 
         const verdict = await options.approvalHandler({
           toolName: tc.name,
           input: tc.input,
           reason: decision.reason,
         });
+
+        if (onEvent)
+          await onEvent({
+            type: "tool_approval_decision",
+            id: tc.id,
+            name: tc.name,
+            decision: verdict,
+          });
 
         if (verdict === "allow") {
           shouldExecute = true;
@@ -147,6 +198,7 @@ async function runAgentLoop(
         const msg = blockedMsg(tc, blockReason);
         messages.push(msg);
         newMessages.push(msg);
+        if (onEvent) await onEvent({ type: "tool_result", message: msg });
         continue;
       }
 
@@ -160,6 +212,7 @@ async function runAgentLoop(
         };
         messages.push(msg);
         newMessages.push(msg);
+        if (onEvent) await onEvent({ type: "tool_result", message: msg });
         continue;
       }
 
@@ -179,9 +232,18 @@ async function runAgentLoop(
           };
           messages.push(msg);
           newMessages.push(msg);
+          if (onEvent) await onEvent({ type: "tool_result", message: msg });
           continue;
         }
       }
+
+      if (onEvent)
+        await onEvent({
+          type: "tool_started",
+          id: tc.id,
+          name: tc.name,
+          input: tc.input,
+        });
 
       const result = await tool.execute(tc.input, { cwd });
       let content = result.ok ? result.output : `Error: ${result.output}`;
@@ -197,8 +259,11 @@ async function runAgentLoop(
       };
       messages.push(resultMsg);
       newMessages.push(resultMsg);
+      if (onEvent) await onEvent({ type: "tool_result", message: resultMsg });
     }
   }
+
+  if (onEvent) await onEvent({ type: "turn_finished" });
 }
 
 export async function runTurn(

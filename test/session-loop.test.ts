@@ -5,6 +5,7 @@ import { readFileTool } from "../src/tools/read.js";
 import { editFileTool } from "../src/tools/edit.js";
 import { bashTool } from "../src/tools/bash.js";
 import { runSession, runTurn } from "../src/session/loop.js";
+import type { TurnEvent } from "../src/session/loop.js";
 import type { Provider } from "../src/model/provider.js";
 import type { ModelEvent, Message, ToolSchema } from "../src/model/types.js";
 import type { ProviderStreamOptions } from "../src/model/provider.js";
@@ -390,7 +391,7 @@ describe("runTurn", () => {
     ]);
 
     const session = makeSession(process.cwd());
-    const { session: updated, newMessages } = await runTurn(
+    const { session: updated } = await runTurn(
       provider,
       new ToolRegistry(),
       session,
@@ -493,5 +494,252 @@ describe("runTurn", () => {
     // Turn 2: user + assistant added = 4 messages total
     expect(r2.session.messages).toHaveLength(4);
     expect(r2.session.messages.map((m) => m.content)).toEqual(["a", "t1", "b", "t2"]);
+  });
+});
+
+// --- TurnEvent ordering ---
+
+describe("TurnEvent ordering", () => {
+  function makeSession(cwd: string, messages: Message[] = []): SessionState {
+    return { id: randomUUID(), cwd, messages };
+  }
+
+  function captureEvents(): { events: TurnEvent[]; onEvent: (e: TurnEvent) => void } {
+    const events: TurnEvent[] = [];
+    return {
+      events,
+      onEvent: (e: TurnEvent) => {
+        events.push(e);
+      },
+    };
+  }
+
+  it("emits assistant_text_delta before assistant_message", async () => {
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "Hello" },
+        { type: "text_delta", text: " world" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { events, onEvent } = captureEvents();
+    await runTurn(provider, new ToolRegistry(), makeSession(process.cwd()), "hi", {
+      approval: "auto",
+      onEvent,
+    });
+
+    const types = events.map((e) => e.type);
+    const firstDelta = types.indexOf("assistant_text_delta");
+    const firstMsg = types.indexOf("assistant_message");
+    expect(firstDelta).toBeLessThan(firstMsg);
+    expect(firstDelta).toBe(0);
+
+    const finished = types.indexOf("turn_finished");
+    expect(finished).toBe(types.length - 1);
+  });
+
+  it("emits tool_approval_required before approvalHandler resolves", async () => {
+    let handlerCalled = false;
+
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "tc1", name: "bash", input: { command: "touch x.txt" } },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(bashTool);
+
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
+    const { events, onEvent } = captureEvents();
+
+    await runTurn(provider, registry, makeSession(tmp), "touch", {
+      approval: "auto",
+      approvalHandler: async () => {
+        handlerCalled = true;
+        return "allow";
+      },
+      onEvent,
+    });
+
+    const types = events.map((e) => e.type);
+    const reqIdx = types.indexOf("tool_approval_required");
+    const decIdx = types.indexOf("tool_approval_decision");
+    expect(reqIdx).toBeGreaterThanOrEqual(0);
+    expect(reqIdx).toBeLessThan(decIdx);
+    expect(handlerCalled).toBe(true);
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("emits tool_started only after approval allow", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "bash",
+          input: { command: "touch approved.txt" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(bashTool);
+
+    const { events, onEvent } = captureEvents();
+    await runTurn(provider, registry, makeSession(tmp), "touch", {
+      approval: "auto",
+      approvalHandler: async () => "allow",
+      onEvent,
+    });
+
+    const types = events.map((e) => e.type);
+    const decIdx = types.indexOf("tool_approval_decision");
+    const startedIdx = types.indexOf("tool_started");
+    expect(decIdx).toBeGreaterThanOrEqual(0);
+    expect(decIdx).toBeLessThan(startedIdx);
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("emits tool_result immediately after tool execution", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
+    await writeFile(join(tmp, "f.txt"), "hi");
+
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "tc1", name: "read_file", input: { path: "f.txt" } },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    const { events, onEvent } = captureEvents();
+    await runTurn(provider, registry, makeSession(tmp), "read", {
+      approval: "auto",
+      onEvent,
+    });
+
+    const types = events.map((e) => e.type);
+    const startedIdx = types.indexOf("tool_started");
+    const resultIdx = types.indexOf("tool_result");
+    expect(startedIdx).toBeLessThan(resultIdx);
+
+    const resultEvent = events[resultIdx] as Extract<TurnEvent, { type: "tool_result" }>;
+    expect(resultEvent.message.content).toBe("hi");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("denied tool emits tool_approval_decision and tool_result", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "bash",
+          input: { command: "touch denied.txt" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(bashTool);
+
+    const { events, onEvent } = captureEvents();
+    await runTurn(provider, registry, makeSession(tmp), "touch", {
+      approval: "auto",
+      approvalHandler: async () => "deny",
+      onEvent,
+    });
+
+    const types = events.map((e) => e.type);
+    expect(types).toContain("tool_approval_required");
+    expect(types).toContain("tool_approval_decision");
+    expect(types).toContain("tool_result");
+    expect(types).not.toContain("tool_started");
+
+    const decIdx = types.indexOf("tool_approval_decision");
+    const resultIdx = types.indexOf("tool_result");
+    expect(decIdx).toBeLessThan(resultIdx);
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("existing transcript still matches after events", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
+    await writeFile(join(tmp, "test.txt"), "hello");
+
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "Reading." },
+        { type: "tool_call", id: "tc1", name: "read_file", input: { path: "test.txt" } },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "Done." },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    const { events, onEvent } = captureEvents();
+    const session = makeSession(tmp);
+
+    const { session: updated, newMessages } = await runTurn(
+      provider,
+      registry,
+      session,
+      "read test.txt",
+      { approval: "auto", onEvent },
+    );
+
+    // Transcript integrity
+    expect(updated.messages).toHaveLength(4);
+    expect(updated.messages[1].content).toBe("Reading.");
+    expect(updated.messages[2].content).toBe("hello");
+    expect(updated.messages[3].content).toBe("Done.");
+
+    // newMessages is subset
+    expect(newMessages).toHaveLength(4);
+
+    // Events were emitted
+    const types = events.map((e) => e.type);
+    expect(types[0]).toBe("assistant_text_delta");
+    expect(types).toContain("tool_call");
+    expect(types).toContain("assistant_message");
+    expect(types).toContain("tool_result");
+    expect(types[types.length - 1]).toBe("turn_finished");
+
+    await rm(tmp, { recursive: true });
   });
 });

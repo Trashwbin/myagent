@@ -12,7 +12,7 @@ import { searchTool } from "./tools/search.js";
 import { editFileTool } from "./tools/edit.js";
 import { bashTool } from "./tools/bash.js";
 import { runTurn, runSession } from "./session/loop.js";
-import type { ApprovalRequest, SessionState } from "./session/loop.js";
+import type { ApprovalRequest, SessionState, TurnEvent } from "./session/loop.js";
 import type { ApprovalMode } from "./permission/rules.js";
 import type { Provider } from "./model/provider.js";
 import { restoreCheckpoint } from "./workspace/checkpoint.js";
@@ -20,21 +20,15 @@ import { getGitDiffStat } from "./workspace/diff.js";
 import { ProviderRuntimeError, formatProviderError } from "./model/errors.js";
 import { openStore } from "./storage/store.js";
 import type { TranscriptStore } from "./storage/store.js";
+import { resolveApprovalAnswer } from "./cli/approval.js";
 
 function makeApprovalHandler(
   rl: readline.Interface,
 ): (request: ApprovalRequest) => Promise<"allow" | "deny"> {
-  return async (request: ApprovalRequest): Promise<"allow" | "deny"> => {
-    console.log("\nTool requires approval:");
-    console.log(`- tool: ${request.toolName}`);
-    console.log(`- reason: ${request.reason}`);
-    console.log(`- input: ${JSON.stringify(request.input)}`);
-
+  return async (_request: ApprovalRequest): Promise<"allow" | "deny"> => {
     return new Promise((resolve) => {
-      rl.question("Approve? [y/N] ", (answer) => {
-        const ok =
-          answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes";
-        resolve(ok ? "allow" : "deny");
+      rl.question("Approve? [Y/n] ", (answer) => {
+        resolve(resolveApprovalAnswer(answer));
       });
     });
   };
@@ -51,14 +45,33 @@ function askLine(rl: readline.Interface): Promise<string | null> {
   });
 }
 
-function printMessages(
-  messages: Array<{ role: string; content: string; toolName?: string }>,
-) {
-  for (const msg of messages) {
-    if (msg.role === "user") continue;
-    const prefix = msg.role === "tool_result" ? `tool:${msg.toolName}` : msg.role;
-    console.log(`[${prefix}] ${msg.content}`);
-  }
+function makeEventRenderer(): (event: TurnEvent) => void {
+  let streamedText = false;
+
+  return (event: TurnEvent) => {
+    switch (event.type) {
+      case "assistant_text_delta":
+        process.stdout.write(event.text);
+        streamedText = true;
+        break;
+      case "assistant_message":
+        if (streamedText) {
+          process.stdout.write("\n");
+          streamedText = false;
+        }
+        break;
+      case "tool_approval_required":
+        console.log(`\n[approval] ${event.name}: ${event.reason}`);
+        console.log(`  input: ${JSON.stringify(event.input)}`);
+        break;
+      case "tool_started":
+        console.log(`[tool:${event.name}] ...`);
+        break;
+      case "tool_result":
+        console.log(`[tool:${event.message.toolName}] ${event.message.content}`);
+        break;
+    }
+  };
 }
 
 function printSessionList(
@@ -153,6 +166,7 @@ async function chatMode(
     output: process.stdout,
   });
   const approvalHandler = makeApprovalHandler(rl);
+  const onEvent = makeEventRenderer();
 
   console.log(`Session: ${session.id}`);
   console.log("Type your message, /exit to quit.\n");
@@ -171,10 +185,9 @@ async function chatMode(
           registry,
           session,
           input,
-          { approval, approvalHandler },
+          { approval, approvalHandler, onEvent },
         );
         Object.assign(session, updated);
-        printMessages(newMessages);
         store.appendMessages(session.id, newMessages);
       } catch (err) {
         if (err instanceof ProviderRuntimeError) {
@@ -283,21 +296,17 @@ program
         output: process.stdout,
       });
       const approvalHandler = makeApprovalHandler(rl);
+      const onEvent = makeEventRenderer();
 
       try {
         const { transcript } = await runSession(
           provider,
           registry,
           [{ role: "user", content: prompt }],
-          { cwd, approval, approvalHandler },
+          { cwd, approval, approvalHandler, onEvent },
         );
 
         store.appendMessages(session.id, transcript);
-
-        for (const msg of transcript) {
-          const prefix = msg.role === "tool_result" ? `tool:${msg.toolName}` : msg.role;
-          console.log(`[${prefix}] ${msg.content}`);
-        }
 
         const diffStat = await getGitDiffStat(cwd);
         if (diffStat) {
