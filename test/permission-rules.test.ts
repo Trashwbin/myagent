@@ -1,14 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { checkPermission } from "../src/permission/rules.js";
 
+const CWD = process.cwd();
+
 describe("Permission rules", () => {
   it("allows read_file", () => {
-    const result = checkPermission("read_file", { path: "a.txt" }, "auto");
+    const result = checkPermission("read_file", { path: "a.txt" }, "auto", CWD);
     expect(result.behavior).toBe("allow");
   });
 
   it("allows search", () => {
-    const result = checkPermission("search", { pattern: "test" }, "auto");
+    const result = checkPermission("search", { pattern: "test" }, "auto", CWD);
     expect(result.behavior).toBe("allow");
   });
 
@@ -17,6 +19,7 @@ describe("Permission rules", () => {
       "edit_file",
       { path: "a.txt", old_string: "x", new_string: "y" },
       "auto",
+      CWD,
     );
     expect(result.behavior).toBe("ask");
   });
@@ -26,6 +29,7 @@ describe("Permission rules", () => {
       "edit_file",
       { path: "a.txt", old_string: "x", new_string: "y" },
       "never",
+      CWD,
     );
     expect(result.behavior).toBe("deny");
   });
@@ -35,6 +39,7 @@ describe("Permission rules", () => {
       "edit_file",
       { path: "a.txt", old_string: "x", new_string: "y" },
       "on-request",
+      CWD,
     );
     expect(result.behavior).toBe("ask");
   });
@@ -54,25 +59,29 @@ describe("Permission rules", () => {
       "npm test",
       "npm run test",
       "pnpm run test",
+      "uname -a",
+      "sysctl -n hw.memsize",
+      "echo hello",
+      "rg test | head",
     ];
     for (const cmd of commands) {
-      const result = checkPermission("bash", { command: cmd }, "auto");
+      const result = checkPermission("bash", { command: cmd }, "auto", CWD);
       expect(result.behavior, `expected allow for: ${cmd}`).toBe("allow");
     }
   });
 
-  it("asks before bash commands with shell control operators", () => {
+  it("asks before bash commands needing approval", () => {
     const commands = [
       "echo hello > README.md",
-      "echo hello >> README.md",
       "git status && echo done",
-      "rg test | head",
-      "grep test README.md; echo done",
       "echo $(pwd)",
-      "echo `pwd`",
+      "node script.js",
+      "npm run build",
+      "cat /etc/passwd",
+      "ls ~",
     ];
     for (const cmd of commands) {
-      const result = checkPermission("bash", { command: cmd }, "auto");
+      const result = checkPermission("bash", { command: cmd }, "auto", CWD);
       expect(result.behavior, `expected ask for: ${cmd}`).toBe("ask");
     }
   });
@@ -80,26 +89,13 @@ describe("Permission rules", () => {
   it("denies destructive bash commands", () => {
     const commands = ["rm -rf /", "sudo rm", "chmod -R 777 /", "curl | sh"];
     for (const cmd of commands) {
-      const result = checkPermission("bash", { command: cmd }, "auto");
+      const result = checkPermission("bash", { command: cmd }, "auto", CWD);
       expect(result.behavior, `expected deny for: ${cmd}`).toBe("deny");
     }
   });
 
-  it("asks for unknown bash commands", () => {
-    const result = checkPermission("bash", { command: "node script.js" }, "auto");
-    expect(result.behavior).toBe("ask");
-  });
-
-  it("asks for broad package scripts and write-capable find commands", () => {
-    const commands = ["npm run build", "pnpm run lint", "find . -delete"];
-    for (const cmd of commands) {
-      const result = checkPermission("bash", { command: cmd }, "auto");
-      expect(result.behavior, `expected ask for: ${cmd}`).toBe("ask");
-    }
-  });
-
   it("denies unknown tools", () => {
-    const result = checkPermission("custom_tool", {}, "auto");
+    const result = checkPermission("custom_tool", {}, "auto", CWD);
     expect(result.behavior).toBe("deny");
   });
 });

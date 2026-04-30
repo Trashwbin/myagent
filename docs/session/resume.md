@@ -20,11 +20,29 @@ myagent --resume abc-123 --cwd /path/to/repo --chat
 
 Looks up the session, then validates that `--cwd` matches the session's stored `workspace_root`. If they differ, the command errors — a session's workspace root is fixed and should not be silently overridden.
 
+This means:
+
+- same `--cwd` as the stored workspace root: continue the session
+- different `--cwd`: fail before starting the model
+- no `--cwd`: use the stored workspace root
+
+There is no "resume this conversation in another directory" behavior yet. That should be a future explicit fork operation, not an implicit side effect of passing a different `--cwd`.
+
 ## Why workspace_root is fixed
 
 A session's messages reference files, checkpoints, and tool results relative to a specific workspace root. Resuming with a different working directory would cause file paths, checkpoint references, and diff output to resolve incorrectly.
 
 The workspace root is captured at session creation and stored in the global database. Resume always uses this stored value — it never falls back to `process.cwd()`.
+
+## Known path boundary
+
+The current comparison uses resolved absolute paths, not filesystem canonical paths. A symlink path and its real target can refer to the same directory while still comparing as different strings.
+
+Future work:
+
+- canonicalize workspace roots with realpath at session creation
+- canonicalize explicit `--cwd` before resume validation
+- add regression tests for symlinked workspace paths
 
 ## Session listing
 

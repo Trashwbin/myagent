@@ -21,6 +21,8 @@ Tables:
 
 A session's workspace root is set when the session is created (`--cwd`) and persisted in the sessions table. On resume, the stored workspace root is used, not the current terminal directory.
 
+Current implementation stores the resolved path string. It does not yet canonicalize symlinks with `realpath`. If the same workspace is reached through both a symlink path and its real target, resume validation may treat them as different directories. This should be fixed in the workspace/session boundary, not in the storage schema.
+
 ## Checkpoints
 
 Checkpoints (file snapshots before edits) are still stored under the workspace directory in `<workspace>/.myagent/checkpoints/`. This is intentional — checkpoints contain copies of the workspace's own files and should travel with the project.

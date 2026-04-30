@@ -108,7 +108,7 @@ async function runAgentLoop(
     if (toolCalls.length === 0) break;
 
     for (const tc of toolCalls) {
-      const decision = checkPermission(tc.name, tc.input, options.approval);
+      const decision = checkPermission(tc.name, tc.input, options.approval, cwd);
 
       let shouldExecute = false;
       let blockReason = "";

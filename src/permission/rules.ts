@@ -7,6 +7,7 @@ export function checkPermission(
   toolName: string,
   input: unknown,
   mode: ApprovalMode,
+  cwd: string,
 ): PermissionDecision {
   switch (toolName) {
     case "read_file":
@@ -23,7 +24,7 @@ export function checkPermission(
 
     case "bash": {
       const command = (input as { command: string }).command ?? "";
-      const policy = analyzeCommand(command);
+      const policy = analyzeCommand(command, { cwd });
       return { behavior: policy.decision, reason: policy.reason };
     }
 
