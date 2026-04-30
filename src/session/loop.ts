@@ -14,8 +14,25 @@ export type ApprovalRequest = {
   reason: string;
 };
 
+export type SessionState = {
+  id: string;
+  cwd: string;
+  messages: Message[];
+};
+
+export type TurnResult = {
+  session: SessionState;
+  newMessages: Message[];
+};
+
 export type SessionOptions = {
   cwd: string;
+  approval: ApprovalMode;
+  maxTurns?: number;
+  approvalHandler?: (request: ApprovalRequest) => Promise<"allow" | "deny">;
+};
+
+export type TurnOptions = {
   approval: ApprovalMode;
   maxTurns?: number;
   approvalHandler?: (request: ApprovalRequest) => Promise<"allow" | "deny">;
@@ -48,23 +65,25 @@ function blockedMsg(tc: { id: string; name: string }, reason: string): Message {
   };
 }
 
-export async function runSession(
+async function runAgentLoop(
   provider: Provider,
   registry: ToolRegistry,
-  initialMessages: Message[],
-  options: SessionOptions,
-): Promise<SessionResult> {
-  const messages = [...initialMessages];
-  const transcript = [...initialMessages];
+  messages: Message[],
+  newMessages: Message[],
+  cwd: string,
+  options: TurnOptions,
+) {
   const maxTurns = options.maxTurns ?? 10;
   const toolSchemas = buildToolSchemas(registry);
-  const systemPrompt = buildSystemPrompt(options.cwd);
+  const systemPrompt = buildSystemPrompt(cwd);
 
   for (let turn = 0; turn < maxTurns; turn++) {
     let assistantText = "";
     const toolCalls: Array<{ id: string; name: string; input: unknown }> = [];
 
-    for await (const event of provider.stream(messages, toolSchemas, { systemPrompt })) {
+    for await (const event of provider.stream([...messages], toolSchemas, {
+      systemPrompt,
+    })) {
       switch (event.type) {
         case "text_delta":
           assistantText += event.text;
@@ -83,7 +102,7 @@ export async function runSession(
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     };
     messages.push(assistantMsg);
-    transcript.push(assistantMsg);
+    newMessages.push(assistantMsg);
 
     if (toolCalls.length === 0) break;
 
@@ -106,7 +125,7 @@ export async function runSession(
             content: `Tool call requires approval and was not executed: ${decision.reason}`,
           };
           messages.push(msg);
-          transcript.push(msg);
+          newMessages.push(msg);
           continue;
         }
 
@@ -126,7 +145,7 @@ export async function runSession(
       if (!shouldExecute) {
         const msg = blockedMsg(tc, blockReason);
         messages.push(msg);
-        transcript.push(msg);
+        newMessages.push(msg);
         continue;
       }
 
@@ -139,7 +158,7 @@ export async function runSession(
           content: `Tool not found: ${tc.name}`,
         };
         messages.push(msg);
-        transcript.push(msg);
+        newMessages.push(msg);
         continue;
       }
 
@@ -148,7 +167,7 @@ export async function runSession(
       if (tc.name === "edit_file") {
         const filePath = (tc.input as { path: string }).path;
         try {
-          const cp = await createCheckpoint(options.cwd, [filePath]);
+          const cp = await createCheckpoint(cwd, [filePath]);
           checkpointId = cp.id;
         } catch (err: any) {
           const msg: Message = {
@@ -158,12 +177,12 @@ export async function runSession(
             content: `Checkpoint failed, edit not executed: ${err.message}`,
           };
           messages.push(msg);
-          transcript.push(msg);
+          newMessages.push(msg);
           continue;
         }
       }
 
-      const result = await tool.execute(tc.input, { cwd: options.cwd });
+      const result = await tool.execute(tc.input, { cwd });
       let content = result.ok ? result.output : `Error: ${result.output}`;
       if (checkpointId) {
         content += `\n[checkpoint: ${checkpointId}]`;
@@ -176,9 +195,40 @@ export async function runSession(
         content,
       };
       messages.push(resultMsg);
-      transcript.push(resultMsg);
+      newMessages.push(resultMsg);
     }
   }
+}
+
+export async function runTurn(
+  provider: Provider,
+  registry: ToolRegistry,
+  session: SessionState,
+  userInput: string,
+  options: TurnOptions,
+): Promise<TurnResult> {
+  const userMsg: Message = { role: "user", content: userInput };
+  const messages = [...session.messages, userMsg];
+  const newMessages: Message[] = [userMsg];
+
+  await runAgentLoop(provider, registry, messages, newMessages, session.cwd, options);
+
+  return {
+    session: { ...session, messages },
+    newMessages,
+  };
+}
+
+export async function runSession(
+  provider: Provider,
+  registry: ToolRegistry,
+  initialMessages: Message[],
+  options: SessionOptions,
+): Promise<SessionResult> {
+  const messages = [...initialMessages];
+  const transcript = [...initialMessages];
+
+  await runAgentLoop(provider, registry, messages, transcript, options.cwd, options);
 
   return { transcript };
 }

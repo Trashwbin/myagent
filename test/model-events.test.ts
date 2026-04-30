@@ -30,6 +30,20 @@ describe("ModelEvent / FakeProvider", () => {
     expect(collected).toEqual([{ type: "stop", reason: "end_turn" }]);
   });
 
+  it("echoes latest user message when event sets are exhausted", async () => {
+    const provider = new FakeProvider([]);
+
+    const collected: ModelEvent[] = [];
+    for await (const event of provider.stream([{ role: "user", content: "hello" }])) {
+      collected.push(event);
+    }
+
+    expect(collected).toEqual([
+      { type: "text_delta", text: "Received task: hello" },
+      { type: "stop", reason: "end_turn" },
+    ]);
+  });
+
   it("supports multi-turn event sets", async () => {
     const provider = new FakeProvider([
       [
