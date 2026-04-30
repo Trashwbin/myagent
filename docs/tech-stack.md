@@ -60,6 +60,34 @@ type ModelEvent =
 The session loop only depends on `ModelEvent`. Each provider adapter translates
 its native request, tool schema, stream delta, tool-call, and stop-reason format.
 
+## Provider Error Handling
+
+This is a future task, not part of the current v0 loop.
+
+Provider adapters should not leak raw SDK stack traces to the CLI. They should
+normalize provider failures into a small runtime error shape that the session
+loop can print and persist.
+
+Future error handling should cover:
+
+- auth failures: `401`, `403`, invalid key, missing Bearer token
+- model failures: model not found, unsupported tool call format
+- quota and rate limits: `429`, insufficient quota, provider throttling
+- transient upstream failures: `500`, `502`, `503`, empty gateway body
+- proxy compatibility: wrong base URL, missing custom headers, provider family
+  mismatch
+- stream failures: partial stream, malformed tool-call JSON, connection reset
+
+The CLI should print concise actionable output, for example:
+
+```text
+Provider error: openai returned 502 with no response body.
+Hint: retry once or check the gateway upstream account health.
+```
+
+Do not implement automatic provider failover in v0. The first useful step is
+classification, readable output, and transcript-safe error records.
+
 ## Tool Layer
 
 Use explicit built-in tools only:
