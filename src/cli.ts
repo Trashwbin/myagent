@@ -3,7 +3,6 @@ import "dotenv/config";
 import { Command } from "commander";
 import { resolve } from "node:path";
 import * as readline from "node:readline";
-import { randomUUID } from "node:crypto";
 import { FakeProvider } from "./model/fake.js";
 import { OpenAICompatibleProvider } from "./model/openai-compatible.js";
 import { AnthropicCompatibleProvider } from "./model/anthropic-compatible.js";
@@ -19,6 +18,8 @@ import type { Provider } from "./model/provider.js";
 import { restoreCheckpoint } from "./workspace/checkpoint.js";
 import { getGitDiffStat } from "./workspace/diff.js";
 import { ProviderRuntimeError, formatProviderError } from "./model/errors.js";
+import { openStore } from "./storage/store.js";
+import type { TranscriptStore } from "./storage/store.js";
 
 function makeApprovalHandler(
   rl: readline.Interface,
@@ -119,20 +120,15 @@ function buildRegistry(): ToolRegistry {
 async function chatMode(
   provider: Provider,
   registry: ToolRegistry,
-  cwd: string,
+  session: SessionState,
   approval: ApprovalMode,
+  store: TranscriptStore,
 ) {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
   const approvalHandler = makeApprovalHandler(rl);
-
-  const session: SessionState = {
-    id: randomUUID(),
-    cwd,
-    messages: [],
-  };
 
   console.log(`Session: ${session.id}`);
   console.log("Type your message, /exit to quit.\n");
@@ -155,6 +151,7 @@ async function chatMode(
         );
         Object.assign(session, updated);
         printMessages(newMessages);
+        store.appendMessages(session.id, newMessages);
       } catch (err) {
         if (err instanceof ProviderRuntimeError) {
           console.error(`\n${formatProviderError(err)}`);
@@ -164,7 +161,7 @@ async function chatMode(
       }
     }
 
-    const diffStat = await getGitDiffStat(cwd);
+    const diffStat = await getGitDiffStat(session.cwd);
     if (diffStat) {
       console.log("\n--- Changes ---");
       console.log(diffStat);
@@ -185,10 +182,12 @@ program
   .option("--approval <mode>", "approval mode (auto|on-request|never)", "auto")
   .option("--rewind <checkpointId>", "restore checkpoint and exit")
   .option("--chat", "interactive chat mode")
+  .option("--resume <sessionId>", "resume a previous session")
   .argument("[prompt]", "task prompt")
   .action(async (prompt: string | undefined, options: Record<string, string>) => {
-    const cwd = resolve(options.cwd);
+    let cwd = resolve(options.cwd);
     const approval = options.approval as ApprovalMode;
+    const explicitCwd = process.argv.includes("--cwd");
 
     // Rewind mode
     if (options.rewind) {
@@ -197,51 +196,92 @@ program
       process.exit(0);
     }
 
-    // Chat mode
-    if (options.chat) {
-      const provider = createProvider(options, "");
-      const registry = buildRegistry();
-      await chatMode(provider, registry, cwd, approval);
-      return;
-    }
-
-    // Single-shot mode
-    if (!prompt) {
-      console.error("Prompt is required (unless using --rewind or --chat)");
-      process.exit(1);
-    }
-
-    const provider = createProvider(options, prompt);
-    const registry = buildRegistry();
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const approvalHandler = makeApprovalHandler(rl);
+    const store = openStore(cwd);
 
     try {
-      const { transcript } = await runSession(
-        provider,
-        registry,
-        [{ role: "user", content: prompt }],
-        { cwd, approval, approvalHandler },
-      );
-
-      for (const msg of transcript) {
-        const prefix = msg.role === "tool_result" ? `tool:${msg.toolName}` : msg.role;
-        console.log(`[${prefix}] ${msg.content}`);
+      // Resume mode
+      if (options.resume) {
+        const session = store.getSession(options.resume);
+        if (!session) {
+          console.error(`Session not found: ${options.resume}`);
+          process.exit(1);
+        }
+        if (explicitCwd && resolve(options.cwd) !== resolve(session.cwd)) {
+          console.error(
+            `Session ${options.resume} belongs to ${session.cwd}, but --cwd is ${resolve(options.cwd)}. Use a future fork command to move history to another workspace.`,
+          );
+          process.exit(1);
+        }
+        cwd = session.cwd;
+        const provider = createProvider(options, "");
+        const registry = buildRegistry();
+        await chatMode(provider, registry, session, approval, store);
+        return;
       }
 
-      const diffStat = await getGitDiffStat(cwd);
-      if (diffStat) {
-        console.log("\n--- Changes ---");
-        console.log(diffStat);
+      // Chat mode (new session)
+      if (options.chat) {
+        const session = store.createSession({
+          workspaceRoot: cwd,
+          provider: options.provider,
+          model: options.model,
+        });
+        const provider = createProvider(options, "");
+        const registry = buildRegistry();
+        await chatMode(provider, registry, session, approval, store);
+        return;
       }
-    } catch (err) {
-      if (err instanceof ProviderRuntimeError) {
-        console.error(`\n${formatProviderError(err)}`);
+
+      // Single-shot mode
+      if (!prompt) {
+        console.error("Prompt is required (unless using --rewind, --chat, or --resume)");
         process.exit(1);
       }
-      throw err;
+
+      const session = store.createSession({
+        workspaceRoot: cwd,
+        provider: options.provider,
+        model: options.model,
+      });
+      const provider = createProvider(options, prompt);
+      const registry = buildRegistry();
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+      const approvalHandler = makeApprovalHandler(rl);
+
+      try {
+        const { transcript } = await runSession(
+          provider,
+          registry,
+          [{ role: "user", content: prompt }],
+          { cwd, approval, approvalHandler },
+        );
+
+        store.appendMessages(session.id, transcript);
+
+        for (const msg of transcript) {
+          const prefix = msg.role === "tool_result" ? `tool:${msg.toolName}` : msg.role;
+          console.log(`[${prefix}] ${msg.content}`);
+        }
+
+        const diffStat = await getGitDiffStat(cwd);
+        if (diffStat) {
+          console.log("\n--- Changes ---");
+          console.log(diffStat);
+        }
+      } catch (err) {
+        if (err instanceof ProviderRuntimeError) {
+          console.error(`\n${formatProviderError(err)}`);
+          process.exit(1);
+        }
+        throw err;
+      } finally {
+        rl.close();
+      }
     } finally {
-      rl.close();
+      store.close();
     }
   });
 
