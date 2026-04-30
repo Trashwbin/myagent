@@ -62,13 +62,11 @@ its native request, tool schema, stream delta, tool-call, and stop-reason format
 
 ## Provider Error Handling
 
-This is a future task, not part of the current v0 loop.
+The provider adapters normalize SDK failures into `ProviderRuntimeError` before
+they reach the CLI. The CLI prints concise provider, kind, message, hint, status,
+and request-id fields instead of leaking raw SDK stack traces.
 
-Provider adapters should not leak raw SDK stack traces to the CLI. They should
-normalize provider failures into a small runtime error shape that the session
-loop can print and persist.
-
-Future error handling should cover:
+Current classification covers:
 
 - auth failures: `401`, `403`, invalid key, missing Bearer token
 - model failures: model not found, unsupported tool call format
@@ -81,12 +79,14 @@ Future error handling should cover:
 The CLI should print concise actionable output, for example:
 
 ```text
-Provider error: openai returned 502 with no response body.
-Hint: retry once or check the gateway upstream account health.
+Provider error [openai/upstream]: 502 status code (no body)
+Hint: gateway or upstream provider failed; retry or check upstream account health
+Status: 502
 ```
 
-Do not implement automatic provider failover in v0. The first useful step is
-classification, readable output, and transcript-safe error records.
+Do not implement automatic retry or provider failover in v0. The next useful
+steps are transcript-safe error records, scoped retry policy, and explicit
+failover only when the user configures it.
 
 ## Tool Layer
 

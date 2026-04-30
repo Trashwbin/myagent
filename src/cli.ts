@@ -17,6 +17,7 @@ import type { ApprovalMode } from "./permission/rules.js";
 import type { Provider } from "./model/provider.js";
 import { restoreCheckpoint } from "./workspace/checkpoint.js";
 import { getGitDiffStat } from "./workspace/diff.js";
+import { ProviderRuntimeError, formatProviderError } from "./model/errors.js";
 
 function createApprovalHandler(): {
   handler: (request: ApprovalRequest) => Promise<"allow" | "deny">;
@@ -143,6 +144,12 @@ program
         console.log("\n--- Changes ---");
         console.log(diffStat);
       }
+    } catch (err) {
+      if (err instanceof ProviderRuntimeError) {
+        console.error(`\n${formatProviderError(err)}`);
+        process.exit(1);
+      }
+      throw err;
     } finally {
       closeRl();
     }

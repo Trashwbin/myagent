@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Provider } from "./provider.js";
 import type { ProviderStreamOptions } from "./provider.js";
 import type { ModelEvent, Message, ProviderConfig, ToolSchema } from "./types.js";
+import { normalizeProviderError, ProviderRuntimeError } from "./errors.js";
 
 type StopReason = "end_turn" | "tool_use" | "length";
 
@@ -108,59 +109,76 @@ export class AnthropicCompatibleProvider implements Provider {
       params.tools = anthropicTools;
     }
 
-    const stream = this.client.messages.stream(params);
+    let stream;
+    try {
+      stream = this.client.messages.stream(params);
+    } catch (err) {
+      throw normalizeProviderError("anthropic", err);
+    }
 
     let currentToolId = "";
     let currentToolName = "";
     let currentToolInput = "";
 
-    for await (const event of stream) {
-      switch (event.type) {
-        case "content_block_delta":
-          if (event.delta.type === "text_delta") {
-            yield { type: "text_delta", text: event.delta.text };
-          } else if (event.delta.type === "input_json_delta") {
-            currentToolInput += event.delta.partial_json;
-          }
-          break;
-
-        case "content_block_start":
-          if (event.content_block.type === "tool_use") {
-            currentToolId = event.content_block.id;
-            currentToolName = event.content_block.name;
-            currentToolInput = "";
-          }
-          break;
-
-        case "content_block_stop":
-          if (currentToolId) {
-            let input: unknown;
-            try {
-              input = JSON.parse(currentToolInput);
-            } catch {
-              input = { raw: currentToolInput };
+    try {
+      for await (const event of stream) {
+        switch (event.type) {
+          case "content_block_delta":
+            if (event.delta.type === "text_delta") {
+              yield { type: "text_delta", text: event.delta.text };
+            } else if (event.delta.type === "input_json_delta") {
+              currentToolInput += event.delta.partial_json;
             }
-            yield {
-              type: "tool_call",
-              id: currentToolId,
-              name: currentToolName,
-              input,
-            };
-            currentToolId = "";
-            currentToolName = "";
-            currentToolInput = "";
-          }
-          break;
+            break;
 
-        case "message_delta":
-          if (event.delta.stop_reason) {
-            yield {
-              type: "stop",
-              reason: STOP_REASON_MAP[event.delta.stop_reason] ?? "end_turn",
-            };
-          }
-          break;
+          case "content_block_start":
+            if (event.content_block.type === "tool_use") {
+              currentToolId = event.content_block.id;
+              currentToolName = event.content_block.name;
+              currentToolInput = "";
+            }
+            break;
+
+          case "content_block_stop":
+            if (currentToolId) {
+              let input: unknown;
+              try {
+                input = JSON.parse(currentToolInput);
+              } catch {
+                throw new ProviderRuntimeError(
+                  "anthropic",
+                  "stream",
+                  `Malformed tool-call arguments from provider: ${currentToolInput.slice(0, 80)}`,
+                  {
+                    hint: "provider returned malformed streaming tool-call data",
+                  },
+                );
+              }
+              yield {
+                type: "tool_call",
+                id: currentToolId,
+                name: currentToolName,
+                input,
+              };
+              currentToolId = "";
+              currentToolName = "";
+              currentToolInput = "";
+            }
+            break;
+
+          case "message_delta":
+            if (event.delta.stop_reason) {
+              yield {
+                type: "stop",
+                reason: STOP_REASON_MAP[event.delta.stop_reason] ?? "end_turn",
+              };
+            }
+            break;
+        }
       }
+    } catch (err) {
+      if (err instanceof ProviderRuntimeError) throw err;
+      throw normalizeProviderError("anthropic", err);
     }
   }
 }

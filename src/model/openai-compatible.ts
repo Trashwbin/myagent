@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import type { Provider } from "./provider.js";
 import type { ProviderStreamOptions } from "./provider.js";
 import type { ModelEvent, Message, ProviderConfig, ToolSchema } from "./types.js";
+import { normalizeProviderError, ProviderRuntimeError } from "./errors.js";
 
 type StopReason = "end_turn" | "tool_use" | "length";
 
@@ -92,60 +93,82 @@ export class OpenAICompatibleProvider implements Provider {
       params.tools = openaiTools;
     }
 
-    const stream = await this.client.chat.completions.create(params);
+    let stream;
+    try {
+      stream = await this.client.chat.completions.create(params);
+    } catch (err) {
+      throw normalizeProviderError("openai", err);
+    }
 
     const pendingToolCalls = new Map<
       number,
       { id: string; name: string; arguments: string }
     >();
 
-    for await (const chunk of stream) {
-      const choice = chunk.choices[0];
-      if (!choice) continue;
+    try {
+      for await (const chunk of stream) {
+        const choice = chunk.choices[0];
+        if (!choice) continue;
 
-      const delta = choice.delta;
+        const delta = choice.delta;
 
-      if (delta.content) {
-        yield { type: "text_delta", text: delta.content };
-      }
+        if (delta.content) {
+          yield { type: "text_delta", text: delta.content };
+        }
 
-      if (delta.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const idx = tc.index ?? 0;
-          const pending = pendingToolCalls.get(idx) ?? {
-            id: "",
-            name: "",
-            arguments: "",
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index ?? 0;
+            const pending = pendingToolCalls.get(idx) ?? {
+              id: "",
+              name: "",
+              arguments: "",
+            };
+            if (tc.id) {
+              pending.id = tc.id;
+            }
+            if (tc.function?.name) {
+              pending.name += tc.function.name;
+            }
+            if (tc.function?.arguments) {
+              pending.arguments += tc.function.arguments;
+            }
+            pendingToolCalls.set(idx, pending);
+          }
+        }
+
+        if (choice.finish_reason) {
+          for (const [, tc] of pendingToolCalls) {
+            let input: unknown;
+            try {
+              input = JSON.parse(tc.arguments);
+            } catch {
+              throw new ProviderRuntimeError(
+                "openai",
+                "stream",
+                `Malformed tool-call arguments from provider: ${tc.arguments.slice(0, 80)}`,
+                {
+                  hint: "provider returned malformed streaming tool-call data",
+                },
+              );
+            }
+            yield {
+              type: "tool_call",
+              id: tc.id,
+              name: tc.name,
+              input,
+            };
+          }
+
+          yield {
+            type: "stop",
+            reason: FINISH_REASON_MAP[choice.finish_reason] ?? "end_turn",
           };
-          if (tc.id) {
-            pending.id = tc.id;
-          }
-          if (tc.function?.name) {
-            pending.name += tc.function.name;
-          }
-          if (tc.function?.arguments) {
-            pending.arguments += tc.function.arguments;
-          }
-          pendingToolCalls.set(idx, pending);
         }
       }
-
-      if (choice.finish_reason) {
-        for (const [, tc] of pendingToolCalls) {
-          let input: unknown;
-          try {
-            input = JSON.parse(tc.arguments);
-          } catch {
-            input = { raw: tc.arguments };
-          }
-          yield { type: "tool_call", id: tc.id, name: tc.name, input };
-        }
-
-        yield {
-          type: "stop",
-          reason: FINISH_REASON_MAP[choice.finish_reason] ?? "end_turn",
-        };
-      }
+    } catch (err) {
+      if (err instanceof ProviderRuntimeError) throw err;
+      throw normalizeProviderError("openai", err);
     }
   }
 }
