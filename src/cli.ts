@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "dotenv/config";
 import { Command } from "commander";
 import { resolve } from "node:path";
 import { FakeProvider } from "./model/fake.js";
@@ -89,4 +90,9 @@ program
     }
   });
 
-program.parse();
+const argv =
+  process.argv[2] === "--"
+    ? [...process.argv.slice(0, 2), ...process.argv.slice(3)]
+    : process.argv;
+
+program.parse(argv);
