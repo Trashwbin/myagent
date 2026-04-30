@@ -61,6 +61,30 @@ function printMessages(
   }
 }
 
+function printSessionList(
+  sessions: Array<{
+    id: string;
+    workspaceRoot: string;
+    provider?: string;
+    model?: string;
+    title?: string;
+    updatedAt: number;
+  }>,
+) {
+  if (sessions.length === 0) {
+    console.log("No sessions found.");
+    return;
+  }
+  for (const s of sessions) {
+    const time = new Date(s.updatedAt).toLocaleString();
+    const title = s.title ?? "(untitled)";
+    console.log(`${s.id}  ${title}`);
+    console.log(`  workspace: ${s.workspaceRoot}`);
+    console.log(`  provider: ${s.provider ?? "-"}  model: ${s.model ?? "-"}`);
+    console.log(`  updated: ${time}`);
+  }
+}
+
 function createProvider(options: Record<string, string>, prompt: string): Provider {
   if (options.provider === "fake") {
     return prompt
@@ -183,6 +207,7 @@ program
   .option("--rewind <checkpointId>", "restore checkpoint and exit")
   .option("--chat", "interactive chat mode")
   .option("--resume <sessionId>", "resume a previous session")
+  .option("--sessions", "list historical sessions and exit")
   .argument("[prompt]", "task prompt")
   .action(async (prompt: string | undefined, options: Record<string, string>) => {
     let cwd = resolve(options.cwd);
@@ -196,9 +221,15 @@ program
       process.exit(0);
     }
 
-    const store = openStore(cwd);
+    const store = openStore();
 
     try {
+      // Sessions list mode
+      if (options.sessions) {
+        printSessionList(store.listSessions());
+        return;
+      }
+
       // Resume mode
       if (options.resume) {
         const session = store.getSession(options.resume);
@@ -234,7 +265,9 @@ program
 
       // Single-shot mode
       if (!prompt) {
-        console.error("Prompt is required (unless using --rewind, --chat, or --resume)");
+        console.error(
+          "Prompt is required (unless using --rewind, --chat, --sessions, or --resume)",
+        );
         process.exit(1);
       }
 

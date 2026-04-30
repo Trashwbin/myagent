@@ -1,7 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { openStore } from "../src/storage/store.js";
 import type { TranscriptStore } from "../src/storage/store.js";
-import type { Message } from "../src/model/types.js";
 import { FakeProvider } from "../src/model/fake.js";
 import { ToolRegistry } from "../src/tools/registry.js";
 import { readFileTool } from "../src/tools/read.js";
@@ -19,7 +18,7 @@ afterEach(() => {
   activeStores = [];
 });
 
-async function tmpStoreDir(): Promise<string> {
+async function tmpBaseDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "myagent-store-test-"));
   activeTmpDirs.push(dir);
   return dir;
@@ -32,48 +31,49 @@ async function cleanup() {
   activeTmpDirs = [];
 }
 
+function openTestStore(baseDir: string): TranscriptStore {
+  const store = openStore({ baseDir });
+  activeStores.push(store);
+  return store;
+}
+
 describe("openStore", () => {
-  it("creates .myagent/myagent.sqlite", async () => {
-    const dir = await tmpStoreDir();
-    const store = openStore(dir);
-    activeStores.push(store);
-    expect(existsSync(join(dir, ".myagent", "myagent.sqlite"))).toBe(true);
+  it("creates myagent.sqlite in baseDir", async () => {
+    const base = await tmpBaseDir();
+    openTestStore(base);
+    expect(existsSync(join(base, "myagent.sqlite"))).toBe(true);
     await cleanup();
   });
 
   it("is idempotent", async () => {
-    const dir = await tmpStoreDir();
-    const s1 = openStore(dir);
-    const s2 = openStore(dir);
-    activeStores.push(s1, s2);
-    const session = s1.createSession({ workspaceRoot: dir });
+    const base = await tmpBaseDir();
+    const s1 = openTestStore(base);
+    const s2 = openTestStore(base);
+    const session = s1.createSession({ workspaceRoot: "/tmp/ws" });
     expect(s2.getSession(session.id)).toBeDefined();
     await cleanup();
   });
 });
 
 describe("createSession", () => {
-  it("returns a SessionState with resolved workspace root", async () => {
-    const dir = await tmpStoreDir();
-    const store = openStore(dir);
-    activeStores.push(store);
-    const session = store.createSession({ workspaceRoot: dir });
+  it("returns a SessionState with the given workspace root", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/project" });
     expect(session.id).toBeTruthy();
-    expect(session.cwd).toBe(dir);
+    expect(session.cwd).toBe("/tmp/project");
     expect(session.messages).toEqual([]);
     await cleanup();
   });
 
   it("persists provider and model", async () => {
-    const dir = await tmpStoreDir();
-    const store = openStore(dir);
-    activeStores.push(store);
-    const session = store.createSession({
-      workspaceRoot: dir,
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    store.createSession({
+      workspaceRoot: "/tmp/ws",
       provider: "openai",
       model: "gpt-4o",
     });
-    expect(session.id).toBeTruthy();
     const listed = store.listSessions();
     expect(listed).toHaveLength(1);
     expect(listed[0].provider).toBe("openai");
@@ -84,15 +84,13 @@ describe("createSession", () => {
 
 describe("appendMessages + getSession", () => {
   it("stores and restores user and assistant messages", async () => {
-    const dir = await tmpStoreDir();
-    const store = openStore(dir);
-    activeStores.push(store);
-    const session = store.createSession({ workspaceRoot: dir });
-    const msgs: Message[] = [
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/ws" });
+    store.appendMessages(session.id, [
       { role: "user", content: "hello" },
       { role: "assistant", content: "hi there" },
-    ];
-    store.appendMessages(session.id, msgs);
+    ]);
     const restored = store.getSession(session.id)!;
     expect(restored.messages).toHaveLength(2);
     expect(restored.messages[0]).toEqual({ role: "user", content: "hello" });
@@ -104,10 +102,9 @@ describe("appendMessages + getSession", () => {
   });
 
   it("roundtrips assistant toolCalls as JSON", async () => {
-    const dir = await tmpStoreDir();
-    const store = openStore(dir);
-    activeStores.push(store);
-    const session = store.createSession({ workspaceRoot: dir });
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/ws" });
     const toolCalls = [{ id: "tc1", name: "read_file", input: { path: "a.ts" } }];
     store.appendMessages(session.id, [
       { role: "assistant", content: "let me check", toolCalls },
@@ -118,10 +115,9 @@ describe("appendMessages + getSession", () => {
   });
 
   it("roundtrips tool_result toolCallId and toolName", async () => {
-    const dir = await tmpStoreDir();
-    const store = openStore(dir);
-    activeStores.push(store);
-    const session = store.createSession({ workspaceRoot: dir });
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/ws" });
     store.appendMessages(session.id, [
       {
         role: "tool_result",
@@ -141,10 +137,9 @@ describe("appendMessages + getSession", () => {
   });
 
   it("preserves seq ordering across multiple appends", async () => {
-    const dir = await tmpStoreDir();
-    const store = openStore(dir);
-    activeStores.push(store);
-    const session = store.createSession({ workspaceRoot: dir });
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/ws" });
     store.appendMessages(session.id, [
       { role: "user", content: "first" },
       { role: "assistant", content: "first-reply" },
@@ -165,39 +160,82 @@ describe("appendMessages + getSession", () => {
   });
 });
 
+describe("title from first user message", () => {
+  it("sets title from first user message content", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/ws" });
+    store.appendMessages(session.id, [
+      { role: "user", content: "fix the bug in auth.ts please" },
+    ]);
+    const listed = store.listSessions();
+    expect(listed[0].title).toBe("fix the bug in auth.ts please");
+    await cleanup();
+  });
+
+  it("truncates title to 60 characters", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/ws" });
+    const longContent = "a".repeat(100);
+    store.appendMessages(session.id, [{ role: "user", content: longContent }]);
+    const listed = store.listSessions();
+    expect(listed[0].title).toBe("a".repeat(60));
+    await cleanup();
+  });
+
+  it("does not overwrite title on subsequent appends", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/ws" });
+    store.appendMessages(session.id, [{ role: "user", content: "first prompt" }]);
+    store.appendMessages(session.id, [{ role: "user", content: "second prompt" }]);
+    const listed = store.listSessions();
+    expect(listed[0].title).toBe("first prompt");
+    await cleanup();
+  });
+});
+
 describe("getSession workspace root", () => {
   it("returns the persisted workspace root, not process.cwd()", async () => {
-    const dir = await tmpStoreDir();
-    const store = openStore(dir);
-    activeStores.push(store);
-    const session = store.createSession({ workspaceRoot: dir });
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const ws = await tmpBaseDir();
+    const session = store.createSession({ workspaceRoot: ws });
     const restored = store.getSession(session.id)!;
-    expect(restored.cwd).toBe(dir);
+    expect(restored.cwd).toBe(ws);
     expect(restored.cwd).not.toBe(process.cwd());
     await cleanup();
   });
 });
 
 describe("listSessions", () => {
-  it("returns all sessions ordered by updated_at desc", async () => {
-    const dir = await tmpStoreDir();
-    const store = openStore(dir);
-    activeStores.push(store);
-    const s1 = store.createSession({ workspaceRoot: dir });
-    const s2 = store.createSession({ workspaceRoot: dir });
+  it("returns sessions ordered by updated_at desc", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const s1 = store.createSession({ workspaceRoot: "/tmp/a" });
+    await new Promise((r) => setTimeout(r, 10));
+    const s2 = store.createSession({ workspaceRoot: "/tmp/b" });
     const listed = store.listSessions();
     expect(listed).toHaveLength(2);
-    expect(new Set(listed.map((s) => s.id))).toEqual(new Set([s1.id, s2.id]));
+    expect(listed[0].id).toBe(s2.id);
+    expect(listed[1].id).toBe(s1.id);
+    await cleanup();
+  });
+
+  it("returns empty array when no sessions", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    expect(store.listSessions()).toEqual([]);
     await cleanup();
   });
 });
 
 describe("updateSessionTimestamp", () => {
   it("updates updated_at", async () => {
-    const dir = await tmpStoreDir();
-    const store = openStore(dir);
-    activeStores.push(store);
-    const session = store.createSession({ workspaceRoot: dir });
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/ws" });
     const before = store.listSessions().find((s) => s.id === session.id)!;
     await new Promise((r) => setTimeout(r, 10));
     store.updateSessionTimestamp(session.id);
@@ -207,12 +245,57 @@ describe("updateSessionTimestamp", () => {
   });
 });
 
+describe("resume finds workspace from global store", () => {
+  it("resume without --cwd finds workspace via global store", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const ws = "/tmp/some-workspace";
+
+    const session = store.createSession({
+      workspaceRoot: ws,
+      provider: "openai",
+      model: "gpt-4o",
+    });
+    store.appendMessages(session.id, [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "hi" },
+    ]);
+
+    // Simulate resume: look up by session id
+    const restored = store.getSession(session.id)!;
+    expect(restored).toBeDefined();
+    expect(restored.cwd).toBe(ws);
+    expect(restored.messages).toHaveLength(2);
+    await cleanup();
+  });
+
+  it("detects mismatched workspace root on resume", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+
+    const session = store.createSession({
+      workspaceRoot: "/tmp/workspace-a",
+    });
+    store.appendMessages(session.id, [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "hi" },
+    ]);
+
+    const restored = store.getSession(session.id)!;
+    // Session was created in workspace-a
+    expect(resolve(restored.cwd)).toBe(resolve("/tmp/workspace-a"));
+    // A different cwd should not match
+    expect(resolve(restored.cwd)).not.toBe(resolve("/tmp/workspace-b"));
+    await cleanup();
+  });
+});
+
 describe("multi-turn integration with runTurn", () => {
   it("persists and restores messages across two turns", async () => {
-    const dir = await tmpStoreDir();
-    const store = openStore(dir);
-    activeStores.push(store);
-    const session = store.createSession({ workspaceRoot: dir });
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const ws = await tmpBaseDir();
+    const session = store.createSession({ workspaceRoot: ws });
 
     const provider = new FakeProvider([
       [
@@ -245,16 +328,16 @@ describe("multi-turn integration with runTurn", () => {
       "second",
       "world",
     ]);
-    expect(restored.cwd).toBe(dir);
+    expect(restored.cwd).toBe(ws);
     await cleanup();
   });
 
   it("persists tool_call and tool_result across turns", async () => {
-    const dir = await tmpStoreDir();
-    await writeFile(join(dir, "data.txt"), "hello");
-    const store = openStore(dir);
-    activeStores.push(store);
-    const session = store.createSession({ workspaceRoot: dir });
+    const base = await tmpBaseDir();
+    const ws = await tmpBaseDir();
+    const store = openTestStore(base);
+    await writeFile(join(ws, "data.txt"), "hello");
+    const session = store.createSession({ workspaceRoot: ws });
 
     const provider = new FakeProvider([
       [
@@ -290,31 +373,6 @@ describe("multi-turn integration with runTurn", () => {
     expect(restored.messages[2].content).toContain("hello");
     expect(restored.messages[3].role).toBe("assistant");
     expect(restored.messages[3].content).toBe("done");
-    await cleanup();
-  });
-});
-
-describe("resume workspace validation", () => {
-  it("detects mismatched workspace root on resume", async () => {
-    const dirA = await tmpStoreDir();
-    const dirB = await tmpStoreDir();
-    const storeA = openStore(dirA);
-    activeStores.push(storeA);
-
-    const session = storeA.createSession({ workspaceRoot: dirA });
-    storeA.appendMessages(session.id, [
-      { role: "user", content: "hello" },
-      { role: "assistant", content: "hi" },
-    ]);
-
-    // Resume from same store should match
-    const restored = storeA.getSession(session.id)!;
-    expect(resolve(restored.cwd)).toBe(resolve(dirA));
-
-    // Simulating resume with different cwd: the restored session's cwd
-    // should not match a different workspace
-    expect(resolve(restored.cwd)).not.toBe(resolve(dirB));
-
     await cleanup();
   });
 });

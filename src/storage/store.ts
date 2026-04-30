@@ -1,6 +1,7 @@
 import BetterSqlite3 from "better-sqlite3";
 import { mkdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { Message } from "../model/types.js";
 import type { SessionState } from "../session/loop.js";
@@ -26,6 +27,10 @@ export type TranscriptStore = {
   listSessions(): SessionRow[];
   updateSessionTimestamp(sessionId: string): void;
   close(): void;
+};
+
+export type StoreOptions = {
+  baseDir?: string;
 };
 
 function now(): number {
@@ -55,10 +60,11 @@ function deserializeMessage(row: Record<string, unknown>): Message {
   return msg;
 }
 
-export function openStore(workspaceRoot: string): TranscriptStore {
-  const dir = join(resolve(workspaceRoot), ".myagent");
-  mkdirSync(dir, { recursive: true });
-  const dbPath = join(dir, "myagent.sqlite");
+export function openStore(options?: StoreOptions): TranscriptStore {
+  const baseDir =
+    options?.baseDir ?? process.env.MYAGENT_HOME ?? join(homedir(), ".myagent");
+  mkdirSync(baseDir, { recursive: true });
+  const dbPath = join(baseDir, "myagent.sqlite");
   const db = new BetterSqlite3(dbPath);
 
   db.pragma("journal_mode = WAL");
@@ -93,15 +99,26 @@ export function openStore(workspaceRoot: string): TranscriptStore {
     db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(now(), sessionId);
   }
 
+  function updateTitleFromUserMsg(sessionId: string, messages: Message[]) {
+    for (const msg of messages) {
+      if (msg.role === "user" && msg.content) {
+        db.prepare("UPDATE sessions SET title = ? WHERE id = ? AND title IS NULL").run(
+          msg.content.slice(0, 60),
+          sessionId,
+        );
+        break;
+      }
+    }
+  }
+
   return {
     createSession(input) {
       const id = randomUUID();
       const ts = now();
-      const root = resolve(input.workspaceRoot);
       db.prepare(
         "INSERT INTO sessions (id, workspace_root, provider, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-      ).run(id, root, input.provider ?? null, input.model ?? null, ts, ts);
-      return { id, cwd: root, messages: [] };
+      ).run(id, input.workspaceRoot, input.provider ?? null, input.model ?? null, ts, ts);
+      return { id, cwd: input.workspaceRoot, messages: [] };
     },
 
     getSession(id) {
@@ -150,6 +167,7 @@ export function openStore(workspaceRoot: string): TranscriptStore {
       });
 
       insertAll();
+      updateTitleFromUserMsg(sessionId, messages);
       updateSessionTimestamp(sessionId);
     },
 
