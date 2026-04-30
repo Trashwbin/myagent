@@ -21,7 +21,10 @@ export const bashTool: ToolDefinition = {
         cwd: context.cwd,
         timeout: 30_000,
       });
-      return { ok: true, output: stdout || stderr };
+      return {
+        ok: true,
+        output: stdout || stderr || `Command completed with no output: ${command}`,
+      };
     } catch (err: any) {
       return {
         ok: false,

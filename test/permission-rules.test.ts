@@ -44,13 +44,36 @@ describe("Permission rules", () => {
       "git status",
       "git diff",
       "rg test",
+      "grep test file.txt",
+      "cat README.md",
+      "pwd",
+      "ls -la",
+      "head -20 file.txt",
+      "tail -20 file.txt",
       "pnpm test",
       "npm test",
-      "echo hello",
+      "npm run test",
+      "pnpm run test",
     ];
     for (const cmd of commands) {
       const result = checkPermission("bash", { command: cmd }, "auto");
       expect(result.behavior, `expected allow for: ${cmd}`).toBe("allow");
+    }
+  });
+
+  it("asks before bash commands with shell control operators", () => {
+    const commands = [
+      "echo hello > README.md",
+      "echo hello >> README.md",
+      "git status && echo done",
+      "rg test | head",
+      "grep test README.md; echo done",
+      "echo $(pwd)",
+      "echo `pwd`",
+    ];
+    for (const cmd of commands) {
+      const result = checkPermission("bash", { command: cmd }, "auto");
+      expect(result.behavior, `expected ask for: ${cmd}`).toBe("ask");
     }
   });
 
@@ -65,6 +88,14 @@ describe("Permission rules", () => {
   it("asks for unknown bash commands", () => {
     const result = checkPermission("bash", { command: "node script.js" }, "auto");
     expect(result.behavior).toBe("ask");
+  });
+
+  it("asks for broad package scripts and write-capable find commands", () => {
+    const commands = ["npm run build", "pnpm run lint", "find . -delete"];
+    for (const cmd of commands) {
+      const result = checkPermission("bash", { command: cmd }, "auto");
+      expect(result.behavior, `expected ask for: ${cmd}`).toBe("ask");
+    }
   });
 
   it("denies unknown tools", () => {

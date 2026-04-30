@@ -1,18 +1,7 @@
 import type { PermissionDecision } from "./decision.js";
+import { analyzeCommand } from "./command-policy.js";
 
 export type ApprovalMode = "auto" | "on-request" | "never";
-
-const ALLOWED_BASH_COMMANDS = [
-  "git status",
-  "git diff",
-  "rg ",
-  "grep ",
-  "pnpm test",
-  "npm test",
-  "echo ",
-];
-
-const DENIED_BASH_PATTERNS = ["rm -rf", "sudo ", "chmod -R", "curl | sh"];
 
 export function checkPermission(
   toolName: string,
@@ -34,13 +23,8 @@ export function checkPermission(
 
     case "bash": {
       const command = (input as { command: string }).command ?? "";
-      if (DENIED_BASH_PATTERNS.some((p) => command.includes(p))) {
-        return { behavior: "deny", reason: "destructive command detected" };
-      }
-      if (ALLOWED_BASH_COMMANDS.some((p) => command.startsWith(p))) {
-        return { behavior: "allow", reason: "safe command" };
-      }
-      return { behavior: "ask", reason: "command requires approval" };
+      const policy = analyzeCommand(command);
+      return { behavior: policy.decision, reason: policy.reason };
     }
 
     default:
