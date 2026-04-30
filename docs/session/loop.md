@@ -54,6 +54,7 @@ type TurnEvent =
       name: string;
       input: unknown;
       reason: string;
+      metadata?: Record<string, unknown>;
     }
   | {
       type: "tool_approval_decision";
@@ -84,17 +85,21 @@ Within a single model → tool → model cycle:
 
 - **`Message`** is the persistence structure. It's what gets stored in the transcript and survives across sessions.
 - **`TurnEvent`** is the real-time observation structure. It's ephemeral — for the CLI/UI to react during execution.
+- **`ToolPermissionDecision.resolvedInput`** is the secure handoff object between the permission layer and tool execution. It carries pre-resolved paths so tools don't re-interpret user input.
+- **`ToolContext.permissionResolved`** marks that internal handoff as trusted. Direct tool callers cannot make `resolvedPath` trusted by merely passing it in input.
 
 The `onEvent` callback is optional. When not provided, the loop runs identically but without streaming output. This keeps tests and non-interactive usage simple.
 
 ### Approval
 
-Approval is a runtime decision point. When a tool call's permission check returns "ask":
+Approval is a runtime decision point. When `checkToolPermission()` returns "ask":
 
 1. If no `approvalHandler` is provided: the tool is not executed, a `tool_result` with a blocked message is emitted and persisted.
-2. If an `approvalHandler` is provided: `tool_approval_required` is emitted with the tool name, reason, and input. The handler decides allow/deny. `tool_approval_decision` is emitted with the verdict.
+2. If an `approvalHandler` is provided: `tool_approval_required` is emitted with the tool name, reason, input, and `metadata` (path info, workspace status, sensitivity). The handler decides allow/deny. `tool_approval_decision` is emitted with the verdict.
 
-The CLI's approval handler prints the tool info (from the event) and prompts `Approve? [Y/n]`. Empty input or `y`/`yes` grants approval. `n`/`no` denies.
+When approved, the tool executes with `decision.resolvedInput` (not the original input) and `ToolContext.permissionResolved: true`. This ensures the tool uses the permission-resolved path without exposing that internal field as a normal model-controlled parameter.
+
+The CLI's approval handler prints the tool info and metadata from the event, then prompts `Approve? [Y/n]`. Empty input or `y`/`yes` grants approval. `n`/`no` denies.
 
 ## Persistence
 

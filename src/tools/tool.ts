@@ -2,6 +2,7 @@ import type { ZodType } from "zod";
 
 export type ToolContext = {
   cwd: string;
+  permissionResolved?: boolean;
 };
 
 export type ToolResult = {

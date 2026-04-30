@@ -2,13 +2,24 @@ import { z } from "zod";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ToolDefinition, ToolContext, ToolResult } from "./tool.js";
-import { resolveWorkspacePath } from "../workspace/path.js";
+import { resolvePathInfo } from "../workspace/path-info.js";
+import {
+  isSensitiveReadPath,
+  sensitiveGrepExcludeArgs,
+  sensitiveRgExcludeGlobs,
+} from "../permission/sensitive-paths.js";
 
 const execFileAsync = promisify(execFile);
 
 const inputSchema = z.object({
   pattern: z.string().describe("Search pattern"),
   path: z.string().optional().default(".").describe("Directory to search in"),
+});
+
+const executionInputSchema = inputSchema.extend({
+  resolvedPath: z.string().optional(),
+  realPath: z.string().optional(),
+  excludeSensitive: z.boolean().optional(),
 });
 
 let rgAvailable: boolean | undefined;
@@ -30,10 +41,28 @@ export const searchTool: ToolDefinition = {
   inputSchema,
 
   async execute(input: unknown, context: ToolContext): Promise<ToolResult> {
-    const { pattern, path: searchPath } = inputSchema.parse(input);
-    const absPath = resolveWorkspacePath(context.cwd, searchPath);
-    if (!absPath) {
-      return { ok: false, output: "Search path is outside workspace" };
+    const parsed = executionInputSchema.parse(input);
+    const { pattern } = parsed;
+    const excludeSensitive =
+      context.permissionResolved && parsed.excludeSensitive === false ? false : true;
+
+    let absPath: string;
+    if (parsed.resolvedPath && context.permissionResolved) {
+      absPath = parsed.resolvedPath;
+    } else {
+      const pathInfo = resolvePathInfo(context.cwd, parsed.path);
+      if (
+        !pathInfo ||
+        !pathInfo.insideWorkspace ||
+        isSensitiveReadPath(pathInfo.realPath)
+      ) {
+        return {
+          ok: false,
+          output:
+            "search requires permission-resolved input for external/sensitive paths",
+        };
+      }
+      absPath = pathInfo.absolutePath;
     }
 
     const useRg = await detectRg();
@@ -41,17 +70,24 @@ export const searchTool: ToolDefinition = {
     try {
       let stdout: string;
       if (useRg) {
+        const baseArgs = ["-n", "--no-heading", "--color", "never"];
+        const globArgs =
+          excludeSensitive !== false
+            ? sensitiveRgExcludeGlobs().flatMap((g) => ["--glob", g])
+            : [];
         const result = await execFileAsync(
           "rg",
-          ["-n", "--no-heading", "--color", "never", "--", pattern, absPath],
+          [...baseArgs, ...globArgs, "--", pattern, absPath],
           { cwd: context.cwd, timeout: 10_000 },
         );
         stdout = result.stdout;
       } else {
-        const result = await execFileAsync("grep", ["-rn", "-e", pattern, absPath], {
-          cwd: context.cwd,
-          timeout: 10_000,
-        });
+        const excludeArgs = excludeSensitive !== false ? sensitiveGrepExcludeArgs() : [];
+        const result = await execFileAsync(
+          "grep",
+          ["-rn", ...excludeArgs, "-e", pattern, absPath],
+          { cwd: context.cwd, timeout: 10_000 },
+        );
         stdout = result.stdout;
       }
       return { ok: true, output: stdout || "No matches found" };

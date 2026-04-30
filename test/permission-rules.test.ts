@@ -34,6 +34,20 @@ describe("Permission rules", () => {
     expect(result.behavior).toBe("deny");
   });
 
+  it("denies approval-required read/search/bash in never mode", () => {
+    const cases = [
+      ["read_file", { path: "/etc/passwd" }],
+      ["search", { pattern: "test", path: "/etc" }],
+      ["bash", { command: "node script.js" }],
+    ] as const;
+
+    for (const [toolName, input] of cases) {
+      const result = checkPermission(toolName, input, "never", CWD);
+      expect(result.behavior, `expected deny for ${toolName}`).toBe("deny");
+      expect(result.reason).toContain("approval mode is never");
+    }
+  });
+
   it("asks for edit_file in on-request mode", () => {
     const result = checkPermission(
       "edit_file",
@@ -97,5 +111,27 @@ describe("Permission rules", () => {
   it("denies unknown tools", () => {
     const result = checkPermission("custom_tool", {}, "auto", CWD);
     expect(result.behavior).toBe("deny");
+  });
+
+  it("asks for read_file outside workspace", () => {
+    const result = checkPermission("read_file", { path: "/etc/passwd" }, "auto", CWD);
+    expect(result.behavior).toBe("ask");
+    expect(result.reason).toContain("outside workspace");
+  });
+
+  it("asks for search outside workspace", () => {
+    const result = checkPermission(
+      "search",
+      { pattern: "test", path: "/etc" },
+      "auto",
+      CWD,
+    );
+    expect(result.behavior).toBe("ask");
+    expect(result.reason).toContain("outside workspace");
+  });
+
+  it("allows search in workspace", () => {
+    const result = checkPermission("search", { pattern: "test", path: "." }, "auto", CWD);
+    expect(result.behavior).toBe("allow");
   });
 });

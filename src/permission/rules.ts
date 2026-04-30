@@ -1,7 +1,8 @@
 import type { PermissionDecision } from "./decision.js";
-import { analyzeCommand } from "./command-policy.js";
+import { checkToolPermission } from "./policy.js";
+import type { ApprovalMode } from "./policy.js";
 
-export type ApprovalMode = "auto" | "on-request" | "never";
+export type { ApprovalMode };
 
 export function checkPermission(
   toolName: string,
@@ -9,26 +10,6 @@ export function checkPermission(
   mode: ApprovalMode,
   cwd: string,
 ): PermissionDecision {
-  switch (toolName) {
-    case "read_file":
-      return { behavior: "allow", reason: "read operations are safe" };
-
-    case "search":
-      return { behavior: "allow", reason: "search operations are safe" };
-
-    case "edit_file":
-      if (mode === "never") {
-        return { behavior: "deny", reason: "edits denied in never-approval mode" };
-      }
-      return { behavior: "ask", reason: "file edits require approval" };
-
-    case "bash": {
-      const command = (input as { command: string }).command ?? "";
-      const policy = analyzeCommand(command, { cwd });
-      return { behavior: policy.decision, reason: policy.reason };
-    }
-
-    default:
-      return { behavior: "deny", reason: `unknown tool: ${toolName}` };
-  }
+  const decision = checkToolPermission(toolName, input, mode, cwd);
+  return { behavior: decision.behavior, reason: decision.reason };
 }

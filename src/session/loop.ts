@@ -1,8 +1,8 @@
 import type { Provider } from "../model/provider.js";
 import type { ToolSchema } from "../model/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import { checkPermission } from "../permission/rules.js";
-import type { ApprovalMode } from "../permission/rules.js";
+import { checkToolPermission } from "../permission/policy.js";
+import type { ApprovalMode } from "../permission/policy.js";
 import type { Message } from "./message.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { createCheckpoint } from "../workspace/checkpoint.js";
@@ -55,6 +55,7 @@ export type TurnEvent =
       name: string;
       input: unknown;
       reason: string;
+      metadata?: Record<string, unknown>;
     }
   | {
       type: "tool_approval_decision";
@@ -141,7 +142,8 @@ async function runAgentLoop(
     if (toolCalls.length === 0) break;
 
     for (const tc of toolCalls) {
-      const decision = checkPermission(tc.name, tc.input, options.approval, cwd);
+      const decision = checkToolPermission(tc.name, tc.input, options.approval, cwd);
+      const toolInput = decision.resolvedInput ?? tc.input;
 
       let shouldExecute = false;
       let blockReason = "";
@@ -149,7 +151,7 @@ async function runAgentLoop(
       if (decision.behavior === "allow") {
         shouldExecute = true;
       } else if (decision.behavior === "deny") {
-        blockReason = decision.reason ?? "denied";
+        blockReason = decision.reason;
       } else {
         if (!options.approvalHandler) {
           const msg: Message = {
@@ -171,6 +173,7 @@ async function runAgentLoop(
             name: tc.name,
             input: tc.input,
             reason: decision.reason,
+            metadata: decision.metadata,
           });
 
         const verdict = await options.approvalHandler({
@@ -219,7 +222,9 @@ async function runAgentLoop(
       // Checkpoint before edit_file
       let checkpointId: string | undefined;
       if (tc.name === "edit_file") {
-        const filePath = (tc.input as { path: string }).path;
+        const filePath =
+          (toolInput as { resolvedPath?: string; path: string }).resolvedPath ??
+          (tc.input as { path: string }).path;
         try {
           const cp = await createCheckpoint(cwd, [filePath]);
           checkpointId = cp.id;
@@ -242,10 +247,13 @@ async function runAgentLoop(
           type: "tool_started",
           id: tc.id,
           name: tc.name,
-          input: tc.input,
+          input: toolInput,
         });
 
-      const result = await tool.execute(tc.input, { cwd });
+      const result = await tool.execute(toolInput, {
+        cwd,
+        permissionResolved: decision.resolvedInput !== undefined,
+      });
       let content = result.ok ? result.output : `Error: ${result.output}`;
       if (checkpointId) {
         content += `\n[checkpoint: ${checkpointId}]`;

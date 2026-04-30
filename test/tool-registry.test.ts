@@ -4,6 +4,7 @@ import { readFileTool } from "../src/tools/read.js";
 import { searchTool } from "../src/tools/search.js";
 import { editFileTool } from "../src/tools/edit.js";
 import { bashTool } from "../src/tools/bash.js";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 describe("ToolRegistry", () => {
   it("registers and finds all four built-in tools", () => {
@@ -42,5 +43,24 @@ describe("ToolRegistry", () => {
       expect(tool.inputSchema).toBeDefined();
       expect(typeof tool.execute).toBe("function");
     }
+  });
+
+  it("does not expose permission-resolved internal fields to the model", () => {
+    const properties = (tool: { inputSchema: unknown }) =>
+      Object.keys(
+        ((zodToJsonSchema(tool.inputSchema as any) as any).properties ?? {}) as Record<
+          string,
+          unknown
+        >,
+      );
+
+    expect(properties(readFileTool)).not.toContain("resolvedPath");
+    expect(properties(readFileTool)).not.toContain("realPath");
+
+    expect(properties(searchTool)).not.toContain("resolvedPath");
+    expect(properties(searchTool)).not.toContain("realPath");
+    expect(properties(searchTool)).not.toContain("excludeSensitive");
+
+    expect(properties(editFileTool)).not.toContain("resolvedPath");
   });
 });

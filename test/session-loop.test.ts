@@ -10,7 +10,7 @@ import type { Provider } from "../src/model/provider.js";
 import type { ModelEvent, Message, ToolSchema } from "../src/model/types.js";
 import type { ProviderStreamOptions } from "../src/model/provider.js";
 import type { SessionState } from "../src/session/loop.js";
-import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -741,5 +741,51 @@ describe("TurnEvent ordering", () => {
     expect(types[types.length - 1]).toBe("turn_finished");
 
     await rm(tmp, { recursive: true });
+  });
+
+  it("tool_approval_required event includes metadata", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
+    const sibling = `${tmp}-sibling`;
+    await mkdir(sibling);
+    await writeFile(join(sibling, "data.txt"), "sibling data");
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: `../${sibling.split("/").at(-1)}/data.txt` },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    const { events, onEvent } = captureEvents();
+    await runTurn(provider, registry, makeSession(tmp), "read", {
+      approval: "auto",
+      approvalHandler: async () => "allow",
+      onEvent,
+    });
+
+    const approvalEvent = events.find((e) => e.type === "tool_approval_required");
+    expect(approvalEvent).toBeDefined();
+    expect((approvalEvent as any).metadata).toBeDefined();
+    expect((approvalEvent as any).metadata.insideWorkspace).toBe(false);
+    expect((approvalEvent as any).metadata.realPath).toBeTruthy();
+
+    const toolResult = events.find((e) => e.type === "tool_result");
+    expect(toolResult).toBeDefined();
+    expect((toolResult as any).message.content).toContain("sibling data");
+
+    await rm(tmp, { recursive: true, force: true });
+    await rm(sibling, { recursive: true, force: true });
   });
 });

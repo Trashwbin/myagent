@@ -9,14 +9,25 @@ const inputSchema = z.object({
   new_string: z.string().describe("Replacement string"),
 });
 
+const executionInputSchema = inputSchema.extend({
+  resolvedPath: z.string().optional(),
+});
+
 export const editFileTool: ToolDefinition = {
   name: "edit_file",
   description: "Edit a file by replacing an exact string match",
   inputSchema,
 
   async execute(input: unknown, context: ToolContext): Promise<ToolResult> {
-    const { path, old_string, new_string } = inputSchema.parse(input);
-    const absPath = resolveWorkspacePath(context.cwd, path);
+    const { path, resolvedPath, old_string, new_string } =
+      executionInputSchema.parse(input);
+
+    let absPath: string | undefined;
+    if (resolvedPath && context.permissionResolved) {
+      absPath = resolvedPath;
+    } else {
+      absPath = resolveWorkspacePath(context.cwd, path);
+    }
     if (!absPath) {
       return { ok: false, output: "Path is outside workspace" };
     }

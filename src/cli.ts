@@ -62,6 +62,12 @@ function makeEventRenderer(): (event: TurnEvent) => void {
         break;
       case "tool_approval_required":
         console.log(`\n[approval] ${event.name}: ${event.reason}`);
+        if (event.metadata) {
+          const meta = event.metadata;
+          if (meta.realPath) console.log(`  path: ${meta.realPath}`);
+          if (meta.insideWorkspace === false) console.log(`  [outside workspace]`);
+          if (meta.sensitive) console.log(`  [sensitive]`);
+        }
         console.log(`  input: ${JSON.stringify(event.input)}`);
         break;
       case "tool_started":
