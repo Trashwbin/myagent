@@ -2,6 +2,7 @@
 import "dotenv/config";
 import { Command } from "commander";
 import { resolve } from "node:path";
+import * as readline from "node:readline";
 import { FakeProvider } from "./model/fake.js";
 import { OpenAICompatibleProvider } from "./model/openai-compatible.js";
 import { AnthropicCompatibleProvider } from "./model/anthropic-compatible.js";
@@ -11,8 +12,39 @@ import { searchTool } from "./tools/search.js";
 import { editFileTool } from "./tools/edit.js";
 import { bashTool } from "./tools/bash.js";
 import { runSession } from "./session/loop.js";
+import type { ApprovalRequest } from "./session/loop.js";
 import type { ApprovalMode } from "./permission/rules.js";
 import type { Provider } from "./model/provider.js";
+import { restoreCheckpoint } from "./workspace/checkpoint.js";
+import { getGitDiffStat } from "./workspace/diff.js";
+
+function createApprovalHandler(): {
+  handler: (request: ApprovalRequest) => Promise<"allow" | "deny">;
+  close: () => void;
+} {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return {
+    handler: async (request: ApprovalRequest): Promise<"allow" | "deny"> => {
+      console.log("\nTool requires approval:");
+      console.log(`- tool: ${request.toolName}`);
+      console.log(`- reason: ${request.reason}`);
+      console.log(`- input: ${JSON.stringify(request.input)}`);
+
+      return new Promise((resolve) => {
+        rl.question("Approve? [y/N] ", (answer) => {
+          const ok =
+            answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes";
+          resolve(ok ? "allow" : "deny");
+        });
+      });
+    },
+    close: () => rl.close(),
+  };
+}
 
 const program = new Command();
 
@@ -23,9 +55,23 @@ program
   .option("--provider <provider>", "model provider (fake|openai|anthropic)", "fake")
   .option("--model <model>", "model name")
   .option("--approval <mode>", "approval mode (auto|on-request|never)", "auto")
-  .argument("<prompt>", "task prompt")
-  .action(async (prompt: string, options: Record<string, string>) => {
+  .option("--rewind <checkpointId>", "restore checkpoint and exit")
+  .argument("[prompt]", "task prompt")
+  .action(async (prompt: string | undefined, options: Record<string, string>) => {
     const cwd = resolve(options.cwd);
+
+    // Rewind mode: restore checkpoint and exit
+    if (options.rewind) {
+      await restoreCheckpoint(cwd, options.rewind);
+      console.log(`Restored checkpoint: ${options.rewind}`);
+      process.exit(0);
+    }
+
+    if (!prompt) {
+      console.error("Prompt is required (unless using --rewind)");
+      process.exit(1);
+    }
+
     const approval = options.approval as ApprovalMode;
 
     let provider: Provider;
@@ -77,16 +123,28 @@ program
     registry.register(editFileTool);
     registry.register(bashTool);
 
-    const { transcript } = await runSession(
-      provider,
-      registry,
-      [{ role: "user", content: prompt }],
-      { cwd, approval },
-    );
+    const { handler: approvalHandler, close: closeRl } = createApprovalHandler();
 
-    for (const msg of transcript) {
-      const prefix = msg.role === "tool_result" ? `tool:${msg.toolName}` : msg.role;
-      console.log(`[${prefix}] ${msg.content}`);
+    try {
+      const { transcript } = await runSession(
+        provider,
+        registry,
+        [{ role: "user", content: prompt }],
+        { cwd, approval, approvalHandler },
+      );
+
+      for (const msg of transcript) {
+        const prefix = msg.role === "tool_result" ? `tool:${msg.toolName}` : msg.role;
+        console.log(`[${prefix}] ${msg.content}`);
+      }
+
+      const diffStat = await getGitDiffStat(cwd);
+      if (diffStat) {
+        console.log("\n--- Changes ---");
+        console.log(diffStat);
+      }
+    } finally {
+      closeRl();
     }
   });
 

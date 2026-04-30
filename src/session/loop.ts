@@ -5,6 +5,20 @@ import { checkPermission } from "../permission/rules.js";
 import type { ApprovalMode } from "../permission/rules.js";
 import type { Message } from "./message.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { createCheckpoint } from "../workspace/checkpoint.js";
+
+export type ApprovalRequest = {
+  toolName: string;
+  input: unknown;
+  reason: string;
+};
+
+export type SessionOptions = {
+  cwd: string;
+  approval: ApprovalMode;
+  maxTurns?: number;
+  approvalHandler?: (request: ApprovalRequest) => Promise<"allow" | "deny">;
+};
 
 export type SessionResult = {
   transcript: Message[];
@@ -24,11 +38,20 @@ function buildToolSchemas(registry: ToolRegistry): ToolSchema[] {
   });
 }
 
+function blockedMsg(tc: { id: string; name: string }, reason: string): Message {
+  return {
+    role: "tool_result",
+    toolCallId: tc.id,
+    toolName: tc.name,
+    content: `Tool call denied and was not executed: ${reason}`,
+  };
+}
+
 export async function runSession(
   provider: Provider,
   registry: ToolRegistry,
   initialMessages: Message[],
-  options: { cwd: string; approval: ApprovalMode; maxTurns?: number },
+  options: SessionOptions,
 ): Promise<SessionResult> {
   const messages = [...initialMessages];
   const transcript = [...initialMessages];
@@ -65,38 +88,93 @@ export async function runSession(
     for (const tc of toolCalls) {
       const decision = checkPermission(tc.name, tc.input, options.approval);
 
+      let shouldExecute = false;
+      let blockReason = "";
+
       if (decision.behavior === "allow") {
-        const tool = registry.get(tc.name);
-        if (!tool) {
-          const resultMsg: Message = {
+        shouldExecute = true;
+      } else if (decision.behavior === "deny") {
+        blockReason = decision.reason ?? "denied";
+      } else {
+        if (!options.approvalHandler) {
+          const msg: Message = {
             role: "tool_result",
             toolCallId: tc.id,
             toolName: tc.name,
-            content: `Tool not found: ${tc.name}`,
+            content: `Tool call requires approval and was not executed: ${decision.reason}`,
           };
-          messages.push(resultMsg);
-          transcript.push(resultMsg);
+          messages.push(msg);
+          transcript.push(msg);
           continue;
         }
-        const result = await tool.execute(tc.input, { cwd: options.cwd });
-        const resultMsg: Message = {
-          role: "tool_result",
-          toolCallId: tc.id,
+
+        const verdict = await options.approvalHandler({
           toolName: tc.name,
-          content: result.ok ? result.output : `Error: ${result.output}`,
-        };
-        messages.push(resultMsg);
-        transcript.push(resultMsg);
-      } else {
-        const resultMsg: Message = {
-          role: "tool_result",
-          toolCallId: tc.id,
-          toolName: tc.name,
-          content: `Blocked (${decision.behavior}): ${decision.reason}`,
-        };
-        messages.push(resultMsg);
-        transcript.push(resultMsg);
+          input: tc.input,
+          reason: decision.reason,
+        });
+
+        if (verdict === "allow") {
+          shouldExecute = true;
+        } else {
+          blockReason = decision.reason;
+        }
       }
+
+      if (!shouldExecute) {
+        const msg = blockedMsg(tc, blockReason);
+        messages.push(msg);
+        transcript.push(msg);
+        continue;
+      }
+
+      const tool = registry.get(tc.name);
+      if (!tool) {
+        const msg: Message = {
+          role: "tool_result",
+          toolCallId: tc.id,
+          toolName: tc.name,
+          content: `Tool not found: ${tc.name}`,
+        };
+        messages.push(msg);
+        transcript.push(msg);
+        continue;
+      }
+
+      // Checkpoint before edit_file
+      let checkpointId: string | undefined;
+      if (tc.name === "edit_file") {
+        const filePath = (tc.input as { path: string }).path;
+        try {
+          const cp = await createCheckpoint(options.cwd, [filePath]);
+          checkpointId = cp.id;
+        } catch (err: any) {
+          const msg: Message = {
+            role: "tool_result",
+            toolCallId: tc.id,
+            toolName: tc.name,
+            content: `Checkpoint failed, edit not executed: ${err.message}`,
+          };
+          messages.push(msg);
+          transcript.push(msg);
+          continue;
+        }
+      }
+
+      const result = await tool.execute(tc.input, { cwd: options.cwd });
+      let content = result.ok ? result.output : `Error: ${result.output}`;
+      if (checkpointId) {
+        content += `\n[checkpoint: ${checkpointId}]`;
+      }
+
+      const resultMsg: Message = {
+        role: "tool_result",
+        toolCallId: tc.id,
+        toolName: tc.name,
+        content,
+      };
+      messages.push(resultMsg);
+      transcript.push(resultMsg);
     }
   }
 
