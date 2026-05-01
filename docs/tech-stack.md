@@ -70,7 +70,7 @@ Current exceptions:
   `MYAGENT_BASE_URL` env var > settings > built-in default.
 - `maxOutputTokens` also has no CLI flag; it resolves as
   `MYAGENT_MAX_OUTPUT_TOKENS` env var > settings > provider default
-  (4096 for OpenAI, 8192 for Anthropic).
+  (unset for OpenAI requests, 16384 for Anthropic).
 
 Supported fields:
 
@@ -85,8 +85,9 @@ Supported fields:
 }
 ```
 
-`maxOutputTokens` controls per-turn output length. When unset, providers use
-their built-in defaults (4096 for OpenAI, 8192 for Anthropic).
+`maxOutputTokens` controls per-turn output length. When unset, OpenAI-compatible
+requests omit `max_tokens` and let the upstream decide the default. Anthropic
+requests still send a default of 16384.
 
 Internal stream boundary:
 

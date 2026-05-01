@@ -164,4 +164,59 @@ describe("Anthropic convertMessages", () => {
     expect(capturedParams.system).toBe("system rules");
     expect(capturedParams.messages).toEqual([{ role: "user", content: "hello" }]);
   });
+
+  it("uses 16384 as the default max_tokens when maxOutputTokens is unset", async () => {
+    const provider = new AnthropicCompatibleProvider({
+      provider: "anthropic",
+      model: "test-model",
+      apiKey: "test-key",
+    });
+    let capturedParams: any;
+
+    (provider as any).client = {
+      messages: {
+        stream: (params: any) => {
+          capturedParams = params;
+          return chunks([
+            {
+              type: "message_delta",
+              delta: { stop_reason: "end_turn" },
+            },
+          ]);
+        },
+      },
+    };
+
+    await collectEvents(provider.stream([{ role: "user", content: "hello" }]));
+
+    expect(capturedParams.max_tokens).toBe(16384);
+  });
+
+  it("uses configured maxOutputTokens when provided", async () => {
+    const provider = new AnthropicCompatibleProvider({
+      provider: "anthropic",
+      model: "test-model",
+      apiKey: "test-key",
+      maxOutputTokens: 4096,
+    });
+    let capturedParams: any;
+
+    (provider as any).client = {
+      messages: {
+        stream: (params: any) => {
+          capturedParams = params;
+          return chunks([
+            {
+              type: "message_delta",
+              delta: { stop_reason: "end_turn" },
+            },
+          ]);
+        },
+      },
+    };
+
+    await collectEvents(provider.stream([{ role: "user", content: "hello" }]));
+
+    expect(capturedParams.max_tokens).toBe(4096);
+  });
 });

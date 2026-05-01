@@ -226,4 +226,61 @@ describe("OpenAI convertMessages", () => {
     });
     expect(capturedParams.messages[1]).toEqual({ role: "user", content: "hello" });
   });
+
+  it("does not send max_tokens when maxOutputTokens is unset", async () => {
+    const provider = new OpenAICompatibleProvider({
+      provider: "openai",
+      model: "test-model",
+      apiKey: "test-key",
+    });
+    let capturedParams: any;
+
+    (provider as any).client = {
+      chat: {
+        completions: {
+          create: async (params: any) => {
+            capturedParams = params;
+            return chunks([
+              {
+                choices: [{ delta: {}, finish_reason: "stop" }],
+              },
+            ]);
+          },
+        },
+      },
+    };
+
+    await collectEvents(provider.stream([{ role: "user", content: "hello" }]));
+
+    expect("max_tokens" in capturedParams).toBe(false);
+  });
+
+  it("sends max_tokens when maxOutputTokens is configured", async () => {
+    const provider = new OpenAICompatibleProvider({
+      provider: "openai",
+      model: "test-model",
+      apiKey: "test-key",
+      maxOutputTokens: 2048,
+    });
+    let capturedParams: any;
+
+    (provider as any).client = {
+      chat: {
+        completions: {
+          create: async (params: any) => {
+            capturedParams = params;
+            return chunks([
+              {
+                choices: [{ delta: {}, finish_reason: "stop" }],
+              },
+            ]);
+          },
+        },
+      },
+    };
+
+    await collectEvents(provider.stream([{ role: "user", content: "hello" }]));
+
+    expect(capturedParams.max_tokens).toBe(2048);
+  });
 });
