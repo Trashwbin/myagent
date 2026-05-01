@@ -18,6 +18,7 @@ import type { Message } from "./message.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { createCheckpoint } from "../workspace/checkpoint.js";
 import { buildSystemPrompt } from "./system-prompt.js";
+import { ReadStateTracker } from "../tools/file-mutation.js";
 
 export type ApprovalRequest = {
   toolName: string;
@@ -48,6 +49,7 @@ export type SessionOptions = {
   onEvent?: (event: TurnEvent) => void | Promise<void>;
   sessionApprovalRules?: ApprovalRule[];
   store?: PermissionStore;
+  readState?: ReadStateTracker;
 };
 
 export type TurnOptions = {
@@ -57,6 +59,7 @@ export type TurnOptions = {
   onEvent?: (event: TurnEvent) => void | Promise<void>;
   sessionApprovalRules?: ApprovalRule[];
   store?: PermissionStore;
+  readState?: ReadStateTracker;
 };
 
 export type SessionResult = {
@@ -123,6 +126,7 @@ async function runAgentLoop(
   const onEvent = options.onEvent;
   const sessionRules = options.sessionApprovalRules ?? [];
   const store = options.store;
+  const readState = options.readState ?? new ReadStateTracker();
 
   for (let turn = 0; turn < maxTurns; turn++) {
     let assistantText = "";
@@ -355,9 +359,9 @@ async function runAgentLoop(
         continue;
       }
 
-      // Checkpoint before edit_file
+      // Checkpoint before file mutation tools
       let checkpointId: string | undefined;
-      if (tc.name === "edit_file") {
+      if (tc.name === "edit_file" || tc.name === "write_file") {
         const filePath =
           (toolInput as { resolvedPath?: string; path: string }).resolvedPath ??
           (tc.input as { path: string }).path;
@@ -389,9 +393,10 @@ async function runAgentLoop(
       const result = await tool.execute(toolInput, {
         cwd,
         permissionResolved: decision.resolvedInput !== undefined,
+        readState,
       });
       let content = result.ok ? result.output : `Error: ${result.output}`;
-      if (checkpointId) {
+      if (result.ok && checkpointId) {
         content += `\n[checkpoint: ${checkpointId}]`;
       }
 

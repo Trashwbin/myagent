@@ -55,7 +55,8 @@ export function buildApprovalPattern(
       const meta = decision.metadata ?? {};
       return (meta.realPath as string) ?? (input as { path?: string }).path;
     }
-    case "edit_file": {
+    case "edit_file":
+    case "write_file": {
       const meta = decision.metadata ?? {};
       return (meta.absolutePath as string) ?? (input as { path: string }).path;
     }

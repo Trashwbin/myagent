@@ -93,8 +93,11 @@ failover only when the user configures it.
 Use explicit built-in tools only:
 
 - `read_file`
+- `list_dir`
 - `search`
 - `edit_file`
+- `write_file` (next)
+- `apply_patch` (after write/edit stabilize)
 - `bash`
 
 Implementation choices:
@@ -102,7 +105,9 @@ Implementation choices:
 - file IO: Node `fs/promises`
 - search: shell out to `rg`
 - shell execution: `execa`
-- edit format: start with exact string replacement, then add structured patch
+- file mutation: `edit_file` for targeted replacement, `write_file` for whole-file writes, then structured `apply_patch`
+
+See [tools/file-mutation.md](tools/file-mutation.md) for the write/edit/patch tool plan.
 
 Each tool should expose:
 
@@ -130,13 +135,16 @@ v0 can run in non-interactive modes:
 - `--approval auto`: allow safe read/search/test commands, ask for writes and
   risky commands
 
-Initial rules:
+Current rules:
 
 - reads inside workspace: allow
-- `rg`, `git diff`, `git status`, package test commands: allow
-- file writes inside workspace: ask or allow depending on mode
+- project-root-scoped outside reads: ask, then reusable through `external_directory`
+- sensitive reads: ask once only, never persisted as session/workspace rules
+- read-only bash commands: classified by command-policy v2, including `cd <dir> && <cmd>` and `git -C <dir>` effective cwd handling
+- reusable bash approval patterns: `git diff *`, `git status *`, `rg *`, `npm test *`, etc.
+- file writes inside workspace: ask in interactive modes, deny in `--approval never`
 - destructive commands: deny by default
-- commands outside workspace: ask or deny
+- write/network/unknown commands: ask or deny based on policy and approval mode
 
 ## Persistence
 
@@ -146,18 +154,22 @@ Library:
 
 - `better-sqlite3`
 
-Initial tables:
+Current tables:
 
 ```text
 sessions
 messages
-tool_calls
-checkpoints
+permission_rules
 ```
 
-Store every model request, model event, tool call, tool result, permission
-decision, and final answer. The store exists so the project can demonstrate
-real agent runtime behavior, not just a prompt wrapper.
+The `messages` table stores assistant tool calls and tool result metadata inline.
+Checkpoint snapshots are stored under `<workspace>/.myagent/checkpoints/`, not in
+SQLite.
+
+The store exists so the project can demonstrate real agent runtime behavior,
+not just a prompt wrapper. Future schema work may split tool calls, permission
+decisions, and checkpoints into first-class tables if the CLI needs richer
+inspection or replay.
 
 ## Workspace Layer
 
@@ -174,13 +186,18 @@ repo, use git diff as the primary output.
 
 Implement simple local compaction after the base loop works.
 
+Status: not implemented yet. File mutation tools v1 (`write_file`, stronger
+`edit_file`, shared mutation policy) comes first because compaction should not
+be built on top of a thin write surface.
+
 v0 strategy:
 
 - keep latest user message
 - keep latest assistant final answer
 - keep recent tool results
 - summarize older turns through the active provider
-- replace older messages with one `summary` message
+- replace older messages with one summary-bearing message or equivalent internal
+  transcript entry
 
 Do not implement remote compaction, background memory, or long-term memory in
 v0.

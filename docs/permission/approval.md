@@ -2,15 +2,15 @@
 
 ## Overview
 
-When `checkToolPermission()` returns "ask", the session loop checks approval memory before prompting the user. Approved actions are remembered at session or workspace scope.
+When `checkToolPermission()` returns "ask", the session loop checks approval memory before prompting the user. Approved actions can be remembered at session or workspace scope unless the request is sensitive.
 
 ## Approval responses
 
 | Input     | Response              | Effect                                                |
 | --------- | --------------------- | ----------------------------------------------------- |
 | Enter / y | `allow_once`          | Execute once. No rule saved.                          |
-| a         | `allow_for_session`   | Save to in-memory rules. Auto-allow for this session. |
-| a → w     | `allow_for_workspace` | Save to SQLite. Auto-allow for this workspace.        |
+| a -> s    | `allow_for_session`   | Save to in-memory rules. Auto-allow for this session. |
+| a -> w    | `allow_for_workspace` | Save to SQLite. Auto-allow for this workspace.        |
 | n / Esc   | `abort`               | Block tool. Terminate turn. Return to user input.     |
 
 ## Three layers
@@ -31,14 +31,25 @@ When `checkToolPermission()` returns "ask", the session loop checks approval mem
 
 `buildApprovalPattern(toolName, input, decision)` derives a stable pattern string for matching:
 
-| Tool        | Pattern source                        |
-| ----------- | ------------------------------------- |
-| `bash`      | Full command string                   |
-| `read_file` | `realPath` from decision metadata     |
-| `search`    | `realPath` from decision metadata     |
-| `edit_file` | `absolutePath` from decision metadata |
+| Tool                     | Pattern source                                                           |
+| ------------------------ | ------------------------------------------------------------------------ |
+| `bash`                   | `decision.metadata.approvalPattern` when present; otherwise full command |
+| `read_file` / `list_dir` | `realPath` from decision metadata                                        |
+| `search`                 | `realPath` from decision metadata                                        |
+| `edit_file`              | `absolutePath` from decision metadata                                    |
 
-Matching is exact: `(toolName, pattern)` must match. Similar but different commands or paths require separate approval.
+Matching is exact: `(toolName, pattern)` must match. Similar but different commands or paths require separate approval. For bash, command-policy v2 can return reusable command-family patterns such as `git diff *`, `git status *`, or `rg *`.
+
+## Sensitive requests
+
+Sensitive reads are ask, not hard-deny, but they cannot be remembered.
+
+- The CLI prompt is `Approve sensitive request? [Enter/y once, n abort]`.
+- `a` / `always` is disabled for sensitive requests.
+- If a lower layer still returns `allow_for_session` or `allow_for_workspace`, the session loop executes the tool once but skips all rule persistence.
+- Existing session, workspace, `external_directory`, or bash approval-pattern rules cannot auto-allow sensitive reads.
+
+Sensitive requests are identified through `decision.metadata.sensitive === true`. This covers direct file reads/searches and bash commands that the command policy can statically recognize as reading sensitive paths.
 
 ## Workspace isolation
 
@@ -49,5 +60,6 @@ Matching is exact: `(toolName, pattern)` must match. Similar but different comma
 ## Important constraints
 
 - Approval memory can only auto-convert "ask" → "allow". It cannot override "deny".
+- Approval memory cannot auto-allow sensitive requests.
 - `edit_file` always creates a checkpoint, even when auto-allowed by a session or workspace rule.
 - The `approval=never` mode still converts "ask" to "deny" before any memory check.

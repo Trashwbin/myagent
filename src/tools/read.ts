@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import type { ToolDefinition, ToolContext, ToolResult } from "./tool.js";
 import { resolvePathInfo } from "../workspace/path-info.js";
 import { isSensitiveReadPath } from "../permission/sensitive-paths.js";
@@ -19,11 +19,13 @@ export const readFileTool: ToolDefinition = {
   inputSchema,
 
   async execute(input: unknown, context: ToolContext): Promise<ToolResult> {
-    const { path, resolvedPath } = executionInputSchema.parse(input);
+    const { path, resolvedPath, realPath } = executionInputSchema.parse(input);
 
     let absPath: string;
+    let resolvedRealPath: string | undefined;
     if (resolvedPath && context.permissionResolved) {
       absPath = resolvedPath;
+      resolvedRealPath = realPath;
     } else {
       const pathInfo = resolvePathInfo(context.cwd, path);
       if (
@@ -38,10 +40,25 @@ export const readFileTool: ToolDefinition = {
         };
       }
       absPath = pathInfo.absolutePath;
+      resolvedRealPath = pathInfo.realPath;
     }
 
     try {
       const content = await readFile(absPath, "utf-8");
+      if (context.readState && resolvedRealPath) {
+        try {
+          const s = await stat(absPath);
+          context.readState.record({
+            path,
+            realPath: resolvedRealPath,
+            mtimeMs: s.mtimeMs,
+            readAt: Date.now(),
+            partial: false,
+          });
+        } catch {
+          // stat failed — skip read state recording
+        }
+      }
       return { ok: true, output: content };
     } catch (err: any) {
       return { ok: false, output: `Failed to read file: ${err.message}` };

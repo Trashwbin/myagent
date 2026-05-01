@@ -99,4 +99,4 @@ Example: 4 `read_file` calls across `src/permission`, `src/session`, and `src/to
 ## Not in this scope
 
 - Global "allow all external paths" is not implemented.
-- Sensitive file override within approved directories is not implemented.
+- Persistent sensitive-file overrides are not implemented. Sensitive reads can be approved once, but they never create session/workspace rules and are never covered by `external_directory`.

@@ -63,6 +63,8 @@ Relevant files:
 - `packages/opencode/src/tool/registry.ts`
 - `packages/opencode/src/tool/read.ts`
 - `packages/opencode/src/tool/edit.ts`
+- `packages/opencode/src/tool/write.ts`
+- `packages/opencode/src/tool/apply_patch.ts`
 - `packages/opencode/src/tool/bash.ts`
 - `packages/opencode/src/permission/*`
 - `packages/opencode/src/snapshot/*`
@@ -75,6 +77,8 @@ Borrow the ideas:
 - snapshots are first-class data, not an afterthought
 - persistence should model sessions and message parts separately
 - built-in tools should be enough before custom tools exist
+- file mutation uses multiple tools (`edit`, `write`, `apply_patch`) but one
+  edit permission family
 
 Do not borrow yet:
 
@@ -138,28 +142,43 @@ src/
     tool.ts
     registry.ts
     read.ts
+    list-dir.ts
     search.ts
     edit.ts
     bash.ts
   permission/
-    decision.ts
+    approval.ts
+    command-policy.ts
+    external-directory.ts
+    policy.ts
+    read-policy.ts
     rules.ts
+    sensitive-paths.ts
   workspace/
     diff.ts
     checkpoint.ts
-    patch.ts
+    path-info.ts
+    path.ts
+    project-root.ts
 ```
 
 ## V0 Implementation Order
 
-1. CLI accepts `--cwd`, `--provider`, `--model`, and a user prompt.
-2. OpenAI-compatible and Anthropic-compatible clients support streaming text and
-   tool calls.
-3. Tool registry exposes only `read_file`, `search`, `edit_file`, and `bash`.
-4. Permission engine returns `allow`, `ask`, or `deny`.
-5. Session loop persists every message and tool result to SQLite.
-6. Workspace layer captures a checkpoint before edits and can rewind.
-7. Final output prints summary plus `git diff --stat` and full diff path.
+Current completed baseline:
+
+1. CLI accepts `--cwd`, `--provider`, `--model`, `--chat`, `--resume`, `--sessions`, `--rewind`, and a user prompt.
+2. OpenAI-compatible and Anthropic-compatible clients support streaming text and tool calls.
+3. Tool registry exposes `read_file`, `list_dir`, `search`, `edit_file`, and `bash`.
+4. Permission engine returns `allow`, `ask`, or `deny`, with approval memory, external directory rules, bash approval patterns, and sensitive read handling.
+5. Session loop persists every message and tool result to SQLite through the global store.
+6. Workspace layer captures checkpoints before edits and can rewind by checkpoint id.
+7. CLI prints `git diff --stat` after completed chat or single-shot runs when the workspace is a git repository.
+
+Next implementation focus:
+
+1. Sync docs with implementation whenever permission/session behavior changes.
+2. Add file mutation tools v1: `write_file`, stronger `edit_file`, shared mutation metadata, and read-before-write mtime guard.
+3. Add compaction v0 after the write surface is stable.
 
 ## Provider Boundary
 

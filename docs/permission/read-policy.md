@@ -71,6 +71,10 @@ Similar to read_file but with additional semantics:
 Excluded patterns (rg `--glob '!'`):
 `.git`, `.ssh`, `.aws`, `.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa`, `id_ed25519`, `*secret*`, `*credential*`, `*token*`
 
+## file mutation policy
+
+`edit_file`, planned `write_file`, and planned `apply_patch` are different tool surfaces over the same write capability. They should share one permission family and one checkpoint path. See [../tools/file-mutation.md](../tools/file-mutation.md).
+
 ## edit_file policy
 
 Hard workspace restriction — outside-workspace edits are **deny**, not ask.
@@ -87,6 +91,8 @@ Returns `resolvedInput`:
 { path: string, resolvedPath: string, old_string: string, new_string: string }
 ```
 
+Planned `write_file` policy adds one more safety rule for existing files: the file must have been read in the current session, and its current mtime must not be newer than the recorded read time. This prevents blind or stale whole-file overwrites.
+
 ## bash policy
 
 Delegates to `analyzeCommand()` from command-policy. See [command-policy.md](command-policy.md).
@@ -96,6 +102,8 @@ Delegates to `analyzeCommand()` from command-policy. See [command-policy.md](com
 `isSensitiveReadPath(realPath)` in `src/permission/sensitive-paths.ts` matches path segments against patterns. The same module also owns the rg/grep exclusion patterns used by `search`.
 
 **Filenames:** `.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa`, `id_ed25519`, `.npmrc`, `.pypirc`, `.netrc`, `*secret*`, `*credential*`, `*token*`
+
+`.env.example`, `.env.sample`, `.env.template`, and compound example names such as `.env.local.example` are treated as non-sensitive template files.
 
 **Directories:** `.ssh`, `.aws`, `.git`
 

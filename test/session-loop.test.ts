@@ -3,9 +3,11 @@ import { FakeProvider } from "../src/model/fake.js";
 import { ToolRegistry } from "../src/tools/registry.js";
 import { readFileTool } from "../src/tools/read.js";
 import { editFileTool } from "../src/tools/edit.js";
+import { writeFileTool } from "../src/tools/write.js";
 import { bashTool } from "../src/tools/bash.js";
 import { listDirTool } from "../src/tools/list-dir.js";
 import { searchTool } from "../src/tools/search.js";
+import { ReadStateTracker } from "../src/tools/file-mutation.js";
 import { runSession, runTurn } from "../src/session/loop.js";
 import type { TurnEvent } from "../src/session/loop.js";
 import type { Provider } from "../src/model/provider.js";
@@ -51,9 +53,7 @@ describe("Session loop (runSession wrapper)", () => {
     expect(capturedOptions?.systemPrompt).toContain(
       "The workspace root is: /tmp/myagent-workspace",
     );
-    expect(capturedOptions?.systemPrompt).toContain(
-      "Modify existing files only with edit_file",
-    );
+    expect(capturedOptions?.systemPrompt).toContain("edit_file");
   });
 
   it("consumes text_delta events", async () => {
@@ -2335,6 +2335,493 @@ describe("Approval memory and abort", () => {
       "denied",
     );
     expect(sessionRules).toHaveLength(0);
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  // --- write_file integration ---
+
+  it("write_file creates checkpoint in session loop", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, "data.txt"), "original");
+
+    const readState = new ReadStateTracker();
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+    registry.register(writeFileTool);
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: "data.txt" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "write_file",
+          input: { path: "data.txt", content: "replaced" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(
+      provider,
+      registry,
+      makeSession(tmp),
+      "read then write",
+      {
+        approval: "auto",
+        approvalHandler: async () => "allow_once",
+        readState,
+      },
+    );
+
+    // read_file succeeded
+    const readResult = newMessages.find(
+      (m) => m.role === "tool_result" && m.toolName === "read_file",
+    );
+    expect(readResult?.content).toBe("original");
+
+    // write_file succeeded with checkpoint
+    const writeResult = newMessages.find(
+      (m) => m.role === "tool_result" && m.toolName === "write_file",
+    );
+    expect(writeResult?.content).toContain("Wrote data.txt");
+    expect(writeResult?.content).toContain("[checkpoint:");
+
+    // File was actually written
+    const content = await readFile(join(tmp, "data.txt"), "utf-8");
+    expect(content).toBe("replaced");
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("write_file checkpoint restores new file", async () => {
+    const tmp = await tmpDir();
+    const readState = new ReadStateTracker();
+    const registry = new ToolRegistry();
+    registry.register(writeFileTool);
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "write_file",
+          input: { path: "newfile.txt", content: "new content" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(
+      provider,
+      registry,
+      makeSession(tmp),
+      "create file",
+      {
+        approval: "auto",
+        approvalHandler: async () => "allow_once",
+        readState,
+      },
+    );
+
+    const result = newMessages.find(
+      (m) => m.role === "tool_result" && m.toolName === "write_file",
+    );
+    expect(result?.content).toContain("[checkpoint:");
+
+    // Restore checkpoint
+    const match = result!.content.match(/\[checkpoint: ([^\]]+)\]/);
+    expect(match).toBeTruthy();
+    const { restoreCheckpoint } = await import("../src/workspace/checkpoint.js");
+    await restoreCheckpoint(tmp, match![1]);
+
+    // New file should be deleted
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(join(tmp, "newfile.txt"))).toBe(false);
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("write_file checkpoint restores overwritten file", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, "data.txt"), "original");
+    const readState = new ReadStateTracker();
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+    registry.register(writeFileTool);
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: "data.txt" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "write_file",
+          input: { path: "data.txt", content: "overwritten" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(
+      provider,
+      registry,
+      makeSession(tmp),
+      "read then overwrite",
+      {
+        approval: "auto",
+        approvalHandler: async () => "allow_once",
+        readState,
+      },
+    );
+
+    const result = newMessages.find(
+      (m) => m.role === "tool_result" && m.toolName === "write_file",
+    );
+    expect(result?.content).toContain("[checkpoint:");
+
+    // Restore
+    const match = result!.content.match(/\[checkpoint: ([^\]]+)\]/);
+    const { restoreCheckpoint } = await import("../src/workspace/checkpoint.js");
+    await restoreCheckpoint(tmp, match![1]);
+
+    // Content should be original
+    expect(await readFile(join(tmp, "data.txt"), "utf-8")).toBe("original");
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("write_file is denied in never-approval mode", async () => {
+    const tmp = await tmpDir();
+    const registry = new ToolRegistry();
+    registry.register(writeFileTool);
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "write_file",
+          input: { path: "new.txt", content: "data" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(provider, registry, makeSession(tmp), "write", {
+      approval: "never",
+    });
+
+    const result = newMessages.find((m) => m.role === "tool_result");
+    expect(result?.content).toContain("denied");
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("auto-approved write_file still creates checkpoint", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, "f.txt"), "v1");
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+    registry.register(writeFileTool);
+
+    // First read/write: approve write for session
+    const provider1 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc0",
+          name: "read_file",
+          input: { path: "f.txt" },
+        },
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "write_file",
+          input: { path: "f.txt", content: "v2" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    const r1 = await runTurn(provider1, registry, makeSession(tmp), "write", {
+      approval: "auto",
+      approvalHandler: async () => "allow_for_session",
+      sessionApprovalRules: sessionRules,
+    });
+    const firstWrite = r1.newMessages.find(
+      (m) => m.role === "tool_result" && m.toolName === "write_file",
+    );
+    expect(firstWrite?.content).toContain("[checkpoint:");
+    expect(sessionRules.length).toBeGreaterThanOrEqual(1);
+
+    // Second read/write: write is auto-allowed, still checkpoint
+    const provider2 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc-read2",
+          name: "read_file",
+          input: { path: "f.txt" },
+        },
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "write_file",
+          input: { path: "f.txt", content: "v3" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    const r2 = await runTurn(provider2, registry, r1.session, "write again", {
+      approval: "auto",
+      sessionApprovalRules: sessionRules,
+    });
+    const secondWrite = r2.newMessages.find(
+      (m) => m.role === "tool_result" && m.toolName === "write_file",
+    );
+    expect(secondWrite?.content).toContain("[checkpoint:");
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("external_directory does not auto-allow write_file", async () => {
+    const ws = await tmpDir();
+    const ext = await tmpDir();
+    await writeFile(join(ext, "a.txt"), "aaa");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+    registry.register(writeFileTool);
+
+    let handlerCalled = 0;
+    const handler = async () => {
+      handlerCalled++;
+      return "allow_for_session" as const;
+    };
+
+    // Approve reading from external dir
+    const provider1 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: join(ext, "a.txt") },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    await runTurn(provider1, registry, makeSession(ws), "read", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+    expect(handlerCalled).toBe(1);
+
+    // write_file to external dir should still ask (and be denied by policy)
+    const provider2 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "write_file",
+          input: { path: join(ext, "b.txt"), content: "new" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    const r2 = await runTurn(provider2, registry, makeSession(ws), "write external", {
+      approval: "auto",
+      sessionApprovalRules: sessionRules,
+    });
+
+    // write_file outside workspace is denied by policy
+    const result = r2.newMessages.find(
+      (m) => m.role === "tool_result" && m.toolName === "write_file",
+    );
+    expect(result?.content).toContain("denied");
+
+    await rm(ws, { recursive: true, force: true });
+    await rm(ext, { recursive: true, force: true });
+  });
+
+  it("same turn: read_file then write_file succeeds", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, "data.txt"), "original content");
+    const readState = new ReadStateTracker();
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+    registry.register(writeFileTool);
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: "data.txt" },
+        },
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "write_file",
+          input: { path: "data.txt", content: "updated content" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(
+      provider,
+      registry,
+      makeSession(tmp),
+      "read and write",
+      {
+        approval: "auto",
+        approvalHandler: async () => "allow_once",
+        readState,
+      },
+    );
+
+    const results = newMessages.filter((m) => m.role === "tool_result");
+    expect(results[0].content).toBe("original content");
+    expect(results[1].content).toContain("Wrote data.txt");
+
+    const content = await readFile(join(tmp, "data.txt"), "utf-8");
+    expect(content).toBe("updated content");
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("write_file failure does not expose checkpoint id", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, "data.txt"), "original");
+    const registry = new ToolRegistry();
+    registry.register(writeFileTool);
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "write_file",
+          input: { path: "data.txt", content: "updated" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(
+      provider,
+      registry,
+      makeSession(tmp),
+      "write without reading",
+      {
+        approval: "auto",
+        approvalHandler: async () => "allow_once",
+        readState: new ReadStateTracker(),
+      },
+    );
+
+    const result = newMessages.find(
+      (m) => m.role === "tool_result" && m.toolName === "write_file",
+    );
+    expect(result?.content).toContain("must be read with read_file");
+    expect(result?.content).not.toContain("[checkpoint:");
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("write_file approval event includes diff metadata", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, "data.txt"), "old\n");
+    const registry = new ToolRegistry();
+    registry.register(writeFileTool);
+    const events: TurnEvent[] = [];
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "write_file",
+          input: { path: "data.txt", content: "new\n" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+    ]);
+
+    await runTurn(provider, registry, makeSession(tmp), "write", {
+      approval: "auto",
+      approvalHandler: async () => "abort",
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    const approvalEvent = events.find(
+      (e): e is Extract<TurnEvent, { type: "tool_approval_required" }> =>
+        e.type === "tool_approval_required",
+    );
+    expect(approvalEvent?.metadata?.diff).toContain("-old");
+    expect(approvalEvent?.metadata?.diff).toContain("+new");
+    expect(approvalEvent?.metadata?.additions).toBe(1);
+    expect(approvalEvent?.metadata?.deletions).toBe(1);
 
     await rm(tmp, { recursive: true, force: true });
   });

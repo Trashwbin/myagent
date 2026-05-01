@@ -19,9 +19,21 @@ Tables:
 
 `workspace_root` is a field on the session record. It tells myagent which directory to resolve file paths and run commands in. It is not the database location.
 
-A session's workspace root is set when the session is created (`--cwd`) and persisted in the sessions table. On resume, the stored workspace root is used, not the current terminal directory.
+A session's workspace root is set when the session is created (`--cwd`) and persisted in the sessions table. The CLI canonicalizes this path with `realpathSync.native(resolve(path))` before storing it. On resume, the stored workspace root is used, not the current terminal directory.
 
-Current implementation stores the resolved path string. It does not yet canonicalize symlinks with `realpath`. If the same workspace is reached through both a symlink path and its real target, resume validation may treat them as different directories. This should be fixed in the workspace/session boundary, not in the storage schema.
+The store persists the path it is given; canonicalization belongs to the workspace/session boundary. CLI-created sessions pass canonical workspace roots into `openStore()`. Direct test harnesses or future API callers should do the same if they construct sessions without the CLI.
+
+## Permission rules
+
+Workspace-scoped approvals are stored in the same SQLite database in `permission_rules`:
+
+- `workspace_root` — canonical workspace root that owns the rule
+- `tool_name` — tool or capability name, such as `bash`, `edit_file`, or `external_directory`
+- `pattern` — exact approval pattern used for matching
+- `action` — currently only `allow`
+- `created_at` — insertion timestamp
+
+Rules are scoped by `workspace_root`. A rule created in one workspace does not apply when another workspace is active, even if the tool name and pattern match.
 
 ## Checkpoints
 

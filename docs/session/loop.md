@@ -99,7 +99,9 @@ Approval is a runtime decision point. When `checkToolPermission()` returns "ask"
 
 When approved, the tool executes with `decision.resolvedInput` (not the original input) and `ToolContext.permissionResolved: true`. This ensures the tool uses the permission-resolved path without exposing that internal field as a normal model-controlled parameter.
 
-The CLI's approval handler prints the tool info and metadata from the event, then prompts `Approve? [Enter/y once, a always, n abort]`. Empty input or `y` grants `allow_once`. `a` triggers a secondary prompt for session/workspace scope. `n` aborts the turn.
+The CLI's approval handler prints the tool info and metadata from the event, then prompts `Approve? [Enter/y once, a always, n abort]`. Empty input or `y` grants `allow_once`. `a` triggers a secondary prompt: `Always allow? [s session, w workspace, n cancel]`. `s` grants `allow_for_session`, `w` grants `allow_for_workspace`, and `n` returns to the primary prompt.
+
+For sensitive requests (`metadata.sensitive === true`), the prompt is `Approve sensitive request? [Enter/y once, n abort]`. Session/workspace reuse is disabled. Even if a custom approval handler returns `allow_for_session` or `allow_for_workspace`, the loop treats the request as one-shot for persistence purposes and does not save any approval rule.
 
 ## Persistence
 
@@ -124,6 +126,8 @@ If no matching rule exists and an approval handler is provided, the handler retu
 - `abort` — block tool, terminate turn.
 
 The `sessionApprovalRules` array is passed by reference from the chat loop. Rules added by `allow_for_session` accumulate across turns within the same CLI session.
+
+Sensitive requests are excluded from approval memory. They can execute after an explicit approval, but no session rule or workspace rule is created, and existing broad rules cannot auto-allow them.
 
 ## Abort
 

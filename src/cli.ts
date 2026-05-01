@@ -11,8 +11,10 @@ import { ToolRegistry } from "./tools/registry.js";
 import { readFileTool } from "./tools/read.js";
 import { searchTool } from "./tools/search.js";
 import { editFileTool } from "./tools/edit.js";
+import { writeFileTool } from "./tools/write.js";
 import { bashTool } from "./tools/bash.js";
 import { listDirTool } from "./tools/list-dir.js";
+import { ReadStateTracker } from "./tools/file-mutation.js";
 import { runTurn, runSession } from "./session/loop.js";
 import type { ApprovalRequest, SessionState, TurnEvent } from "./session/loop.js";
 import type { ApprovalMode } from "./permission/rules.js";
@@ -122,6 +124,12 @@ function makeEventRenderer(): (event: TurnEvent) => void {
             if (meta.realPath) console.log(`  path: ${meta.realPath}`);
             if (meta.insideWorkspace === false) console.log(`  [outside workspace]`);
             if (meta.sensitive) console.log(`  [sensitive]`);
+            if (meta.additions !== undefined || meta.deletions !== undefined) {
+              console.log(`  changes: +${meta.additions ?? 0} -${meta.deletions ?? 0}`);
+            }
+            if (typeof meta.diff === "string" && meta.diff) {
+              console.log(meta.diff);
+            }
           }
           console.log(`  input: ${JSON.stringify(event.input)}`);
         }
@@ -213,6 +221,7 @@ function buildRegistry(): ToolRegistry {
   registry.register(readFileTool);
   registry.register(searchTool);
   registry.register(editFileTool);
+  registry.register(writeFileTool);
   registry.register(bashTool);
   registry.register(listDirTool);
   return registry;
@@ -230,6 +239,7 @@ async function chatMode(
     output: process.stdout,
   });
   const sessionApprovalRules: ApprovalRule[] = [];
+  const readState = new ReadStateTracker();
   const approvalHandler = makeApprovalHandler(rl);
   const onEvent = makeEventRenderer();
 
@@ -255,6 +265,7 @@ async function chatMode(
           onEvent,
           sessionApprovalRules,
           store,
+          readState,
         });
         Object.assign(session, updated);
         store.appendMessages(session.id, newMessages);
@@ -370,13 +381,22 @@ program
       });
       const approvalHandler = makeApprovalHandler(rl);
       const onEvent = makeEventRenderer();
+      const readState = new ReadStateTracker();
 
       try {
         const { transcript, aborted } = await runSession(
           provider,
           registry,
           [{ role: "user", content: prompt }],
-          { cwd, approval, approvalHandler, onEvent, sessionApprovalRules: [], store },
+          {
+            cwd,
+            approval,
+            approvalHandler,
+            onEvent,
+            sessionApprovalRules: [],
+            store,
+            readState,
+          },
         );
 
         store.appendMessages(session.id, transcript);

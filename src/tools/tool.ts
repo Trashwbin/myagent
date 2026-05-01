@@ -1,8 +1,10 @@
 import type { ZodType } from "zod";
+import type { ReadStateTracker } from "./file-mutation.js";
 
 export type ToolContext = {
   cwd: string;
   permissionResolved?: boolean;
+  readState?: ReadStateTracker;
 };
 
 export type ToolResult = {

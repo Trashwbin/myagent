@@ -3,6 +3,13 @@ import type { WorkspacePathInfo } from "../workspace/path-info.js";
 import { checkReadPolicy, isSensitiveReadPath } from "./read-policy.js";
 import { analyzeCommand } from "./command-policy.js";
 import { buildExternalDirectoryMeta } from "./external-directory.js";
+import { readFileSync } from "node:fs";
+import {
+  computeDiff,
+  normalizeToLf,
+  detectLineEnding,
+  applyLineEnding,
+} from "../tools/file-mutation.js";
 
 export type ApprovalMode = "auto" | "on-request" | "never";
 
@@ -48,6 +55,8 @@ export function checkToolPermission(
       return finalize(checkSearch(input, cwd));
     case "edit_file":
       return finalize(checkEditFile(input, mode, cwd));
+    case "write_file":
+      return finalize(checkWriteFile(input, mode, cwd));
     case "bash":
       return finalize(checkBash(input, cwd));
     default:
@@ -151,10 +160,16 @@ function checkEditFile(
   mode: ApprovalMode,
   cwd: string,
 ): ToolPermissionDecision {
-  const { path, old_string, new_string } = input as {
+  const {
+    path,
+    old_string,
+    new_string,
+    replace_all = false,
+  } = input as {
     path: string;
     old_string: string;
     new_string: string;
+    replace_all?: boolean;
   };
 
   if (mode === "never") {
@@ -174,6 +189,17 @@ function checkEditFile(
     };
   }
 
+  const metadata = pathMeta(pathInfo);
+  if (!isSensitiveReadPath(pathInfo.realPath)) {
+    Object.assign(
+      metadata,
+      buildEditDiffMeta(pathInfo.absolutePath, path, old_string, new_string, replace_all),
+    );
+  } else {
+    metadata.operation = "edit";
+    metadata.sensitive = true;
+  }
+
   return {
     behavior: "ask",
     reason: "file edits require approval",
@@ -182,9 +208,111 @@ function checkEditFile(
       resolvedPath: pathInfo.absolutePath,
       old_string,
       new_string,
+      replace_all,
     },
-    metadata: pathMeta(pathInfo),
+    metadata,
   };
+}
+
+function checkWriteFile(
+  input: unknown,
+  mode: ApprovalMode,
+  cwd: string,
+): ToolPermissionDecision {
+  const { path, content } = input as { path: string; content: string };
+
+  if (mode === "never") {
+    return { behavior: "deny", reason: "writes denied in never-approval mode" };
+  }
+
+  const pathInfo = resolvePathInfo(cwd, path);
+  if (!pathInfo) {
+    return { behavior: "deny", reason: "path cannot be resolved" };
+  }
+
+  if (!pathInfo.insideWorkspace) {
+    return {
+      behavior: "deny",
+      reason: "cannot write files outside workspace",
+      metadata: pathMeta(pathInfo),
+    };
+  }
+
+  const metadata = pathMeta(pathInfo);
+  if (!isSensitiveReadPath(pathInfo.realPath)) {
+    Object.assign(metadata, buildWriteDiffMeta(pathInfo.absolutePath, path, content));
+  } else {
+    metadata.operation = "write";
+    metadata.sensitive = true;
+  }
+
+  return {
+    behavior: "ask",
+    reason: "file writes require approval",
+    resolvedInput: {
+      path,
+      content,
+      resolvedPath: pathInfo.absolutePath,
+      realPath: pathInfo.realPath,
+    },
+    metadata,
+  };
+}
+
+function buildWriteDiffMeta(absPath: string, displayPath: string, content: string) {
+  let oldContent = "";
+  let exists = false;
+  try {
+    oldContent = readFileSync(absPath, "utf-8");
+    exists = true;
+  } catch {
+    // New file or unreadable file; permission still asks and tool reports execution errors.
+  }
+  const diff = computeDiff(oldContent, content, displayPath);
+  return {
+    operation: exists ? "write" : "create",
+    diff: diff.diff,
+    additions: diff.additions,
+    deletions: diff.deletions,
+  };
+}
+
+function buildEditDiffMeta(
+  absPath: string,
+  displayPath: string,
+  oldString: string,
+  newString: string,
+  replaceAll: boolean,
+) {
+  try {
+    const content = readFileSync(absPath, "utf-8");
+    const lineEnding = detectLineEnding(content);
+    const normalizedContent = normalizeToLf(content);
+    const normalizedOld = normalizeToLf(oldString);
+    const normalizedNew = normalizeToLf(newString);
+
+    if (!normalizedOld || oldString === newString) {
+      return { operation: "edit" };
+    }
+    const count = normalizedContent.split(normalizedOld).length - 1;
+    if (count === 0 || (!replaceAll && count > 1)) {
+      return { operation: "edit", matchCount: count };
+    }
+    const updatedLf = replaceAll
+      ? normalizedContent.split(normalizedOld).join(normalizedNew)
+      : normalizedContent.replace(normalizedOld, normalizedNew);
+    const updated = applyLineEnding(updatedLf, lineEnding);
+    const diff = computeDiff(content, updated, displayPath);
+    return {
+      operation: "edit",
+      matchCount: count,
+      diff: diff.diff,
+      additions: diff.additions,
+      deletions: diff.deletions,
+    };
+  } catch {
+    return { operation: "edit" };
+  }
 }
 
 function checkBash(input: unknown, cwd: string): ToolPermissionDecision {

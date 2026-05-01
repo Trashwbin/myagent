@@ -36,13 +36,12 @@ The workspace root is captured at session creation and stored in the global data
 
 ## Known path boundary
 
-The current comparison uses resolved absolute paths, not filesystem canonical paths. A symlink path and its real target can refer to the same directory while still comparing as different strings.
+Workspace roots are canonicalized with `realpathSync.native(resolve(path))` when a new session starts and when an explicit `--cwd` is validated during resume. This means a symlink path and its real target should compare as the same workspace in the CLI path.
 
 Future work:
 
-- canonicalize workspace roots with realpath at session creation
-- canonicalize explicit `--cwd` before resume validation
-- add regression tests for symlinked workspace paths
+- keep any non-CLI session construction paths aligned with the same canonicalization rule
+- add regression tests for symlinked workspace paths in resume/listing flows
 
 ## Session listing
 
