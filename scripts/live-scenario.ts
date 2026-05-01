@@ -1,6 +1,7 @@
 #!/usr/bin/env npx tsx
 import "dotenv/config";
 import { parseArgs } from "node:util";
+import { loadSettings, resolveSetting } from "../src/config/settings.js";
 
 import { listScenarios, getScenario } from "../src/testing/scenarios/index.js";
 import { runScenario, formatResult } from "../src/testing/scenario-runner.js";
@@ -20,11 +21,12 @@ Options:
   --all                  Run all scenarios
 
 Environment variables:
-  MYAGENT_PROVIDER    Default provider
-  MYAGENT_MODEL       Default model
-  MYAGENT_BASE_URL    API base URL
-  MYAGENT_API_KEY     API key (required for live runs)
-  MYAGENT_AUTH_TOKEN  Auth token (anthropic)
+  MYAGENT_PROVIDER         Default provider
+  MYAGENT_MODEL            Default model
+  MYAGENT_BASE_URL         API base URL
+  MYAGENT_API_KEY          API key (required for live runs)
+  MYAGENT_AUTH_TOKEN       Auth token (anthropic)
+  MYAGENT_MAX_OUTPUT_TOKENS  Max output tokens per turn
 `);
   process.exit(0);
 }
@@ -53,9 +55,14 @@ if (values.list) {
 }
 
 function resolveConfig(): LiveScenarioConfig {
-  const provider = (values.provider ?? process.env.MYAGENT_PROVIDER ?? "openai") as
-    | "openai"
-    | "anthropic";
+  const settings = loadSettings({ workspaceRoot: process.cwd() });
+
+  const provider = resolveSetting(
+    values.provider as "openai" | "anthropic" | undefined,
+    process.env.MYAGENT_PROVIDER as "openai" | "anthropic" | undefined,
+    settings.provider,
+    "openai",
+  );
 
   const apiKey = process.env.MYAGENT_API_KEY;
   const authToken = process.env.MYAGENT_AUTH_TOKEN;
@@ -68,17 +75,45 @@ function resolveConfig(): LiveScenarioConfig {
     process.exit(1);
   }
 
-  const model =
-    values.model ?? process.env.MYAGENT_MODEL ?? (provider === "openai" ? "gpt-4o" : "claude-sonnet-4-5");
+  const model = resolveSetting(
+    values.model || undefined,
+    process.env.MYAGENT_MODEL || undefined,
+    settings.model,
+    provider === "openai" ? "gpt-4o" : "claude-sonnet-4-5",
+  );
+
+  const baseUrl = resolveSetting<string | undefined>(
+    values["base-url"] || undefined,
+    process.env.MYAGENT_BASE_URL || undefined,
+    settings.baseUrl,
+    undefined,
+  );
+
+  const maxTurns = resolveSetting<number | undefined>(
+    values["max-turns"] ? parseInt(values["max-turns"], 10) : undefined,
+    process.env.MYAGENT_MAX_TURNS ? parseInt(process.env.MYAGENT_MAX_TURNS, 10) : undefined,
+    settings.maxTurns,
+    undefined,
+  );
+
+  const maxOutputTokens = resolveSetting<number | undefined>(
+    undefined,
+    process.env.MYAGENT_MAX_OUTPUT_TOKENS
+      ? parseInt(process.env.MYAGENT_MAX_OUTPUT_TOKENS, 10)
+      : undefined,
+    settings.maxOutputTokens,
+    undefined,
+  );
 
   return {
     provider,
     model,
-    baseUrl: values["base-url"] ?? process.env.MYAGENT_BASE_URL,
+    baseUrl,
     apiKey,
     authToken,
     cwd: process.cwd(),
-    maxTurns: values["max-turns"] ? parseInt(values["max-turns"], 10) : undefined,
+    maxTurns,
+    maxOutputTokens,
     autoApprove: true,
     outputDir: values["output-dir"] ?? undefined,
   };

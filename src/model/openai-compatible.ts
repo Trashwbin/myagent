@@ -86,7 +86,7 @@ export class OpenAICompatibleProvider implements Provider {
       messages: options?.systemPrompt
         ? [{ role: "system", content: options.systemPrompt }, ...openaiMessages]
         : openaiMessages,
-      max_tokens: 4096,
+      max_tokens: this.config.maxOutputTokens ?? 4096,
       stream: true,
     };
     if (openaiTools) {

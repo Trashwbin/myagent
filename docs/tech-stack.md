@@ -48,6 +48,46 @@ MYAGENT_BASE_URL=...
 MYAGENT_API_KEY=...
 ```
 
+These can also be set via `settings.json` (see below). CLI flags and env vars
+always take precedence over file config. API keys must stay in env vars.
+
+Settings files (optional, layered):
+
+```text
+~/.myagent/settings.json              global
+<workspace>/.myagent/settings.json    project
+<workspace>/.myagent/settings.local.json  local (gitignored)
+```
+
+Priority: CLI flags > env vars > settings.local.json > project settings > global settings > defaults.
+
+Most fields (`provider`, `model`, `maxTurns`, `approval`) follow this full
+priority chain.
+
+Current exceptions:
+
+- `baseUrl` in the main CLI has no dedicated flag yet, so it resolves as
+  `MYAGENT_BASE_URL` env var > settings > built-in default.
+- `maxOutputTokens` also has no CLI flag; it resolves as
+  `MYAGENT_MAX_OUTPUT_TOKENS` env var > settings > provider default
+  (4096 for OpenAI, 8192 for Anthropic).
+
+Supported fields:
+
+```json
+{
+  "provider": "openai" | "anthropic",
+  "model": "...",
+  "baseUrl": "...",
+  "maxOutputTokens": 4096,
+  "maxTurns": 10,
+  "approval": "auto" | "on-request"
+}
+```
+
+`maxOutputTokens` controls per-turn output length. When unset, providers use
+their built-in defaults (4096 for OpenAI, 8192 for Anthropic).
+
 Internal stream boundary:
 
 ```ts

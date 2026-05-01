@@ -25,4 +25,5 @@ export type ProviderConfig = {
   baseUrl?: string;
   apiKey?: string;
   authToken?: string;
+  maxOutputTokens?: number;
 };

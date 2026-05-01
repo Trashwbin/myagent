@@ -28,6 +28,8 @@ import type { TranscriptStore } from "./storage/store.js";
 import { resolvePrimaryAnswer, resolveSecondaryAnswer } from "./cli/approval.js";
 import { formatToolInputSummary } from "./cli/format-tool-input.js";
 import type { ApprovalResponse, ApprovalRule } from "./permission/approval.js";
+import { loadSettings, resolveSetting, resolveApprovalMode } from "./config/settings.js";
+import type { Settings } from "./config/settings.js";
 
 function canonicalWorkspaceRoot(path: string): string {
   return realpathSync.native(resolve(path));
@@ -187,7 +189,12 @@ function printSessionList(
   }
 }
 
-function createProvider(options: Record<string, string>, prompt: string): Provider {
+function createProvider(
+  options: Record<string, string>,
+  prompt: string,
+  settings: Settings,
+  maxOutputTokens?: number,
+): Provider {
   if (options.provider === "fake") {
     return prompt
       ? new FakeProvider([
@@ -198,7 +205,29 @@ function createProvider(options: Record<string, string>, prompt: string): Provid
         ])
       : new FakeProvider([]);
   }
-  if (options.provider === "openai") {
+
+  const provider = resolveSetting(
+    options.provider || undefined,
+    process.env.MYAGENT_PROVIDER as "openai" | "anthropic" | undefined,
+    settings.provider,
+    "openai",
+  );
+
+  const model = resolveSetting(
+    options.model || undefined,
+    process.env.MYAGENT_MODEL || undefined,
+    settings.model,
+    provider === "openai" ? "gpt-4o" : "claude-sonnet-4-5",
+  );
+
+  const baseUrl = resolveSetting<string | undefined>(
+    undefined,
+    process.env.MYAGENT_BASE_URL || undefined,
+    settings.baseUrl,
+    undefined,
+  );
+
+  if (provider === "openai") {
     const apiKey = process.env.MYAGENT_API_KEY;
     if (!apiKey) {
       console.error("MYAGENT_API_KEY is required for openai provider");
@@ -206,12 +235,14 @@ function createProvider(options: Record<string, string>, prompt: string): Provid
     }
     return new OpenAICompatibleProvider({
       provider: "openai",
-      model: options.model || process.env.MYAGENT_MODEL || "gpt-4o",
-      baseUrl: process.env.MYAGENT_BASE_URL,
+      model,
+      baseUrl,
       apiKey,
+      maxOutputTokens,
     });
   }
-  if (options.provider === "anthropic") {
+
+  if (provider === "anthropic") {
     const apiKey = process.env.MYAGENT_API_KEY;
     const authToken = process.env.MYAGENT_AUTH_TOKEN;
     if (!apiKey && !authToken) {
@@ -222,14 +253,16 @@ function createProvider(options: Record<string, string>, prompt: string): Provid
     }
     return new AnthropicCompatibleProvider({
       provider: "anthropic",
-      model: options.model || process.env.MYAGENT_MODEL || "claude-sonnet-4-5",
-      baseUrl: process.env.MYAGENT_BASE_URL,
+      model,
+      baseUrl,
       apiKey,
       authToken,
+      maxOutputTokens,
     });
   }
+
   console.error(
-    `Provider "${options.provider}" not supported. Use fake, openai, or anthropic.`,
+    `Provider "${provider}" not supported. Use fake, openai, or anthropic.`,
   );
   process.exit(1);
 }
@@ -252,6 +285,7 @@ async function chatMode(
   session: SessionState,
   approval: ApprovalMode,
   store: TranscriptStore,
+  maxTurns?: number,
 ) {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -280,6 +314,7 @@ async function chatMode(
           aborted,
         } = await runTurn(provider, registry, session, input, {
           approval,
+          maxTurns,
           approvalHandler,
           onEvent,
           sessionApprovalRules,
@@ -317,9 +352,10 @@ program
   .name("myagent")
   .description("A small coding-agent runtime")
   .option("--cwd <path>", "working directory", process.cwd())
-  .option("--provider <provider>", "model provider (fake|openai|anthropic)", "fake")
+  .option("--provider <provider>", "model provider (fake|openai|anthropic)")
   .option("--model <model>", "model name")
-  .option("--approval <mode>", "approval mode (auto|on-request|never)", "auto")
+  .option("--approval <mode>", "approval mode (auto|on-request)", "auto")
+  .option("--max-turns <n>", "max agent turns")
   .option("--rewind <checkpointId>", "restore checkpoint and exit")
   .option("--chat", "interactive chat mode")
   .option("--resume <sessionId>", "resume a previous session")
@@ -327,7 +363,25 @@ program
   .argument("[prompt]", "task prompt")
   .action(async (prompt: string | undefined, options: Record<string, string>) => {
     let cwd = canonicalWorkspaceRoot(options.cwd);
-    const approval = options.approval as ApprovalMode;
+    let settings = loadSettings({ workspaceRoot: cwd });
+
+    const resolveMaxTurns = () =>
+      resolveSetting<number | undefined>(
+        options.maxTurns ? parseInt(options.maxTurns, 10) : undefined,
+        process.env.MYAGENT_MAX_TURNS ? parseInt(process.env.MYAGENT_MAX_TURNS, 10) : undefined,
+        settings.maxTurns,
+        undefined,
+      );
+
+    const resolveMaxOutputTokens = () =>
+      resolveSetting<number | undefined>(
+        undefined,
+        process.env.MYAGENT_MAX_OUTPUT_TOKENS
+          ? parseInt(process.env.MYAGENT_MAX_OUTPUT_TOKENS, 10)
+          : undefined,
+        settings.maxOutputTokens,
+        undefined,
+      );
     const explicitCwd = process.argv.includes("--cwd");
 
     // Rewind mode
@@ -360,9 +414,10 @@ program
           process.exit(1);
         }
         cwd = session.cwd;
-        const provider = createProvider(options, "");
+        settings = loadSettings({ workspaceRoot: cwd });
+        const provider = createProvider(options, "", settings, resolveMaxOutputTokens());
         const registry = buildRegistry();
-        await chatMode(provider, registry, session, approval, store);
+        await chatMode(provider, registry, session, resolveApprovalMode(process.argv, options.approval, process.env.MYAGENT_APPROVAL, settings), store, resolveMaxTurns());
         return;
       }
 
@@ -373,9 +428,9 @@ program
           provider: options.provider,
           model: options.model,
         });
-        const provider = createProvider(options, "");
+        const provider = createProvider(options, "", settings, resolveMaxOutputTokens());
         const registry = buildRegistry();
-        await chatMode(provider, registry, session, approval, store);
+        await chatMode(provider, registry, session, resolveApprovalMode(process.argv, options.approval, process.env.MYAGENT_APPROVAL, settings), store, resolveMaxTurns());
         return;
       }
 
@@ -392,7 +447,7 @@ program
         provider: options.provider,
         model: options.model,
       });
-      const provider = createProvider(options, prompt);
+      const provider = createProvider(options, prompt, settings, resolveMaxOutputTokens());
       const registry = buildRegistry();
       const rl = readline.createInterface({
         input: process.stdin,
@@ -409,7 +464,8 @@ program
           [{ role: "user", content: prompt }],
           {
             cwd,
-            approval,
+            approval: resolveApprovalMode(process.argv, options.approval, process.env.MYAGENT_APPROVAL, settings),
+            maxTurns: resolveMaxTurns(),
             approvalHandler,
             onEvent,
             sessionApprovalRules: [],

@@ -112,6 +112,7 @@ export type LiveScenarioConfig = {
   authToken?: string;
   cwd: string;
   maxTurns?: number;
+  maxOutputTokens?: number;
   /** Auto-approve all non-sensitive tool requests */
   autoApprove?: boolean;
   /** Transcript output directory */

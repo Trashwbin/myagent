@@ -44,6 +44,7 @@ function createProviderFromConfig(config: LiveScenarioConfig): Provider {
     model: config.model,
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
+    maxOutputTokens: config.maxOutputTokens,
   };
 
   if (config.provider === "openai") {

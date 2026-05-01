@@ -35,10 +35,12 @@ Set via CLI flags or environment variables:
 | `--provider` | `MYAGENT_PROVIDER` | `openai` or `anthropic` (default: openai) |
 | `--model` | `MYAGENT_MODEL` | Model name |
 | `--base-url` | `MYAGENT_BASE_URL` | API base URL |
+| `--max-turns` | `MYAGENT_MAX_TURNS` | Max agent turns per scenario |
+| `--output-dir` | — | Transcript output directory (default: `.live-scenarios/`) |
 | — | `MYAGENT_API_KEY` | API key (required) |
 | — | `MYAGENT_AUTH_TOKEN` | Auth token (anthropic) |
-| `--output-dir` | — | Transcript output directory (default: `.live-scenarios/`) |
-| `--max-turns` | — | Max agent turns per scenario |
+
+`provider`, `model`, `baseUrl`, `maxTurns`, and `maxOutputTokens` are also resolved from `settings.json` (see docs/tech-stack.md). Most fields follow CLI flags > env vars > settings > defaults; `maxOutputTokens` has no CLI flag and resolves as env var > settings > provider default. API keys must be in env vars.
 
 If no API key is provided, the harness exits with a clear error message instead of hanging.
 

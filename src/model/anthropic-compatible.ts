@@ -99,7 +99,7 @@ export class AnthropicCompatibleProvider implements Provider {
     const params: Anthropic.MessageCreateParamsStreaming = {
       model: this.config.model,
       messages: anthropicMessages,
-      max_tokens: 8192,
+      max_tokens: this.config.maxOutputTokens ?? 8192,
       stream: true,
     };
     if (options?.systemPrompt) {
