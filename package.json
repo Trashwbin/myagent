@@ -6,7 +6,8 @@
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
     "format": "prettier --write .",
-    "check": "prettier --check ."
+    "check": "prettier --check .",
+    "live:scenario": "tsx scripts/live-scenario.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
