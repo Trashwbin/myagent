@@ -13,7 +13,11 @@ const execFileAsync = promisify(execFile);
 
 const inputSchema = z.object({
   pattern: z.string().describe("Search pattern"),
-  path: z.string().optional().default(".").describe("Directory to search in"),
+  path: z
+    .string()
+    .optional()
+    .default(".")
+    .describe("Directory to search in, absolute or relative to workspace root"),
 });
 
 const executionInputSchema = inputSchema.extend({

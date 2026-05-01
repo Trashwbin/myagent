@@ -37,7 +37,7 @@ type ToolPermissionDecision = {
 };
 ```
 
-## read_file policy
+## read_file / list_dir policy
 
 Uses `resolvePathInfo` via `checkReadPolicy`. Returns `resolvedInput`:
 
@@ -51,6 +51,8 @@ Uses `resolvePathInfo` via `checkReadPolicy`. Returns `resolvedInput`:
 | Sensitive file (anywhere)       | ask      | sensitive file read requires approval |
 | Inside workspace, not sensitive | allow    | workspace read is safe                |
 | Outside workspace               | ask      | file is outside workspace             |
+
+For outside-workspace non-sensitive paths, the decision metadata includes `externalDirectoryPattern` (e.g., `/ext/project/*`). See [external-directory.md](external-directory.md).
 
 ### Tool guard
 

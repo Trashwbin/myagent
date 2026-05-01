@@ -1,6 +1,8 @@
 import { resolve, relative, dirname, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { realpathSync, existsSync } from "node:fs";
+import { findProjectRoot } from "../workspace/project-root.js";
+import { isSensitiveReadPath } from "./sensitive-paths.js";
 
 // --- Types ---
 
@@ -18,6 +20,12 @@ export type CommandPolicyResult = {
   reason: string;
   commands?: string[];
   paths?: PathInfo[];
+  sensitive?: boolean;
+  effectiveCwd?: string;
+  externalDirectoryPattern?: string;
+  externalDirectoryRoot?: string;
+  externalDirectoryReason?: "project_root" | "parent_directory";
+  approvalPattern?: string;
 };
 
 export type CommandUnit = {
@@ -80,22 +88,18 @@ const GIT_WRITE_SUBCOMMANDS = new Set([
   "add",
   "commit",
   "checkout",
+  "switch",
   "reset",
   "push",
+  "pull",
   "merge",
+  "rebase",
+  "stash",
+  "clean",
+  "tag",
 ]);
 
-const GIT_READ_SUBCOMMANDS = new Set([
-  "status",
-  "diff",
-  "log",
-  "branch",
-  "remote",
-  "tag",
-  "show",
-  "stash",
-  "describe",
-]);
+const GIT_READ_SUBCOMMANDS = new Set(["status", "diff", "log", "show", "rev-parse"]);
 
 const FIND_FLAGS = new Set(["-L", "-P", "-H", "-O"]);
 
@@ -313,6 +317,17 @@ function isInsideWorkspace(resolvedPath: string, cwd: string): boolean {
   }
 }
 
+function canonicalPath(inputPath: string): string {
+  if (existsSync(inputPath)) return realpathSync(inputPath);
+  let nearest = inputPath;
+  while (!existsSync(nearest)) {
+    const parent = dirname(nearest);
+    if (parent === nearest) return inputPath;
+    nearest = parent;
+  }
+  return resolve(realpathSync(nearest), relative(nearest, inputPath));
+}
+
 // --- Path extraction ---
 
 function extractPaths(unit: CommandUnit, cwd: string): PathInfo[] {
@@ -510,7 +525,26 @@ function classifyUnit(unit: CommandUnit): {
 
   // Git
   if (cmd === "git") {
-    const sub = unit.args[0];
+    let argIdx = 0;
+    if (unit.args[argIdx] === "-C") argIdx += 2;
+    const sub = unit.args[argIdx];
+    if (sub === "branch") {
+      const branchArgs = unit.args.slice(argIdx + 1);
+      if (branchArgs.length === 1 && branchArgs[0] === "--show-current") {
+        return {
+          effect: "read",
+          decision: "allow",
+          reason: "read-only git command",
+          isReadOnly: true,
+        };
+      }
+      return {
+        effect: "write",
+        decision: "ask",
+        reason: "git branch may modify refs",
+        isReadOnly: false,
+      };
+    }
     if (GIT_READ_SUBCOMMANDS.has(sub)) {
       if (/\s--output(=|\s)/.test(unit.raw)) {
         return {
@@ -646,6 +680,68 @@ function classifyUnit(unit: CommandUnit): {
   };
 }
 
+// --- cd <dir> && <cmd> parsing ---
+
+function tryParseCdAndChain(
+  command: string,
+  cwd: string,
+): { effectiveCwd: string; secondCommand: string } | null {
+  const unquoted = command.replace(/'[^']*'/g, "").replace(/"[^"]*"/g, "");
+  if (/\|\|/.test(unquoted) || /;/.test(unquoted)) return null;
+
+  const andCount = (unquoted.match(/&&/g) || []).length;
+  if (andCount !== 1) return null;
+
+  const segments = splitOnChains(command);
+  if (segments.length !== 2) return null;
+
+  const first = segments[0].trim();
+  const second = segments[1].trim();
+
+  const cdTokens = tokenize(first);
+  if (cdTokens.length !== 2 || cdTokens[0] !== "cd") return null;
+
+  const targetDir = canonicalPath(expandPath(stripQuotes(cdTokens[1]), cwd));
+  return { effectiveCwd: targetDir, secondCommand: second };
+}
+
+// --- Approval pattern generation ---
+
+function buildBashApprovalPattern(units: CommandUnit[]): string | undefined {
+  if (units.length !== 1) return undefined;
+
+  const unit = units[0];
+  const cmd = unit.command;
+
+  if (cmd === "git") {
+    let i = 0;
+    if (unit.args[i] === "-C") i += 2;
+    const sub = unit.args[i];
+    if (sub) return `git ${sub} *`;
+    return undefined;
+  }
+
+  if (cmd === "rg" || cmd === "grep") {
+    return `${cmd} *`;
+  }
+
+  if (cmd === "npm" || cmd === "pnpm" || cmd === "yarn") {
+    const subArgs: string[] = [];
+    for (const a of unit.args) {
+      if (a.startsWith("-")) continue;
+      subArgs.push(a);
+      if (subArgs.length >= 2) break;
+    }
+    if (subArgs.length > 0) return `${cmd} ${subArgs.join(" ")} *`;
+  }
+
+  return undefined;
+}
+
+function hasSensitivePath(paths: PathInfo[]): boolean {
+  return paths.some((p) => isSensitiveReadPath(p.resolved));
+}
+
 // --- Main analysis ---
 
 export function analyzeCommand(
@@ -654,6 +750,7 @@ export function analyzeCommand(
 ): CommandPolicyResult {
   const normalized = command.trim();
   const cwd = options.cwd;
+  let effectiveCwd: string | undefined;
 
   // Layer 1: Dangerous patterns → deny
   for (const { pattern, reason } of DANGEROUS_PATTERNS) {
@@ -680,21 +777,28 @@ export function analyzeCommand(
     };
   }
 
-  // Layer 3.5: Chain operators → ask
+  // Layer 3.5: Smart chain handling — cd <dir> && <readonly-cmd>
+  let analysisCommand = normalized;
   if (hasChainOperator(normalized)) {
-    return {
-      effect: "write",
-      decision: "ask",
-      reason: "command chain requires approval",
-    };
+    const cdChain = tryParseCdAndChain(normalized, cwd);
+    if (cdChain) {
+      effectiveCwd = cdChain.effectiveCwd;
+      analysisCommand = cdChain.secondCommand;
+    } else {
+      return {
+        effect: "write",
+        decision: "ask",
+        reason: "command chain requires approval",
+      };
+    }
   }
 
   // Layer 4: Parse into units
-  const units = parseCommandUnits(normalized);
+  const units = parseCommandUnits(analysisCommand);
   const commands = units.map((u) => u.command);
 
   // Layer 5: Pipeline interpreter targets
-  if (hasPipeline(normalized)) {
+  if (hasPipeline(analysisCommand)) {
     for (const unit of units) {
       if (SHELL_PIPELINE_TARGETS.has(unit.command)) {
         return {
@@ -738,21 +842,43 @@ export function analyzeCommand(
   const allPaths: PathInfo[] = [];
   for (const unit of units) {
     const cls = classifyUnit(unit);
-    let paths = extractPaths(unit, cwd);
+    const pathCwd = effectiveCwd ?? cwd;
+    let paths = extractPaths(unit, pathCwd);
     if (unit.command === "curl" || unit.command === "wget") {
-      paths = paths.concat(extractNetworkOutputPaths(unit, cwd));
+      paths = paths.concat(extractNetworkOutputPaths(unit, pathCwd));
     }
     allPaths.push(...paths);
 
     if (cls.isReadOnly) {
+      const sensitivePath = paths.find((p) => isSensitiveReadPath(p.resolved));
+      if (sensitivePath) {
+        return {
+          effect: "read",
+          decision: "ask",
+          reason: sensitivePath.insideWorkspace
+            ? "sensitive path read requires approval"
+            : "sensitive path read outside workspace requires approval",
+          commands,
+          paths: allPaths,
+          sensitive: true,
+          effectiveCwd,
+          approvalPattern: buildBashApprovalPattern(units),
+        };
+      }
       for (const p of paths) {
         if (!p.insideWorkspace) {
+          const projectRoot = findProjectRoot(p.resolved, false);
           return {
             effect: "read",
             decision: "ask",
             reason: `command references path outside workspace: ${p.raw}`,
             commands,
             paths: allPaths,
+            effectiveCwd,
+            externalDirectoryPattern: projectRoot.root + "/*",
+            externalDirectoryRoot: projectRoot.root,
+            externalDirectoryReason: projectRoot.reason,
+            approvalPattern: buildBashApprovalPattern(units),
           };
         }
       }
@@ -797,6 +923,29 @@ export function analyzeCommand(
         paths: allPaths.length > 0 ? allPaths : undefined,
       };
     }
+
+    // Extract git -C effectiveCwd
+    if (unit.command === "git" && unit.args[0] === "-C" && unit.args[1]) {
+      if (!effectiveCwd)
+        effectiveCwd = canonicalPath(expandPath(stripQuotes(unit.args[1]), cwd));
+    }
+  }
+
+  // Post-loop: external effectiveCwd check for readonly commands
+  if (effectiveCwd && !isInsideWorkspace(effectiveCwd, cwd)) {
+    const effectiveCwdReal = canonicalPath(effectiveCwd);
+    const projectRoot = findProjectRoot(effectiveCwdReal, true);
+    return {
+      effect: "read",
+      decision: "ask",
+      reason: "readonly command references external project",
+      commands,
+      effectiveCwd: effectiveCwdReal,
+      externalDirectoryPattern: projectRoot.root + "/*",
+      externalDirectoryRoot: projectRoot.root,
+      externalDirectoryReason: projectRoot.reason,
+      approvalPattern: buildBashApprovalPattern(units),
+    };
   }
 
   return {
@@ -805,5 +954,6 @@ export function analyzeCommand(
     reason: units.length > 1 ? "read-only pipeline" : "read-only command",
     commands,
     paths: allPaths.length > 0 ? allPaths : undefined,
+    approvalPattern: buildBashApprovalPattern(units),
   };
 }

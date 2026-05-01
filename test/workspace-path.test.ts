@@ -87,7 +87,7 @@ describe("read_file outside workspace", () => {
 
     const { newMessages } = await runTurn(provider, registry, makeSession(root), "read", {
       approval: "auto",
-      approvalHandler: async () => "allow",
+      approvalHandler: async () => "allow_once",
     });
 
     const toolResult = newMessages.find((m) => m.role === "tool_result");
@@ -125,7 +125,7 @@ describe("read_file outside workspace", () => {
 
     const { newMessages } = await runTurn(provider, registry, makeSession(root), "read", {
       approval: "auto",
-      approvalHandler: async () => "deny",
+      approvalHandler: async () => "abort",
     });
 
     const toolResult = newMessages.find((m) => m.role === "tool_result");
@@ -205,7 +205,7 @@ describe("read_file outside workspace", () => {
       "read env",
       {
         approval: "auto",
-        approvalHandler: async () => "allow",
+        approvalHandler: async () => "allow_once",
       },
     );
 

@@ -13,6 +13,8 @@ const SENSITIVE_FILE_PATTERNS: RegExp[] = [
   /token/i,
 ];
 
+const ENV_EXAMPLE_SUFFIXES = [".example", ".sample", ".template"];
+
 const SENSITIVE_SEARCH_FILE_GLOBS = [
   ".env",
   ".env.*",
@@ -27,10 +29,20 @@ const SENSITIVE_SEARCH_FILE_GLOBS = [
 
 const SENSITIVE_DIRS = [".ssh", ".aws", ".git"];
 
+function isEnvExampleFile(segment: string): boolean {
+  if (!segment.startsWith(".env")) return false;
+  for (const suffix of ENV_EXAMPLE_SUFFIXES) {
+    if (segment === `.env${suffix}`) return true;
+    if (segment.startsWith(".env.") && segment.endsWith(suffix)) return true;
+  }
+  return false;
+}
+
 export function isSensitiveReadPath(realPath: string): boolean {
   const segments = realPath.split("/").filter(Boolean);
   for (const seg of segments) {
     if (SENSITIVE_DIRS.includes(seg)) return true;
+    if (isEnvExampleFile(seg)) continue;
     for (const pat of SENSITIVE_FILE_PATTERNS) {
       if (pat.test(seg)) return true;
     }

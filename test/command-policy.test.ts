@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { analyzeCommand, parseCommandUnits } from "../src/permission/command-policy.js";
-import { mkdtemp, symlink, rm, mkdir } from "node:fs/promises";
+import { mkdtemp, symlink, rm, mkdir, writeFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -563,5 +563,279 @@ describe("command policy: curl/wget output path", () => {
     const r = analyze("curl https://example.com");
     expect(r.decision).toBe("ask");
     expect(r.effect).toBe("network");
+  });
+});
+
+// --- Command-policy v2: effective cwd and external directory ---
+
+describe("command policy v2: cd <dir> && <cmd>", () => {
+  let tmpDir: string;
+  let extDir: string;
+
+  afterEach(async () => {
+    if (extDir) await rm(extDir, { recursive: true, force: true });
+    if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("cd <dir> && git diff → read/ask external project", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "myagent-v2-"));
+    extDir = await mkdtemp(join(tmpdir(), "myagent-ext-"));
+    await mkdir(join(extDir, "src"), { recursive: true });
+    await writeFile(join(extDir, "package.json"), "{}");
+
+    const r = analyze(`cd ${extDir} && git diff`, tmpDir);
+    expect(r.decision).toBe("ask");
+    expect(r.effect).toBe("read");
+    expect(r.reason).toContain("external project");
+    expect(r.effectiveCwd).toBe(await realpath(extDir));
+    expect(r.approvalPattern).toBe("git diff *");
+    expect(r.externalDirectoryPattern).toBeTruthy();
+  });
+
+  it("cd <dir> && git status --short → ask with git status pattern", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "myagent-v2-"));
+    extDir = await mkdtemp(join(tmpdir(), "myagent-ext-"));
+
+    const r = analyze(`cd ${extDir} && git status --short`, tmpDir);
+    expect(r.decision).toBe("ask");
+    expect(r.approvalPattern).toBe("git status *");
+  });
+
+  it("cd <dir> && git add . → ask/write, not read", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "myagent-v2-"));
+    extDir = await mkdtemp(join(tmpdir(), "myagent-ext-"));
+
+    const r = analyze(`cd ${extDir} && git add .`, tmpDir);
+    expect(r.decision).toBe("ask");
+    expect(r.effect).toBe("write");
+    expect(r.reason).toContain("git add");
+  });
+
+  it("cd <dir> && git diff inside workspace → allow", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "myagent-v2-"));
+
+    const r = analyze(`cd ${tmpDir} && git diff`, tmpDir);
+    expect(r.decision).toBe("allow");
+    expect(r.effect).toBe("read");
+  });
+
+  it("complex chain cd && cmd && cmd → ask", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "myagent-v2-"));
+    extDir = await mkdtemp(join(tmpdir(), "myagent-ext-"));
+
+    const r = analyze(`cd ${extDir} && git diff && cat .env`, tmpDir);
+    expect(r.decision).toBe("ask");
+    expect(r.reason).toContain("command chain");
+  });
+
+  it("cd <dir>; git diff → ask (semicolon not allowed)", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "myagent-v2-"));
+    extDir = await mkdtemp(join(tmpdir(), "myagent-ext-"));
+
+    const r = analyze(`cd ${extDir}; git diff`, tmpDir);
+    expect(r.decision).toBe("ask");
+    expect(r.reason).toContain("command chain");
+  });
+
+  it("cd <dir> || git diff → ask (or not allowed)", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "myagent-v2-"));
+    extDir = await mkdtemp(join(tmpdir(), "myagent-ext-"));
+
+    const r = analyze(`cd ${extDir} || git diff`, tmpDir);
+    expect(r.decision).toBe("ask");
+    expect(r.reason).toContain("command chain");
+  });
+
+  it("cd <dir> && git diff > out.patch → ask (redirect)", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "myagent-v2-"));
+    extDir = await mkdtemp(join(tmpdir(), "myagent-ext-"));
+
+    const r = analyze(`cd ${extDir} && git diff > out.patch`, tmpDir);
+    expect(r.decision).toBe("ask");
+    expect(r.reason).toContain("redirect");
+  });
+
+  it("cd <dir> && rg TODO src → read/ask external", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "myagent-v2-"));
+    extDir = await mkdtemp(join(tmpdir(), "myagent-ext-"));
+    await mkdir(join(extDir, "src"), { recursive: true });
+    await writeFile(join(extDir, "package.json"), "{}");
+
+    const r = analyze(`cd ${extDir} && rg TODO src`, tmpDir);
+    expect(r.decision).toBe("ask");
+    expect(r.effect).toBe("read");
+    expect(r.approvalPattern).toBe("rg *");
+  });
+
+  it("cd <dir> && cat .env marks the bash decision sensitive", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "myagent-v2-"));
+    extDir = await mkdtemp(join(tmpdir(), "myagent-ext-"));
+    await writeFile(join(extDir, ".env"), "SECRET=x");
+
+    const r = analyze(`cd ${extDir} && cat .env`, tmpDir);
+    expect(r.decision).toBe("ask");
+    expect(r.reason).toContain("sensitive");
+    expect(r.sensitive).toBe(true);
+    expect(r.externalDirectoryPattern).toBeUndefined();
+  });
+});
+
+describe("command policy v2: git -C <dir>", () => {
+  let tmpDir: string;
+  let extDir: string;
+
+  afterEach(async () => {
+    if (extDir) await rm(extDir, { recursive: true, force: true });
+    if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("git -C <dir> status → ask external project", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "myagent-v2-"));
+    extDir = await mkdtemp(join(tmpdir(), "myagent-ext-"));
+    await mkdir(join(extDir, "src"), { recursive: true });
+    await writeFile(join(extDir, "package.json"), "{}");
+
+    const r = analyze(`git -C ${extDir} status --short`, tmpDir);
+    expect(r.decision).toBe("ask");
+    expect(r.effect).toBe("read");
+    expect(r.reason).toContain("external project");
+    expect(r.effectiveCwd).toBe(await realpath(extDir));
+    expect(r.approvalPattern).toBe("git status *");
+    expect(r.externalDirectoryPattern).toBeTruthy();
+  });
+
+  it("git -C <dir> diff → ask with git diff pattern", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "myagent-v2-"));
+    extDir = await mkdtemp(join(tmpdir(), "myagent-ext-"));
+
+    const r = analyze(`git -C ${extDir} diff -- src/a.ts`, tmpDir);
+    expect(r.decision).toBe("ask");
+    expect(r.approvalPattern).toBe("git diff *");
+  });
+
+  it("git -C <dir> add . → ask/write", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "myagent-v2-"));
+    extDir = await mkdtemp(join(tmpdir(), "myagent-ext-"));
+
+    const r = analyze(`git -C ${extDir} add .`, tmpDir);
+    expect(r.decision).toBe("ask");
+    expect(r.effect).toBe("write");
+    expect(r.reason).toContain("git add");
+  });
+
+  it("git -C <dir> diff inside workspace → allow", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "myagent-v2-"));
+
+    const r = analyze(`git -C ${tmpDir} diff`, tmpDir);
+    expect(r.decision).toBe("allow");
+  });
+});
+
+describe("command policy v2: updated git subcommands", () => {
+  it("git stash → ask/write", () => {
+    const r = analyze("git stash");
+    expect(r.decision).toBe("ask");
+    expect(r.effect).toBe("write");
+  });
+
+  it("git tag v1.0 → ask/write", () => {
+    const r = analyze("git tag v1.0");
+    expect(r.decision).toBe("ask");
+    expect(r.effect).toBe("write");
+  });
+
+  it("git switch main → ask/write", () => {
+    const r = analyze("git switch main");
+    expect(r.decision).toBe("ask");
+    expect(r.effect).toBe("write");
+  });
+
+  it("git pull → ask/write", () => {
+    const r = analyze("git pull");
+    expect(r.decision).toBe("ask");
+    expect(r.effect).toBe("write");
+  });
+
+  it("git rebase main → ask/write", () => {
+    const r = analyze("git rebase main");
+    expect(r.decision).toBe("ask");
+    expect(r.effect).toBe("write");
+  });
+
+  it("git clean -fd → ask/write", () => {
+    const r = analyze("git clean -fd");
+    expect(r.decision).toBe("ask");
+    expect(r.effect).toBe("write");
+  });
+
+  it("git rev-parse HEAD → allow/read", () => {
+    const r = analyze("git rev-parse HEAD");
+    expect(r.decision).toBe("allow");
+    expect(r.effect).toBe("read");
+  });
+});
+
+describe("command policy v2: approval pattern", () => {
+  it("git diff generates git diff *", () => {
+    const r = analyze("git diff");
+    expect(r.approvalPattern).toBe("git diff *");
+  });
+
+  it("git status --short generates git status *", () => {
+    const r = analyze("git status --short");
+    expect(r.approvalPattern).toBe("git status *");
+  });
+
+  it("rg TODO src generates rg *", () => {
+    const r = analyze("rg TODO src");
+    expect(r.approvalPattern).toBe("rg *");
+  });
+
+  it("npm test generates npm test *", () => {
+    const r = analyze("npm test");
+    expect(r.approvalPattern).toBe("npm test *");
+  });
+
+  it("pnpm run test generates pnpm run test *", () => {
+    const r = analyze("pnpm run test");
+    expect(r.approvalPattern).toBe("pnpm run test *");
+  });
+
+  it("pipelines do not generate approval pattern", () => {
+    const r = analyze("cat file | grep pattern");
+    expect(r.approvalPattern).toBeUndefined();
+  });
+});
+
+describe("command policy: sensitive file read commands → ask", () => {
+  const sensitiveCmdCases = [
+    "cat .env",
+    "head .env",
+    "tail .env",
+    "grep SECRET .env",
+    "rg SECRET .env",
+    "sed -n '1,5p' .env",
+    "wc .env",
+    "file .env",
+    "stat .env",
+  ];
+
+  for (const cmd of sensitiveCmdCases) {
+    it(`asks for sensitive read: ${cmd}`, () => {
+      const r = analyze(cmd);
+      expect(r.decision).toBe("ask");
+      expect(r.sensitive).toBe(true);
+      expect(r.reason).toContain("sensitive");
+    });
+  }
+
+  it("allows cat .env.example (not sensitive)", () => {
+    const r = analyze("cat .env.example");
+    expect(r.decision).toBe("allow");
+  });
+
+  it("allows head .env.sample (not sensitive)", () => {
+    const r = analyze("head .env.sample");
+    expect(r.decision).toBe("allow");
   });
 });

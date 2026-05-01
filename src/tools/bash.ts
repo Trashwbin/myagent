@@ -5,9 +5,34 @@ import type { ToolDefinition, ToolContext, ToolResult } from "./tool.js";
 
 const execAsync = promisify(exec);
 
+const MAX_BYTES = 20_000;
+const MAX_LINES = 500;
+
 const inputSchema = z.object({
   command: z.string().describe("Shell command to execute"),
 });
+
+export function truncateOutput(output: string): string {
+  let lines = output.split("\n");
+  let truncated = false;
+
+  if (lines.length > MAX_LINES) {
+    lines = lines.slice(0, MAX_LINES);
+    truncated = true;
+  }
+
+  let result = lines.join("\n");
+  if (result.length > MAX_BYTES) {
+    result = result.slice(0, MAX_BYTES);
+    truncated = true;
+  }
+
+  if (truncated) {
+    result += `\n\n[output truncated: showing first ${MAX_BYTES} bytes / ${MAX_LINES} lines]\nUse a narrower command, file path, --stat, head/tail, or search for a specific pattern.`;
+  }
+
+  return result;
+}
 
 export const bashTool: ToolDefinition = {
   name: "bash",
@@ -21,15 +46,11 @@ export const bashTool: ToolDefinition = {
         cwd: context.cwd,
         timeout: 30_000,
       });
-      return {
-        ok: true,
-        output: stdout || stderr || `Command completed with no output: ${command}`,
-      };
+      const raw = stdout || stderr || `Command completed with no output: ${command}`;
+      return { ok: true, output: truncateOutput(raw) };
     } catch (err: any) {
-      return {
-        ok: false,
-        output: err.stdout || err.stderr || err.message,
-      };
+      const raw = err.stdout || err.stderr || err.message;
+      return { ok: false, output: truncateOutput(raw) };
     }
   },
 };

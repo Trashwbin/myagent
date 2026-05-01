@@ -26,6 +26,19 @@ export type TranscriptStore = {
   appendMessages(sessionId: string, messages: Message[]): void;
   listSessions(): SessionRow[];
   updateSessionTimestamp(sessionId: string): void;
+  addPermissionRule(input: {
+    workspaceRoot: string;
+    toolName: string;
+    pattern: string;
+  }): string;
+  listPermissionRules(
+    workspaceRoot: string,
+  ): Array<{ id: string; toolName: string; pattern: string; createdAt: number }>;
+  findMatchingRule(
+    workspaceRoot: string,
+    toolName: string,
+    pattern: string,
+  ): { toolName: string; pattern: string } | undefined;
   close(): void;
 };
 
@@ -93,6 +106,19 @@ export function openStore(options?: StoreOptions): TranscriptStore {
 
   db.exec(
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_session_seq ON messages(session_id, seq)`,
+  );
+
+  db.exec(`CREATE TABLE IF NOT EXISTS permission_rules (
+    id TEXT PRIMARY KEY,
+    workspace_root TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    pattern TEXT NOT NULL,
+    action TEXT NOT NULL DEFAULT 'allow',
+    created_at INTEGER NOT NULL
+  )`);
+
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_permission_rules_lookup ON permission_rules(workspace_root, tool_name, pattern)`,
   );
 
   function updateSessionTimestamp(sessionId: string) {
@@ -187,6 +213,55 @@ export function openStore(options?: StoreOptions): TranscriptStore {
     },
 
     updateSessionTimestamp,
+
+    addPermissionRule(input: {
+      workspaceRoot: string;
+      toolName: string;
+      pattern: string;
+    }): string {
+      const id = randomUUID();
+      const createdAt = now();
+      const existing = db
+        .prepare(
+          "SELECT id FROM permission_rules WHERE workspace_root = ? AND tool_name = ? AND pattern = ? AND action = 'allow' LIMIT 1",
+        )
+        .get(input.workspaceRoot, input.toolName, input.pattern) as
+        | { id: string }
+        | undefined;
+      if (existing) return existing.id;
+
+      db.prepare(
+        "INSERT INTO permission_rules (id, workspace_root, tool_name, pattern, action, created_at) VALUES (?, ?, ?, ?, 'allow', ?)",
+      ).run(id, input.workspaceRoot, input.toolName, input.pattern, createdAt);
+      return id;
+    },
+
+    listPermissionRules(workspaceRoot: string) {
+      const rows = db
+        .prepare(
+          "SELECT * FROM permission_rules WHERE workspace_root = ? ORDER BY created_at DESC",
+        )
+        .all(workspaceRoot) as Record<string, unknown>[];
+      return rows.map((r) => ({
+        id: r.id as string,
+        toolName: r.tool_name as string,
+        pattern: r.pattern as string,
+        createdAt: r.created_at as number,
+      }));
+    },
+
+    findMatchingRule(workspaceRoot: string, toolName: string, pattern: string) {
+      const row = db
+        .prepare(
+          "SELECT * FROM permission_rules WHERE workspace_root = ? AND tool_name = ? AND pattern = ? AND action = 'allow' LIMIT 1",
+        )
+        .get(workspaceRoot, toolName, pattern) as Record<string, unknown> | undefined;
+      if (!row) return undefined;
+      return {
+        toolName: row.tool_name as string,
+        pattern: row.pattern as string,
+      };
+    },
 
     close() {
       db.close();

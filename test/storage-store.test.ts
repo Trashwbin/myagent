@@ -376,3 +376,119 @@ describe("multi-turn integration with runTurn", () => {
     await cleanup();
   });
 });
+
+describe("permission_rules", () => {
+  it("addPermissionRule inserts and listPermissionRules returns rules", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    store.addPermissionRule({
+      workspaceRoot: "/tmp/ws",
+      toolName: "bash",
+      pattern: "npm test",
+    });
+    const rules = store.listPermissionRules("/tmp/ws");
+    expect(rules).toHaveLength(1);
+    expect(rules[0].toolName).toBe("bash");
+    expect(rules[0].pattern).toBe("npm test");
+    expect(rules[0].id).toBeTruthy();
+    expect(rules[0].createdAt).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("findMatchingRule finds a matching rule", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    store.addPermissionRule({
+      workspaceRoot: "/tmp/ws",
+      toolName: "bash",
+      pattern: "npm test",
+    });
+    const match = store.findMatchingRule("/tmp/ws", "bash", "npm test");
+    expect(match).toBeDefined();
+    expect(match!.toolName).toBe("bash");
+    expect(match!.pattern).toBe("npm test");
+    await cleanup();
+  });
+
+  it("addPermissionRule reuses an existing matching rule", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const first = store.addPermissionRule({
+      workspaceRoot: "/tmp/ws",
+      toolName: "bash",
+      pattern: "npm test",
+    });
+    const second = store.addPermissionRule({
+      workspaceRoot: "/tmp/ws",
+      toolName: "bash",
+      pattern: "npm test",
+    });
+
+    expect(second).toBe(first);
+    expect(store.listPermissionRules("/tmp/ws")).toHaveLength(1);
+    await cleanup();
+  });
+
+  it("findMatchingRule returns undefined for different workspace", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    store.addPermissionRule({
+      workspaceRoot: "/tmp/ws-a",
+      toolName: "bash",
+      pattern: "npm test",
+    });
+    const match = store.findMatchingRule("/tmp/ws-b", "bash", "npm test");
+    expect(match).toBeUndefined();
+    await cleanup();
+  });
+
+  it("findMatchingRule returns undefined for different toolName", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    store.addPermissionRule({
+      workspaceRoot: "/tmp/ws",
+      toolName: "bash",
+      pattern: "npm test",
+    });
+    const match = store.findMatchingRule("/tmp/ws", "read_file", "npm test");
+    expect(match).toBeUndefined();
+    await cleanup();
+  });
+
+  it("findMatchingRule returns undefined for different pattern", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    store.addPermissionRule({
+      workspaceRoot: "/tmp/ws",
+      toolName: "bash",
+      pattern: "npm test",
+    });
+    const match = store.findMatchingRule("/tmp/ws", "bash", "npm run test");
+    expect(match).toBeUndefined();
+    await cleanup();
+  });
+
+  it("listPermissionRules only returns rules for the given workspace", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    store.addPermissionRule({
+      workspaceRoot: "/tmp/ws-a",
+      toolName: "bash",
+      pattern: "ls",
+    });
+    store.addPermissionRule({
+      workspaceRoot: "/tmp/ws-b",
+      toolName: "bash",
+      pattern: "ls",
+    });
+    store.addPermissionRule({
+      workspaceRoot: "/tmp/ws-a",
+      toolName: "bash",
+      pattern: "pwd",
+    });
+    const rules = store.listPermissionRules("/tmp/ws-a");
+    expect(rules).toHaveLength(2);
+    expect(rules.every((r) => r.id)).toBe(true);
+    await cleanup();
+  });
+});

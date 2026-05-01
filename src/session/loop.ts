@@ -3,6 +3,17 @@ import type { ToolSchema } from "../model/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { checkToolPermission } from "../permission/policy.js";
 import type { ApprovalMode } from "../permission/policy.js";
+import {
+  buildApprovalPattern,
+  matchesApprovalRule,
+  createSessionRule,
+} from "../permission/approval.js";
+import type {
+  ApprovalResponse,
+  ApprovalRule,
+  PermissionStore,
+} from "../permission/approval.js";
+import { isExternalDirectoryCapable } from "../permission/external-directory.js";
 import type { Message } from "./message.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { createCheckpoint } from "../workspace/checkpoint.js";
@@ -12,6 +23,8 @@ export type ApprovalRequest = {
   toolName: string;
   input: unknown;
   reason: string;
+  suggestedPattern?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type SessionState = {
@@ -24,25 +37,31 @@ export type SessionState = {
 export type TurnResult = {
   session: SessionState;
   newMessages: Message[];
+  aborted?: boolean;
 };
 
 export type SessionOptions = {
   cwd: string;
   approval: ApprovalMode;
   maxTurns?: number;
-  approvalHandler?: (request: ApprovalRequest) => Promise<"allow" | "deny">;
+  approvalHandler?: (request: ApprovalRequest) => Promise<ApprovalResponse>;
   onEvent?: (event: TurnEvent) => void | Promise<void>;
+  sessionApprovalRules?: ApprovalRule[];
+  store?: PermissionStore;
 };
 
 export type TurnOptions = {
   approval: ApprovalMode;
   maxTurns?: number;
-  approvalHandler?: (request: ApprovalRequest) => Promise<"allow" | "deny">;
+  approvalHandler?: (request: ApprovalRequest) => Promise<ApprovalResponse>;
   onEvent?: (event: TurnEvent) => void | Promise<void>;
+  sessionApprovalRules?: ApprovalRule[];
+  store?: PermissionStore;
 };
 
 export type SessionResult = {
   transcript: Message[];
+  aborted?: boolean;
 };
 
 export type TurnEvent =
@@ -97,11 +116,13 @@ async function runAgentLoop(
   newMessages: Message[],
   cwd: string,
   options: TurnOptions,
-) {
+): Promise<{ aborted: boolean }> {
   const maxTurns = options.maxTurns ?? 10;
   const toolSchemas = buildToolSchemas(registry);
   const systemPrompt = buildSystemPrompt(cwd);
   const onEvent = options.onEvent;
+  const sessionRules = options.sessionApprovalRules ?? [];
+  const store = options.store;
 
   for (let turn = 0; turn < maxTurns; turn++) {
     let assistantText = "";
@@ -153,7 +174,61 @@ async function runAgentLoop(
       } else if (decision.behavior === "deny") {
         blockReason = decision.reason;
       } else {
-        if (!options.approvalHandler) {
+        // "ask" — check approval memory before prompting user
+        const pattern = buildApprovalPattern(tc.name, tc.input, decision);
+        const extDirPattern = decision.metadata?.externalDirectoryPattern as
+          | string
+          | undefined;
+
+        const sessionMatch = sessionRules.find((r) =>
+          matchesApprovalRule(tc.name, tc.input, decision, r),
+        );
+
+        let workspaceMatch: { toolName: string; pattern: string } | undefined;
+        if (!sessionMatch && store) {
+          if (pattern) {
+            workspaceMatch = store.findMatchingRule(cwd, tc.name, pattern);
+          }
+          if (!workspaceMatch && isExternalDirectoryCapable(tc.name, decision.metadata)) {
+            const extRules = store
+              .listPermissionRules(cwd)
+              .filter((r) => r.toolName === "external_directory");
+            workspaceMatch = extRules.find((r) =>
+              matchesApprovalRule(tc.name, tc.input, decision, r),
+            );
+          }
+        }
+
+        // Determine if auto-allowed by existing rules
+        let autoAllowed = false;
+
+        if (tc.name === "bash" && extDirPattern) {
+          // Two-layer check: both external_directory (path) and bash approvalPattern (command) must be covered.
+          const pathCovered =
+            !!sessionRules.find(
+              (r) =>
+                matchesApprovalRule(tc.name, tc.input, decision, r) &&
+                r.toolName === "external_directory",
+            ) ||
+            (store
+              ? store
+                  .listPermissionRules(cwd)
+                  .filter((r) => r.toolName === "external_directory")
+                  .some((r) => matchesApprovalRule(tc.name, tc.input, decision, r))
+              : false);
+          const cmdCovered =
+            !!sessionRules.find((r) => r.toolName === "bash" && r.pattern === pattern) ||
+            (store && pattern ? !!store.findMatchingRule(cwd, "bash", pattern) : false);
+          autoAllowed = pathCovered && cmdCovered;
+        } else {
+          autoAllowed = !!(sessionMatch || workspaceMatch);
+        }
+
+        if (decision.metadata?.sensitive) autoAllowed = false;
+
+        if (autoAllowed) {
+          shouldExecute = true;
+        } else if (!options.approvalHandler) {
           const msg: Message = {
             role: "tool_result",
             toolCallId: tc.id,
@@ -164,36 +239,97 @@ async function runAgentLoop(
           newMessages.push(msg);
           if (onEvent) await onEvent({ type: "tool_result", message: msg });
           continue;
-        }
+        } else {
+          if (onEvent)
+            await onEvent({
+              type: "tool_approval_required",
+              id: tc.id,
+              name: tc.name,
+              input: tc.input,
+              reason: decision.reason,
+              metadata: decision.metadata,
+            });
 
-        if (onEvent)
-          await onEvent({
-            type: "tool_approval_required",
-            id: tc.id,
-            name: tc.name,
+          const response = await options.approvalHandler({
+            toolName: tc.name,
             input: tc.input,
             reason: decision.reason,
+            suggestedPattern: extDirPattern ?? pattern,
             metadata: decision.metadata,
           });
 
-        const verdict = await options.approvalHandler({
-          toolName: tc.name,
-          input: tc.input,
-          reason: decision.reason,
-        });
+          const eventDecision = response === "abort" ? "deny" : "allow";
+          if (onEvent)
+            await onEvent({
+              type: "tool_approval_decision",
+              id: tc.id,
+              name: tc.name,
+              decision: eventDecision,
+            });
 
-        if (onEvent)
-          await onEvent({
-            type: "tool_approval_decision",
-            id: tc.id,
-            name: tc.name,
-            decision: verdict,
-          });
+          if (response === "abort") {
+            const msg = blockedMsg(tc, decision.reason);
+            messages.push(msg);
+            newMessages.push(msg);
+            if (onEvent) await onEvent({ type: "tool_result", message: msg });
+            if (onEvent) await onEvent({ type: "turn_finished" });
+            return { aborted: true };
+          }
 
-        if (verdict === "allow") {
           shouldExecute = true;
-        } else {
-          blockReason = decision.reason;
+          const approvalPat = decision.metadata?.approvalPattern as string | undefined;
+          if (!decision.metadata?.sensitive) {
+            // Save external_directory rule for path coverage
+            if (extDirPattern) {
+              if (response === "allow_for_session") {
+                sessionRules.push(
+                  createSessionRule(
+                    "external_directory",
+                    extDirPattern,
+                    cwd,
+                    decision.reason,
+                  ),
+                );
+              }
+              if (response === "allow_for_workspace" && store) {
+                store.addPermissionRule({
+                  workspaceRoot: cwd,
+                  toolName: "external_directory",
+                  pattern: extDirPattern,
+                });
+              }
+            }
+            // Save bash approvalPattern rule for command coverage
+            if (tc.name === "bash" && approvalPat) {
+              if (response === "allow_for_session") {
+                sessionRules.push(
+                  createSessionRule("bash", approvalPat, cwd, decision.reason),
+                );
+              }
+              if (response === "allow_for_workspace" && store) {
+                store.addPermissionRule({
+                  workspaceRoot: cwd,
+                  toolName: "bash",
+                  pattern: approvalPat,
+                });
+              }
+            }
+            // Save non-bash tool rules (read_file, list_dir, search, edit_file)
+            if (tc.name !== "bash" && !extDirPattern && pattern) {
+              if (response === "allow_for_session") {
+                sessionRules.push(
+                  createSessionRule(tc.name, pattern, cwd, decision.reason),
+                );
+              }
+              if (response === "allow_for_workspace" && store) {
+                store.addPermissionRule({
+                  workspaceRoot: cwd,
+                  toolName: tc.name,
+                  pattern,
+                });
+              }
+            }
+          }
         }
       }
 
@@ -272,6 +408,7 @@ async function runAgentLoop(
   }
 
   if (onEvent) await onEvent({ type: "turn_finished" });
+  return { aborted: false };
 }
 
 export async function runTurn(
@@ -285,11 +422,19 @@ export async function runTurn(
   const messages = [...session.messages, userMsg];
   const newMessages: Message[] = [userMsg];
 
-  await runAgentLoop(provider, registry, messages, newMessages, session.cwd, options);
+  const { aborted } = await runAgentLoop(
+    provider,
+    registry,
+    messages,
+    newMessages,
+    session.cwd,
+    options,
+  );
 
   return {
     session: { ...session, messages },
     newMessages,
+    aborted: aborted || undefined,
   };
 }
 
@@ -302,7 +447,14 @@ export async function runSession(
   const messages = [...initialMessages];
   const transcript = [...initialMessages];
 
-  await runAgentLoop(provider, registry, messages, transcript, options.cwd, options);
+  const { aborted } = await runAgentLoop(
+    provider,
+    registry,
+    messages,
+    transcript,
+    options.cwd,
+    options,
+  );
 
-  return { transcript };
+  return { transcript, aborted: aborted || undefined };
 }

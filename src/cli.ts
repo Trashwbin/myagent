@@ -2,6 +2,7 @@
 import "dotenv/config";
 import { Command } from "commander";
 import { resolve } from "node:path";
+import { realpathSync } from "node:fs";
 import * as readline from "node:readline";
 import { FakeProvider } from "./model/fake.js";
 import { OpenAICompatibleProvider } from "./model/openai-compatible.js";
@@ -11,6 +12,7 @@ import { readFileTool } from "./tools/read.js";
 import { searchTool } from "./tools/search.js";
 import { editFileTool } from "./tools/edit.js";
 import { bashTool } from "./tools/bash.js";
+import { listDirTool } from "./tools/list-dir.js";
 import { runTurn, runSession } from "./session/loop.js";
 import type { ApprovalRequest, SessionState, TurnEvent } from "./session/loop.js";
 import type { ApprovalMode } from "./permission/rules.js";
@@ -20,16 +22,48 @@ import { getGitDiffStat } from "./workspace/diff.js";
 import { ProviderRuntimeError, formatProviderError } from "./model/errors.js";
 import { openStore } from "./storage/store.js";
 import type { TranscriptStore } from "./storage/store.js";
-import { resolveApprovalAnswer } from "./cli/approval.js";
+import { resolvePrimaryAnswer, resolveSecondaryAnswer } from "./cli/approval.js";
+import type { ApprovalResponse, ApprovalRule } from "./permission/approval.js";
+
+function canonicalWorkspaceRoot(path: string): string {
+  return realpathSync.native(resolve(path));
+}
 
 function makeApprovalHandler(
   rl: readline.Interface,
-): (request: ApprovalRequest) => Promise<"allow" | "deny"> {
-  return async (_request: ApprovalRequest): Promise<"allow" | "deny"> => {
+): (request: ApprovalRequest) => Promise<ApprovalResponse> {
+  return async (request: ApprovalRequest): Promise<ApprovalResponse> => {
     return new Promise((resolve) => {
-      rl.question("Approve? [Y/n] ", (answer) => {
-        resolve(resolveApprovalAnswer(answer));
-      });
+      const allowAlways = request.metadata?.sensitive !== true;
+      const primaryPrompt = allowAlways
+        ? "Approve? [Enter/y once, a always, n abort] "
+        : "Approve sensitive request? [Enter/y once, n abort] ";
+
+      const askPrimary = () => {
+        rl.question(primaryPrompt, (answer) => {
+          const primary = resolvePrimaryAnswer(answer, { allowAlways });
+          if (primary === "allow_once") {
+            resolve("allow_once");
+          } else if (primary === "always" && allowAlways) {
+            askSecondary();
+          } else {
+            resolve("abort");
+          }
+        });
+      };
+
+      const askSecondary = () => {
+        rl.question("Always allow? [s session, w workspace, n cancel] ", (answer) => {
+          const secondary = resolveSecondaryAnswer(answer);
+          if (secondary === "cancel") {
+            askPrimary();
+          } else {
+            resolve(secondary);
+          }
+        });
+      };
+
+      askPrimary();
     });
   };
 }
@@ -60,16 +94,39 @@ function makeEventRenderer(): (event: TurnEvent) => void {
           streamedText = false;
         }
         break;
-      case "tool_approval_required":
-        console.log(`\n[approval] ${event.name}: ${event.reason}`);
-        if (event.metadata) {
-          const meta = event.metadata;
-          if (meta.realPath) console.log(`  path: ${meta.realPath}`);
-          if (meta.insideWorkspace === false) console.log(`  [outside workspace]`);
-          if (meta.sensitive) console.log(`  [sensitive]`);
+      case "tool_approval_required": {
+        const meta = event.metadata;
+        if (event.name === "bash" && meta?.externalDirectoryPattern) {
+          console.log(`\n[approval] bash: ${event.reason}`);
+          if (meta.externalDirectoryRoot)
+            console.log(`  project: ${meta.externalDirectoryRoot}`);
+          console.log(`  grants: ${meta.externalDirectoryPattern}`);
+          if (meta.approvalPattern)
+            console.log(`  command pattern: ${meta.approvalPattern}`);
+          if (!meta.sensitive) {
+            console.log(
+              `  Tip: press "a" to reuse this approval for this session/workspace.`,
+            );
+          }
+        } else if (meta?.externalDirectoryPattern) {
+          console.log(`\n[approval] external_directory: ${event.reason}`);
+          if (meta.externalDirectoryRoot)
+            console.log(`  project: ${meta.externalDirectoryRoot}`);
+          console.log(`  grants: ${meta.externalDirectoryPattern}`);
+        } else if (event.name === "bash" && meta?.approvalPattern) {
+          console.log(`\n[approval] bash: ${event.reason}`);
+          console.log(`  command pattern: ${meta.approvalPattern}`);
+        } else {
+          console.log(`\n[approval] ${event.name}: ${event.reason}`);
+          if (meta) {
+            if (meta.realPath) console.log(`  path: ${meta.realPath}`);
+            if (meta.insideWorkspace === false) console.log(`  [outside workspace]`);
+            if (meta.sensitive) console.log(`  [sensitive]`);
+          }
+          console.log(`  input: ${JSON.stringify(event.input)}`);
         }
-        console.log(`  input: ${JSON.stringify(event.input)}`);
         break;
+      }
       case "tool_started":
         console.log(`[tool:${event.name}] ...`);
         break;
@@ -157,6 +214,7 @@ function buildRegistry(): ToolRegistry {
   registry.register(searchTool);
   registry.register(editFileTool);
   registry.register(bashTool);
+  registry.register(listDirTool);
   return registry;
 }
 
@@ -171,6 +229,7 @@ async function chatMode(
     input: process.stdin,
     output: process.stdout,
   });
+  const sessionApprovalRules: ApprovalRule[] = [];
   const approvalHandler = makeApprovalHandler(rl);
   const onEvent = makeEventRenderer();
 
@@ -186,15 +245,23 @@ async function chatMode(
       if (input === "/exit" || input === "/quit") break;
 
       try {
-        const { session: updated, newMessages } = await runTurn(
-          provider,
-          registry,
-          session,
-          input,
-          { approval, approvalHandler, onEvent },
-        );
+        const {
+          session: updated,
+          newMessages,
+          aborted,
+        } = await runTurn(provider, registry, session, input, {
+          approval,
+          approvalHandler,
+          onEvent,
+          sessionApprovalRules,
+          store,
+        });
         Object.assign(session, updated);
         store.appendMessages(session.id, newMessages);
+
+        if (aborted) {
+          console.log("\nTurn aborted. Tell myagent what to do differently.\n");
+        }
       } catch (err) {
         if (err instanceof ProviderRuntimeError) {
           console.error(`\n${formatProviderError(err)}`);
@@ -229,7 +296,7 @@ program
   .option("--sessions", "list historical sessions and exit")
   .argument("[prompt]", "task prompt")
   .action(async (prompt: string | undefined, options: Record<string, string>) => {
-    let cwd = resolve(options.cwd);
+    let cwd = canonicalWorkspaceRoot(options.cwd);
     const approval = options.approval as ApprovalMode;
     const explicitCwd = process.argv.includes("--cwd");
 
@@ -256,9 +323,9 @@ program
           console.error(`Session not found: ${options.resume}`);
           process.exit(1);
         }
-        if (explicitCwd && resolve(options.cwd) !== resolve(session.cwd)) {
+        if (explicitCwd && canonicalWorkspaceRoot(options.cwd) !== session.cwd) {
           console.error(
-            `Session ${options.resume} belongs to ${session.cwd}, but --cwd is ${resolve(options.cwd)}. Use a future fork command to move history to another workspace.`,
+            `Session ${options.resume} belongs to ${session.cwd}, but --cwd is ${canonicalWorkspaceRoot(options.cwd)}. Use a future fork command to move history to another workspace.`,
           );
           process.exit(1);
         }
@@ -305,14 +372,19 @@ program
       const onEvent = makeEventRenderer();
 
       try {
-        const { transcript } = await runSession(
+        const { transcript, aborted } = await runSession(
           provider,
           registry,
           [{ role: "user", content: prompt }],
-          { cwd, approval, approvalHandler, onEvent },
+          { cwd, approval, approvalHandler, onEvent, sessionApprovalRules: [], store },
         );
 
         store.appendMessages(session.id, transcript);
+
+        if (aborted) {
+          console.error("\nTurn aborted.");
+          process.exit(1);
+        }
 
         const diffStat = await getGitDiffStat(cwd);
         if (diffStat) {

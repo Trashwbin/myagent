@@ -9,7 +9,7 @@
 1. **Dangerous patterns → deny**: `rm -rf`, `sudo`, `chmod -R`, `curl/wget | sh/bash/zsh/fish`
 2. **Command substitution → ask**: `$()` and backticks prevent static analysis. Single-quoted `$()` is safe (literal). Double-quoted `$()` is detected because shell executes substitutions inside double quotes.
 3. **Output redirect → ask**: `>`, `>>`, `2>`, `2>>`, `&>` (quote-aware: operators inside quotes are not redirects)
-4. **Chain operators → ask**: `&&`, `||`, `;` — blanket ask for now; future: analyze pure read-only chains
+4. **Chain operators → ask**: `&&`, `||`, `;` — except `cd <dir> && <readonly-cmd>` (see below)
 5. **Parse into command units**: split on `|`, `&&`, `||`, `;`
 6. **Pipeline interpreter targets**:
    - **Shell targets (sh, bash, zsh, fish) → deny**: piping into a shell is always remote script execution
@@ -80,11 +80,70 @@ Both `--flag VALUE` and `--flag=VALUE` forms are handled.
 
 - Full shell grammar / AST parsing (tree-sitter or otherwise)
 - Safe Python/JQ semantic whitelist (e.g., `json.load(sys.stdin)` detection)
-- Read-only chain auto-allow (`uname -a && sw_vers && hostname` still asks)
+- Complex chain auto-allow (`cd dir && cmd && cmd` still asks)
 - Sandbox or isolation
 - ML classifier or pattern learning
-- Persistent allow/deny rules or hooks
 - MCP or external policy sources
+
+## v2: effective cwd and external directory
+
+### `cd <dir> && <readonly-cmd>`
+
+A simple two-unit chain where the first unit is `cd <dir>` and the second is a read-only command is treated as a single command with `effectiveCwd` set to the resolved cd target. All other chains (`;`, `||`, multi-`&&`) still ask.
+
+### `git -C <dir> <subcommand>`
+
+The `-C` flag extracts `effectiveCwd` from the argument. Combined with the readonly git classifier, this allows `git -C ../repo diff` to be classified as a read operation in an external directory rather than a generic bash ask.
+
+### Readonly git classifier
+
+| Subcommand                           | Classification |
+| ------------------------------------ | -------------- |
+| `git status`                         | read           |
+| `git diff`                           | read           |
+| `git log`                            | read           |
+| `git show`                           | read           |
+| `git branch`                         | read           |
+| `git remote`                         | read           |
+| `git rev-parse`                      | read           |
+| `git add/commit/checkout/switch/...` | write (ask)    |
+| `git push/pull/merge/rebase/...`     | write (ask)    |
+| `git stash/clean/tag`                | write (ask)    |
+
+Readonly git with `effectiveCwd` outside workspace returns `ask` with external directory metadata and `approvalPattern`.
+
+### External directory metadata
+
+When `effectiveCwd` is outside the workspace and the command is read-only, `analyzeCommand` returns:
+
+- `effectiveCwd`: the resolved directory
+- `externalDirectoryPattern`: project-root scoped pattern (e.g., `/path/to/project/*`)
+- `externalDirectoryRoot`: the project root directory
+- `externalDirectoryReason`: `"project_root"` or `"parent_directory"`
+
+See [external-directory.md](external-directory.md) for project root detection.
+
+### Approval pattern
+
+`approvalPattern` provides a reusable pattern for the command family:
+
+| Command                        | Pattern           |
+| ------------------------------ | ----------------- |
+| `git diff` / `git -C dir diff` | `git diff *`      |
+| `git status --short`           | `git status *`    |
+| `rg TODO src`                  | `rg *`            |
+| `npm test`                     | `npm test *`      |
+| `pnpm run test`                | `pnpm run test *` |
+
+Patterns are not generated for pipelines or write-effect commands. Write/deny decisions cannot be overridden by approval patterns.
+
+## v2: Bash reuses external_directory
+
+Bash read-only commands with external `effectiveCwd` can match existing `external_directory` rules. See [external-directory.md](external-directory.md) for the two-layer approval model.
+
+## Output budget
+
+`src/tools/bash.ts` truncates stdout/stderr output at 20KB characters or 500 lines, whichever is hit first. Truncated output includes a message suggesting narrower commands. This prevents large diffs (e.g., 71KB `git diff`) from polluting the transcript.
 
 ## References
 

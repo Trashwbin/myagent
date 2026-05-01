@@ -122,6 +122,34 @@ describe("isSensitiveReadPath", () => {
     expect(isSensitiveReadPath("/home/user/project/.npmrc")).toBe(true);
     expect(isSensitiveReadPath("/home/user/.netrc")).toBe(true);
   });
+
+  it("does not flag .env.example", () => {
+    expect(isSensitiveReadPath("/home/user/project/.env.example")).toBe(false);
+  });
+
+  it("does not flag .env.sample", () => {
+    expect(isSensitiveReadPath("/home/user/project/.env.sample")).toBe(false);
+  });
+
+  it("does not flag .env.template", () => {
+    expect(isSensitiveReadPath("/home/user/project/.env.template")).toBe(false);
+  });
+
+  it("does not flag .env.local.example", () => {
+    expect(isSensitiveReadPath("/home/user/project/.env.local.example")).toBe(false);
+  });
+
+  it("does not flag .env.production.sample", () => {
+    expect(isSensitiveReadPath("/home/user/project/.env.production.sample")).toBe(false);
+  });
+
+  it("still flags .env", () => {
+    expect(isSensitiveReadPath("/home/user/project/.env")).toBe(true);
+  });
+
+  it("still flags .env.local", () => {
+    expect(isSensitiveReadPath("/home/user/project/.env.local")).toBe(true);
+  });
 });
 
 // --- checkReadPolicy ---

@@ -5,7 +5,7 @@ import { resolvePathInfo } from "../workspace/path-info.js";
 import { isSensitiveReadPath } from "../permission/sensitive-paths.js";
 
 const inputSchema = z.object({
-  path: z.string().describe("File path relative to workspace root"),
+  path: z.string().describe("File path, absolute or relative to workspace root"),
 });
 
 const executionInputSchema = inputSchema.extend({

@@ -99,10 +99,66 @@ Approval is a runtime decision point. When `checkToolPermission()` returns "ask"
 
 When approved, the tool executes with `decision.resolvedInput` (not the original input) and `ToolContext.permissionResolved: true`. This ensures the tool uses the permission-resolved path without exposing that internal field as a normal model-controlled parameter.
 
-The CLI's approval handler prints the tool info and metadata from the event, then prompts `Approve? [Y/n]`. Empty input or `y`/`yes` grants approval. `n`/`no` denies.
+The CLI's approval handler prints the tool info and metadata from the event, then prompts `Approve? [Enter/y once, a always, n abort]`. Empty input or `y` grants `allow_once`. `a` triggers a secondary prompt for session/workspace scope. `n` aborts the turn.
 
 ## Persistence
 
 The session loop itself is unaware of SQLite. The CLI (or test harness) is responsible for calling `store.appendMessages()` after each turn. The store is a single global database at `~/.myagent/myagent.sqlite`.
 
 The `TurnEvent` system does not affect persistence — the final `Message[]` is identical whether or not events were observed.
+
+## Approval memory
+
+When `checkToolPermission()` returns "ask", the session loop checks approval memory before prompting the user:
+
+1. **Session rules** — `sessionApprovalRules: ApprovalRule[]` passed via `TurnOptions`. In-memory, process-scoped.
+2. **Workspace rules** — `permission_rules` table in `~/.myagent/myagent.sqlite`, queried via `store.findMatchingRule()`.
+
+If a matching rule is found, the tool auto-executes without triggering the approval handler. No `tool_approval_required` or `tool_approval_decision` events are emitted for auto-approved calls.
+
+If no matching rule exists and an approval handler is provided, the handler returns an `ApprovalResponse`:
+
+- `allow_once` — execute, no rule saved.
+- `allow_for_session` — push to `sessionApprovalRules`, execute.
+- `allow_for_workspace` — insert into `permission_rules` via store, execute.
+- `abort` — block tool, terminate turn.
+
+The `sessionApprovalRules` array is passed by reference from the chat loop. Rules added by `allow_for_session` accumulate across turns within the same CLI session.
+
+## Abort
+
+When the user chooses abort:
+
+1. A blocked `tool_result` message is added to the transcript.
+2. `turn_finished` is emitted.
+3. `runAgentLoop` returns `{ aborted: true }`.
+4. `runTurn` returns `{ session, newMessages, aborted: true }`.
+5. In chat mode: the loop prints "Turn aborted. Tell myagent what to do differently." and returns to the `>` prompt.
+6. In single-shot mode: the process exits with code 1.
+
+The model does not get a second chance to respond within an aborted turn. The blocked tool_result is persisted as part of the transcript.
+
+Approval memory (session or workspace rules) cannot convert a "deny" decision into "allow". It only applies to "ask" decisions.
+
+## Same-turn auto-resolution
+
+When the model returns multiple tool calls in a single assistant message, they are processed sequentially. After the user approves one with `allow_for_session` or `allow_for_workspace`, the new rule is immediately visible to subsequent iterations because `sessionApprovalRules` is a shared mutable array. This means:
+
+- 4 `read_file` calls to an external project: only the first triggers the approval handler; the rest are auto-allowed by the `external_directory` rule saved after the first approval.
+- A `bash` read-only command followed by `read_file` in the same external project: after the bash approval saves both `external_directory` and `bash` approvalPattern rules, the `read_file` is auto-allowed by the `external_directory` rule.
+- Sensitive files (`.env`, etc.) are still excluded from `external_directory` matching and will always require separate approval.
+
+## Bash two-layer approval
+
+For bash commands with external directory metadata, the session loop requires two independent approvals:
+
+1. **Path layer** — an `external_directory` rule covering the effective cwd or project root
+2. **Command layer** — a `bash` rule with `approvalPattern` matching the command family (e.g., `git diff *`)
+
+Both must be present for auto-allow. On approval, both rules are saved simultaneously. This means `git diff` and `git status` in the same external project each need their own command-pattern approval, but share the path approval.
+
+For all other tools (read_file, list_dir, search), only the `external_directory` layer applies — a single rule covers all reads under the approved directory.
+
+## Output budget
+
+Bash tool output is truncated at 20KB characters or 500 lines. Truncated output includes a message suggesting narrower commands (`--stat`, `head/tail`, focused paths). This prevents large outputs (e.g., 71KB `git diff`) from filling the transcript. Truncation happens in `src/tools/bash.ts` via `truncateOutput()` and applies to both stdout and stderr.

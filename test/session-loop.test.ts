@@ -1,19 +1,31 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { FakeProvider } from "../src/model/fake.js";
 import { ToolRegistry } from "../src/tools/registry.js";
 import { readFileTool } from "../src/tools/read.js";
 import { editFileTool } from "../src/tools/edit.js";
 import { bashTool } from "../src/tools/bash.js";
+import { listDirTool } from "../src/tools/list-dir.js";
+import { searchTool } from "../src/tools/search.js";
 import { runSession, runTurn } from "../src/session/loop.js";
 import type { TurnEvent } from "../src/session/loop.js";
 import type { Provider } from "../src/model/provider.js";
 import type { ModelEvent, Message, ToolSchema } from "../src/model/types.js";
 import type { ProviderStreamOptions } from "../src/model/provider.js";
 import type { SessionState } from "../src/session/loop.js";
+import type { ApprovalRule } from "../src/permission/approval.js";
+import { openStore } from "../src/storage/store.js";
+import type { TranscriptStore } from "../src/storage/store.js";
 import { mkdtemp, writeFile, readFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
+
+let activeStores: TranscriptStore[] = [];
+
+afterEach(() => {
+  for (const s of activeStores) s.close();
+  activeStores = [];
+});
 
 describe("Session loop (runSession wrapper)", () => {
   it("passes the system prompt to the provider", async () => {
@@ -274,7 +286,7 @@ describe("Session loop (runSession wrapper)", () => {
       {
         cwd: tmp,
         approval: "auto",
-        approvalHandler: async () => "allow",
+        approvalHandler: async () => "allow_once",
       },
     );
 
@@ -317,7 +329,7 @@ describe("Session loop (runSession wrapper)", () => {
       {
         cwd: tmp,
         approval: "auto",
-        approvalHandler: async () => "deny",
+        approvalHandler: async () => "abort",
       },
     );
 
@@ -359,7 +371,7 @@ describe("Session loop (runSession wrapper)", () => {
       {
         cwd: tmp,
         approval: "auto",
-        approvalHandler: async () => "allow",
+        approvalHandler: async () => "allow_once",
       },
     );
 
@@ -563,7 +575,7 @@ describe("TurnEvent ordering", () => {
       approval: "auto",
       approvalHandler: async () => {
         handlerCalled = true;
-        return "allow";
+        return "allow_once";
       },
       onEvent,
     });
@@ -603,7 +615,7 @@ describe("TurnEvent ordering", () => {
     const { events, onEvent } = captureEvents();
     await runTurn(provider, registry, makeSession(tmp), "touch", {
       approval: "auto",
-      approvalHandler: async () => "allow",
+      approvalHandler: async () => "allow_once",
       onEvent,
     });
 
@@ -676,7 +688,7 @@ describe("TurnEvent ordering", () => {
     const { events, onEvent } = captureEvents();
     await runTurn(provider, registry, makeSession(tmp), "touch", {
       approval: "auto",
-      approvalHandler: async () => "deny",
+      approvalHandler: async () => "abort",
       onEvent,
     });
 
@@ -771,7 +783,7 @@ describe("TurnEvent ordering", () => {
     const { events, onEvent } = captureEvents();
     await runTurn(provider, registry, makeSession(tmp), "read", {
       approval: "auto",
-      approvalHandler: async () => "allow",
+      approvalHandler: async () => "allow_once",
       onEvent,
     });
 
@@ -787,5 +799,1543 @@ describe("TurnEvent ordering", () => {
 
     await rm(tmp, { recursive: true, force: true });
     await rm(sibling, { recursive: true, force: true });
+  });
+});
+
+// --- Approval memory and abort ---
+
+describe("Approval memory and abort", () => {
+  function makeSession(cwd: string, messages: Message[] = []): SessionState {
+    return { id: randomUUID(), cwd, messages };
+  }
+
+  async function tmpDir(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), "myagent-approval-test-"));
+    return dir;
+  }
+
+  function openTestStore(baseDir: string): TranscriptStore {
+    const store = openStore({ baseDir });
+    activeStores.push(store);
+    return store;
+  }
+
+  it("allow_once does not write any rule", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, "f.txt"), "hello");
+
+    const sessionRules: ApprovalRule[] = [];
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "edit_file",
+          input: { path: "f.txt", old_string: "hello", new_string: "world" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(editFileTool);
+
+    await runTurn(provider, registry, makeSession(tmp), "edit", {
+      approval: "auto",
+      approvalHandler: async () => "allow_once",
+      sessionApprovalRules: sessionRules,
+    });
+
+    expect(sessionRules).toHaveLength(0);
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("allow_for_session auto-allows matching second request", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, "f.txt"), "content");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(editFileTool);
+
+    let handlerCalled = 0;
+    const handler = async () => {
+      handlerCalled++;
+      return "allow_for_session" as const;
+    };
+
+    // First call: triggers approval handler
+    const provider1 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "edit_file",
+          input: { path: "f.txt", old_string: "content", new_string: "v1" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    const session = makeSession(tmp);
+    const r1 = await runTurn(provider1, registry, session, "edit", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+    expect(handlerCalled).toBe(1);
+    expect(sessionRules).toHaveLength(1);
+
+    // Second call: same tool+pattern, should NOT trigger handler
+    const provider2 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "edit_file",
+          input: { path: "f.txt", old_string: "v1", new_string: "v2" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    const r2 = await runTurn(provider2, registry, r1.session, "edit again", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+    expect(handlerCalled).toBe(1); // Not called again
+    expect(r2.newMessages.find((m) => m.role === "tool_result")?.content).toContain(
+      "Edited f.txt",
+    );
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("allow_for_workspace writes to SQLite and auto-allows in new session", async () => {
+    const tmp = await tmpDir();
+    const storeBase = await tmpDir();
+    const store = openTestStore(storeBase);
+    await writeFile(join(tmp, "f.txt"), "content");
+
+    const registry = new ToolRegistry();
+    registry.register(editFileTool);
+
+    // First session: approve for workspace
+    const provider1 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "edit_file",
+          input: { path: "f.txt", old_string: "content", new_string: "v1" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    const session1 = makeSession(tmp);
+    await runTurn(provider1, registry, session1, "edit", {
+      approval: "auto",
+      approvalHandler: async () => "allow_for_workspace",
+      sessionApprovalRules: [],
+      store,
+    });
+
+    // Rule was persisted
+    const rules = store.listPermissionRules(tmp);
+    expect(rules).toHaveLength(1);
+    expect(rules[0].toolName).toBe("edit_file");
+
+    // Second session, same workspace: should auto-allow without handler
+    await writeFile(join(tmp, "f.txt"), "v1");
+    const provider2 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "edit_file",
+          input: { path: "f.txt", old_string: "v1", new_string: "v2" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    let handlerCalled = false;
+    const session2 = makeSession(tmp);
+    const r2 = await runTurn(provider2, registry, session2, "edit again", {
+      approval: "auto",
+      approvalHandler: async () => {
+        handlerCalled = true;
+        return "allow_once";
+      },
+      sessionApprovalRules: [],
+      store,
+    });
+    expect(handlerCalled).toBe(false);
+    expect(r2.newMessages.find((m) => m.role === "tool_result")?.content).toContain(
+      "Edited f.txt",
+    );
+
+    await rm(tmp, { recursive: true, force: true });
+    await rm(storeBase, { recursive: true, force: true });
+  });
+
+  it("different workspace does not reuse workspace rule", async () => {
+    const tmp1 = await tmpDir();
+    const tmp2 = await tmpDir();
+    const storeBase = await tmpDir();
+    const store = openTestStore(storeBase);
+
+    await writeFile(join(tmp1, "f.txt"), "content");
+
+    const registry = new ToolRegistry();
+    registry.register(editFileTool);
+
+    // Approve in workspace 1
+    const provider1 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "edit_file",
+          input: { path: "f.txt", old_string: "content", new_string: "v1" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    await runTurn(provider1, registry, makeSession(tmp1), "edit", {
+      approval: "auto",
+      approvalHandler: async () => "allow_for_workspace",
+      sessionApprovalRules: [],
+      store,
+    });
+
+    // Same tool in workspace 2: should NOT auto-allow
+    await writeFile(join(tmp2, "f.txt"), "content");
+    let handlerCalled = false;
+    const provider2 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "edit_file",
+          input: { path: "f.txt", old_string: "content", new_string: "v2" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    await runTurn(provider2, registry, makeSession(tmp2), "edit", {
+      approval: "auto",
+      approvalHandler: async () => {
+        handlerCalled = true;
+        return "allow_once";
+      },
+      sessionApprovalRules: [],
+      store,
+    });
+    expect(handlerCalled).toBe(true);
+
+    await rm(tmp1, { recursive: true, force: true });
+    await rm(tmp2, { recursive: true, force: true });
+    await rm(storeBase, { recursive: true, force: true });
+  });
+
+  it("abort terminates the turn", async () => {
+    const tmp = await tmpDir();
+
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "tc1", name: "bash", input: { command: "touch x.txt" } },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(bashTool);
+
+    const { newMessages, aborted } = await runTurn(
+      provider,
+      registry,
+      makeSession(tmp),
+      "touch",
+      { approval: "auto", approvalHandler: async () => "abort" },
+    );
+
+    expect(aborted).toBe(true);
+    // Turn terminated: user + assistant(toolCall) + tool_result(blocked) = 3
+    // No second assistant message ("ok") because turn was aborted
+    expect(newMessages).toHaveLength(3);
+    expect(newMessages[2].role).toBe("tool_result");
+    expect(newMessages[2].content).toContain("denied");
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("abort does not write permission_rules", async () => {
+    const tmp = await tmpDir();
+    const storeBase = await tmpDir();
+    const store = openTestStore(storeBase);
+
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "tc1", name: "bash", input: { command: "touch x.txt" } },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(bashTool);
+
+    await runTurn(provider, registry, makeSession(tmp), "touch", {
+      approval: "auto",
+      approvalHandler: async () => "abort",
+      sessionApprovalRules: [],
+      store,
+    });
+
+    const rules = store.listPermissionRules(tmp);
+    expect(rules).toHaveLength(0);
+
+    await rm(tmp, { recursive: true, force: true });
+    await rm(storeBase, { recursive: true, force: true });
+  });
+
+  it("edit_file still creates checkpoint when auto-allowed by session rule", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, "data.txt"), "v1");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(editFileTool);
+
+    // First edit: approve for session
+    const provider1 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "edit_file",
+          input: { path: "data.txt", old_string: "v1", new_string: "v2" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    const session = makeSession(tmp);
+    const r1 = await runTurn(provider1, registry, session, "edit", {
+      approval: "auto",
+      approvalHandler: async () => "allow_for_session",
+      sessionApprovalRules: sessionRules,
+    });
+
+    // Checkpoint was created on first edit
+    expect(r1.newMessages.find((m) => m.role === "tool_result")?.content).toContain(
+      "[checkpoint:",
+    );
+
+    // Second edit: auto-allowed by session rule, still gets checkpoint
+    const provider2 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "edit_file",
+          input: { path: "data.txt", old_string: "v2", new_string: "v3" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    const r2 = await runTurn(provider2, registry, r1.session, "edit again", {
+      approval: "auto",
+      sessionApprovalRules: sessionRules,
+    });
+
+    const result = r2.newMessages.find((m) => m.role === "tool_result");
+    expect(result?.content).toContain("Edited data.txt");
+    expect(result?.content).toContain("[checkpoint:");
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("persisted rule cannot override deny", async () => {
+    const tmp = await tmpDir();
+    const storeBase = await tmpDir();
+    const store = openTestStore(storeBase);
+
+    // Add a workspace rule for bash with "rm -rf /"
+    store.addPermissionRule({
+      workspaceRoot: tmp,
+      toolName: "bash",
+      pattern: "rm -rf /",
+    });
+
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "tc1", name: "bash", input: { command: "rm -rf /" } },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(bashTool);
+
+    const { newMessages, aborted } = await runTurn(
+      provider,
+      registry,
+      makeSession(tmp),
+      "delete",
+      { approval: "auto", store },
+    );
+
+    // Policy denies "rm -rf /" — rule cannot override
+    const toolResult = newMessages.find((m) => m.role === "tool_result");
+    expect(toolResult).toBeDefined();
+    expect(toolResult!.content).toContain("denied");
+    expect(aborted).toBeFalsy();
+
+    await rm(tmp, { recursive: true, force: true });
+    await rm(storeBase, { recursive: true, force: true });
+  });
+
+  // --- external_directory ---
+
+  it("read_file: external_directory session rule auto-allows second file", async () => {
+    const ws = await tmpDir();
+    const ext = await tmpDir();
+    await writeFile(join(ext, "a.txt"), "aaa");
+    await writeFile(join(ext, "b.txt"), "bbb");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    let handlerCalled = 0;
+    const handler = async () => {
+      handlerCalled++;
+      return "allow_for_session" as const;
+    };
+
+    // First read: asks for approval
+    const provider1 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: join(ext, "a.txt") },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    const session = makeSession(ws);
+    const r1 = await runTurn(provider1, registry, session, "read external", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+    expect(handlerCalled).toBe(1);
+    expect(r1.newMessages.find((m) => m.role === "tool_result")?.content).toBe("aaa");
+
+    // External_directory rule was saved
+    expect(sessionRules.some((r) => r.toolName === "external_directory")).toBe(true);
+
+    // Second read: same directory, different file → auto-allowed
+    const provider2 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "read_file",
+          input: { path: join(ext, "b.txt") },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    const r2 = await runTurn(provider2, registry, r1.session, "read another", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+    expect(handlerCalled).toBe(1);
+    expect(r2.newMessages.find((m) => m.role === "tool_result")?.content).toBe("bbb");
+
+    await rm(ws, { recursive: true, force: true });
+    await rm(ext, { recursive: true, force: true });
+  });
+
+  it("read_file: sibling external directory not matched by external_directory rule", async () => {
+    const ws = await tmpDir();
+    const ext1 = await tmpDir();
+    const ext2 = await tmpDir();
+    await writeFile(join(ext1, "a.txt"), "aaa");
+    await writeFile(join(ext2, "b.txt"), "bbb");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    let handlerCalled = 0;
+    const handler = async () => {
+      handlerCalled++;
+      return "allow_for_session" as const;
+    };
+
+    // Approve ext1
+    const provider1 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: join(ext1, "a.txt") },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    await runTurn(provider1, registry, makeSession(ws), "read", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+    expect(handlerCalled).toBe(1);
+
+    // Read from ext2: should still ask (sibling not covered)
+    const provider2 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "read_file",
+          input: { path: join(ext2, "b.txt") },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    await runTurn(provider2, registry, makeSession(ws), "read", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+    expect(handlerCalled).toBe(2);
+
+    await rm(ws, { recursive: true, force: true });
+    await rm(ext1, { recursive: true, force: true });
+    await rm(ext2, { recursive: true, force: true });
+  });
+
+  it("read_file: sensitive file in approved external dir still asks", async () => {
+    const ws = await tmpDir();
+    const ext = await tmpDir();
+    await writeFile(join(ext, "a.txt"), "aaa");
+    await writeFile(join(ext, ".env"), "SECRET=x");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    let handlerCalled = 0;
+    const handler = async () => {
+      handlerCalled++;
+      return "allow_for_session" as const;
+    };
+
+    // Approve directory via normal file
+    const provider1 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: join(ext, "a.txt") },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    await runTurn(provider1, registry, makeSession(ws), "read", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+    expect(handlerCalled).toBe(1);
+
+    // Read .env: external_directory rule should NOT auto-allow
+    const provider2 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "read_file",
+          input: { path: join(ext, ".env") },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    await runTurn(provider2, registry, makeSession(ws), "read env", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+    expect(handlerCalled).toBe(2);
+
+    await rm(ws, { recursive: true, force: true });
+    await rm(ext, { recursive: true, force: true });
+  });
+
+  it("list_dir: external_directory session rule auto-allows", async () => {
+    const ws = await tmpDir();
+    const ext = await tmpDir();
+    await writeFile(join(ext, "file.txt"), "hi");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(listDirTool);
+
+    let handlerCalled = 0;
+    const handler = async () => {
+      handlerCalled++;
+      return "allow_for_session" as const;
+    };
+
+    const provider1 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "list_dir",
+          input: { path: ext },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    await runTurn(provider1, registry, makeSession(ws), "list", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+    expect(handlerCalled).toBe(1);
+
+    // Second list_dir same dir → auto-allowed
+    const provider2 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "list_dir",
+          input: { path: ext },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    await runTurn(provider2, registry, makeSession(ws), "list again", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+    expect(handlerCalled).toBe(1);
+
+    await rm(ws, { recursive: true, force: true });
+    await rm(ext, { recursive: true, force: true });
+  });
+
+  it("search: external_directory session rule auto-allows same dir", async () => {
+    const ws = await tmpDir();
+    const ext = await tmpDir();
+    await writeFile(join(ext, "code.ts"), "TODO: fix");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(searchTool);
+
+    let handlerCalled = 0;
+    const handler = async () => {
+      handlerCalled++;
+      return "allow_for_session" as const;
+    };
+
+    const provider1 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "search",
+          input: { pattern: "TODO", path: ext },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    await runTurn(provider1, registry, makeSession(ws), "search", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+    expect(handlerCalled).toBe(1);
+
+    // Second search same dir → auto-allowed
+    const provider2 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "search",
+          input: { pattern: "fix", path: ext },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    const r2 = await runTurn(provider2, registry, makeSession(ws), "search again", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+    expect(handlerCalled).toBe(1);
+    expect(r2.newMessages.find((m) => m.role === "tool_result")?.content).toContain(
+      "code.ts",
+    );
+
+    await rm(ws, { recursive: true, force: true });
+    await rm(ext, { recursive: true, force: true });
+  });
+
+  it("external_directory workspace rule persists and auto-allows in new session", async () => {
+    const ws = await tmpDir();
+    const ext = await tmpDir();
+    const storeBase = await tmpDir();
+    const store = openTestStore(storeBase);
+    await writeFile(join(ext, "pkg.json"), '{"name":"test"}');
+
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    // Session 1: approve external_directory for workspace
+    const provider1 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: join(ext, "pkg.json") },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    await runTurn(provider1, registry, makeSession(ws), "read", {
+      approval: "auto",
+      approvalHandler: async () => "allow_for_workspace",
+      sessionApprovalRules: [],
+      store,
+    });
+
+    // Rule was persisted as external_directory
+    const rules = store.listPermissionRules(ws);
+    expect(rules).toHaveLength(1);
+    expect(rules[0].toolName).toBe("external_directory");
+
+    // Session 2, same workspace: auto-allows without handler
+    await writeFile(join(ext, "other.txt"), "other");
+    const provider2 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "read_file",
+          input: { path: join(ext, "other.txt") },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    let handlerCalled = false;
+    const r2 = await runTurn(provider2, registry, makeSession(ws), "read", {
+      approval: "auto",
+      approvalHandler: async () => {
+        handlerCalled = true;
+        return "allow_once";
+      },
+      sessionApprovalRules: [],
+      store,
+    });
+    expect(handlerCalled).toBe(false);
+    expect(r2.newMessages.find((m) => m.role === "tool_result")?.content).toBe("other");
+
+    await rm(ws, { recursive: true, force: true });
+    await rm(ext, { recursive: true, force: true });
+    await rm(storeBase, { recursive: true, force: true });
+  });
+
+  it("external_directory rule from different workspace is not reused", async () => {
+    const ws1 = await tmpDir();
+    const ws2 = await tmpDir();
+    const ext = await tmpDir();
+    const storeBase = await tmpDir();
+    const store = openTestStore(storeBase);
+    await writeFile(join(ext, "shared.txt"), "data");
+
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    // Approve in ws1
+    const provider1 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: join(ext, "shared.txt") },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    await runTurn(provider1, registry, makeSession(ws1), "read", {
+      approval: "auto",
+      approvalHandler: async () => "allow_for_workspace",
+      sessionApprovalRules: [],
+      store,
+    });
+
+    // ws2 should NOT get the rule
+    let handlerCalled = false;
+    const provider2 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "read_file",
+          input: { path: join(ext, "shared.txt") },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+    await runTurn(provider2, registry, makeSession(ws2), "read", {
+      approval: "auto",
+      approvalHandler: async () => {
+        handlerCalled = true;
+        return "allow_once";
+      },
+      sessionApprovalRules: [],
+      store,
+    });
+    expect(handlerCalled).toBe(true);
+
+    await rm(ws1, { recursive: true, force: true });
+    await rm(ws2, { recursive: true, force: true });
+    await rm(ext, { recursive: true, force: true });
+    await rm(storeBase, { recursive: true, force: true });
+  });
+
+  // --- Same-turn auto-resolution ---
+
+  it("same-turn: multi read_file only asks once after project-root pattern", async () => {
+    const ws = await tmpDir();
+    const ext = await tmpDir();
+    await mkdir(join(ext, "src", "permission"), { recursive: true });
+    await mkdir(join(ext, "src", "session"), { recursive: true });
+    await mkdir(join(ext, "src", "tools"), { recursive: true });
+    await writeFile(join(ext, "package.json"), "{}");
+    await writeFile(join(ext, "src", "permission", "a.ts"), "perm");
+    await writeFile(join(ext, "src", "session", "b.ts"), "sess");
+    await writeFile(join(ext, "src", "tools", "c.ts"), "tool");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    let handlerCalled = 0;
+    const handler = async () => {
+      handlerCalled++;
+      return "allow_for_session" as const;
+    };
+
+    // All 4 files in one assistant message
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: join(ext, "src", "permission", "a.ts") },
+        },
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "read_file",
+          input: { path: join(ext, "src", "session", "b.ts") },
+        },
+        {
+          type: "tool_call",
+          id: "tc3",
+          name: "read_file",
+          input: { path: join(ext, "src", "tools", "c.ts") },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(provider, registry, makeSession(ws), "read", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+
+    // Handler only called once for the first file
+    expect(handlerCalled).toBe(1);
+
+    // All three reads succeeded
+    const results = newMessages.filter((m) => m.role === "tool_result");
+    expect(results).toHaveLength(3);
+    expect(results[0].content).toBe("perm");
+    expect(results[1].content).toBe("sess");
+    expect(results[2].content).toBe("tool");
+
+    // One external_directory rule covering the project root
+    expect(sessionRules.length).toBe(1);
+    expect(sessionRules[0].toolName).toBe("external_directory");
+
+    await rm(ws, { recursive: true, force: true });
+    await rm(ext, { recursive: true, force: true });
+  });
+
+  it("same-turn: sensitive file still asks even with project-root pattern", async () => {
+    const ws = await tmpDir();
+    const ext = await tmpDir();
+    await mkdir(join(ext, "src"), { recursive: true });
+    await writeFile(join(ext, "package.json"), "{}");
+    await writeFile(join(ext, "src", "a.ts"), "code");
+    await writeFile(join(ext, ".env"), "SECRET=x");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    let handlerCalled = 0;
+    const handler = async () => {
+      handlerCalled++;
+      return "allow_for_session" as const;
+    };
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: join(ext, "src", "a.ts") },
+        },
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "read_file",
+          input: { path: join(ext, ".env") },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(provider, registry, makeSession(ws), "read", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+
+    // Handler called twice: once for a.ts, once for .env
+    expect(handlerCalled).toBe(2);
+
+    const results = newMessages.filter((m) => m.role === "tool_result");
+    expect(results[0].content).toBe("code");
+    expect(results[1].content).toBe("SECRET=x");
+
+    await rm(ws, { recursive: true, force: true });
+    await rm(ext, { recursive: true, force: true });
+  });
+
+  it("same-turn: bash external approval covers following read_file", async () => {
+    const ws = await tmpDir();
+    const ext = await tmpDir();
+    await mkdir(join(ext, "src", "session"), { recursive: true });
+    await writeFile(join(ext, "package.json"), "{}");
+    await writeFile(join(ext, "src", "session", "loop.ts"), "loop code");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(bashTool);
+    registry.register(readFileTool);
+
+    let handlerCalled = 0;
+    const handler = async () => {
+      handlerCalled++;
+      return "allow_for_session" as const;
+    };
+
+    // bash cd && git diff, then read_file in same turn
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "bash",
+          input: { command: `cd ${ext} && git diff` },
+        },
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "read_file",
+          input: { path: join(ext, "src", "session", "loop.ts") },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(
+      provider,
+      registry,
+      makeSession(ws),
+      "inspect",
+      {
+        approval: "auto",
+        approvalHandler: handler,
+        sessionApprovalRules: sessionRules,
+      },
+    );
+
+    // Handler called once for bash, read_file auto-allowed
+    expect(handlerCalled).toBe(1);
+
+    // Both tool results present
+    const results = newMessages.filter((m) => m.role === "tool_result");
+    expect(results).toHaveLength(2);
+    expect(results[1].content).toBe("loop code");
+
+    // Two rules: external_directory + bash pattern
+    expect(sessionRules.some((r) => r.toolName === "external_directory")).toBe(true);
+    expect(sessionRules.some((r) => r.toolName === "bash")).toBe(true);
+
+    await rm(ws, { recursive: true, force: true });
+    await rm(ext, { recursive: true, force: true });
+  });
+
+  it("bash: external_directory rule does not auto-allow sensitive files", async () => {
+    const ws = await tmpDir();
+    const ext = await tmpDir();
+    await writeFile(join(ext, "package.json"), "{}");
+    await writeFile(join(ext, ".env"), "SECRET=x");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(bashTool);
+
+    let handlerCalled = 0;
+    const handler = async () => {
+      handlerCalled++;
+      return "allow_for_session" as const;
+    };
+
+    const provider1 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "bash",
+          input: { command: `cd ${ext} && git diff` },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const session = makeSession(ws);
+    const r1 = await runTurn(provider1, registry, session, "inspect", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+    expect(handlerCalled).toBe(1);
+    expect(sessionRules.some((r) => r.toolName === "external_directory")).toBe(true);
+
+    const provider2 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "bash",
+          input: { command: `cd ${ext} && cat .env` },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const r2 = await runTurn(provider2, registry, r1.session, "read env", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+
+    expect(handlerCalled).toBe(2);
+    expect(r2.newMessages.find((m) => m.role === "tool_result")?.content).toContain(
+      "SECRET=x",
+    );
+
+    await rm(ws, { recursive: true, force: true });
+    await rm(ext, { recursive: true, force: true });
+  });
+
+  // --- Sensitive file approval: allow_once only, no persistence ---
+
+  it("sensitive read_file .env: allow_once executes but writes no rules", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, ".env"), "SECRET=abc");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: ".env" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(
+      provider,
+      registry,
+      makeSession(tmp),
+      "read env",
+      {
+        approval: "auto",
+        approvalHandler: async () => "allow_once",
+        sessionApprovalRules: sessionRules,
+      },
+    );
+
+    expect(newMessages.find((m) => m.role === "tool_result")?.content).toBe("SECRET=abc");
+    expect(sessionRules).toHaveLength(0);
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("sensitive read_file .env: allow_for_session downgraded, no rules saved", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, ".env"), "SECRET=abc");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    let handlerCalled = 0;
+    const handler = async () => {
+      handlerCalled++;
+      return "allow_for_session" as const;
+    };
+
+    // First read: approve with allow_for_session
+    const provider1 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: ".env" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const session = makeSession(tmp);
+    const r1 = await runTurn(provider1, registry, session, "read env", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+
+    expect(r1.newMessages.find((m) => m.role === "tool_result")?.content).toBe(
+      "SECRET=abc",
+    );
+    expect(sessionRules).toHaveLength(0);
+
+    // Second read: should still ask (no rule was saved)
+    const provider2 = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc2",
+          name: "read_file",
+          input: { path: ".env" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    await runTurn(provider2, registry, r1.session, "read env again", {
+      approval: "auto",
+      approvalHandler: handler,
+      sessionApprovalRules: sessionRules,
+    });
+
+    expect(handlerCalled).toBe(2);
+    expect(sessionRules).toHaveLength(0);
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("sensitive read_file .env: allow_for_workspace downgraded, no persistence", async () => {
+    const tmp = await tmpDir();
+    const storeBase = await tmpDir();
+    const store = openTestStore(storeBase);
+    await writeFile(join(tmp, ".env"), "SECRET=abc");
+
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: ".env" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(
+      provider,
+      registry,
+      makeSession(tmp),
+      "read env",
+      {
+        approval: "auto",
+        approvalHandler: async () => "allow_for_workspace",
+        sessionApprovalRules: [],
+        store,
+      },
+    );
+
+    expect(newMessages.find((m) => m.role === "tool_result")?.content).toBe("SECRET=abc");
+    expect(store.listPermissionRules(tmp)).toHaveLength(0);
+
+    await rm(tmp, { recursive: true, force: true });
+    await rm(storeBase, { recursive: true, force: true });
+  });
+
+  it("sensitive bash cat .env: approved but no bash rule saved", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, ".env"), "SECRET=x");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(bashTool);
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "bash",
+          input: { command: "cat .env" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    await runTurn(provider, registry, makeSession(tmp), "cat env", {
+      approval: "auto",
+      approvalHandler: async () => "allow_for_session",
+      sessionApprovalRules: sessionRules,
+    });
+
+    expect(sessionRules).toHaveLength(0);
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("pre-existing external_directory rule does not auto-allow sensitive read_file", async () => {
+    const ws = await tmpDir();
+    const ext = await tmpDir();
+    await writeFile(join(ext, "a.txt"), "aaa");
+    await writeFile(join(ext, ".env"), "SECRET=x");
+
+    const sessionRules: ApprovalRule[] = [
+      {
+        id: "pre-existing",
+        workspaceRoot: ws,
+        toolName: "external_directory",
+        pattern: ext + "/*",
+        action: "allow",
+        scope: "session",
+        createdAt: Date.now(),
+      },
+    ];
+
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    let handlerCalled = 0;
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: join(ext, ".env") },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    await runTurn(provider, registry, makeSession(ws), "read env", {
+      approval: "auto",
+      approvalHandler: async () => {
+        handlerCalled++;
+        return "allow_once";
+      },
+      sessionApprovalRules: sessionRules,
+    });
+
+    expect(handlerCalled).toBe(1);
+
+    await rm(ws, { recursive: true, force: true });
+    await rm(ext, { recursive: true, force: true });
+  });
+
+  it("pre-existing bash rg * rule does not auto-allow rg on sensitive file", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, ".env"), "SECRET=x");
+
+    const sessionRules: ApprovalRule[] = [
+      {
+        id: "pre-existing-rg",
+        workspaceRoot: tmp,
+        toolName: "bash",
+        pattern: "rg *",
+        action: "allow",
+        scope: "session",
+        createdAt: Date.now(),
+      },
+    ];
+
+    const registry = new ToolRegistry();
+    registry.register(bashTool);
+
+    let handlerCalled = 0;
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "bash",
+          input: { command: "rg SECRET .env" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    await runTurn(provider, registry, makeSession(tmp), "rg env", {
+      approval: "auto",
+      approvalHandler: async () => {
+        handlerCalled++;
+        return "allow_once";
+      },
+      sessionApprovalRules: sessionRules,
+    });
+
+    expect(handlerCalled).toBe(1);
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("sensitive read_file .env: reject does not execute", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, ".env"), "SECRET=abc");
+
+    const sessionRules: ApprovalRule[] = [];
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "read_file",
+          input: { path: ".env" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { newMessages, aborted } = await runTurn(
+      provider,
+      registry,
+      makeSession(tmp),
+      "read env",
+      {
+        approval: "auto",
+        approvalHandler: async () => "abort",
+        sessionApprovalRules: sessionRules,
+      },
+    );
+
+    expect(aborted).toBe(true);
+    expect(newMessages.find((m) => m.role === "tool_result")?.content).toContain(
+      "denied",
+    );
+    expect(sessionRules).toHaveLength(0);
+
+    await rm(tmp, { recursive: true, force: true });
   });
 });
