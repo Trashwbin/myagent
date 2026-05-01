@@ -286,12 +286,17 @@ function checkApplyPatch(
     return { behavior: "deny", reason: resolved.error };
   }
 
-  const affectedPaths = operations.map((op) => op.path);
   const hasSensitive = operations.some((op) => {
     const info = resolvePathInfo(cwd, op.path);
-    return info ? isSensitivePath(info.realPath) : false;
+    if (info ? isSensitivePath(info.realPath) : false) return true;
+    if (op.type === "update" && op.movePath) {
+      const moveInfo = resolvePathInfo(cwd, op.movePath);
+      return moveInfo ? isSensitivePath(moveInfo.realPath) : false;
+    }
+    return false;
   });
   const meta = buildPatchDiffMeta(operations, cwd);
+  const affectedPaths = meta.affectedPaths;
   const resolvedPathsObj: Record<string, string> = {};
   for (const [k, v] of resolved.resolved) {
     resolvedPathsObj[k] = v;
@@ -309,6 +314,7 @@ function checkApplyPatch(
         operation: "patch",
         affectedPaths,
         failures: meta.failures,
+        ...(meta.moves.length > 0 ? { moves: meta.moves } : {}),
       },
     };
   }
@@ -323,6 +329,7 @@ function checkApplyPatch(
     metadata: {
       operation: "patch",
       affectedPaths,
+      ...(meta.moves.length > 0 ? { moves: meta.moves } : {}),
       ...(hasSensitive
         ? { sensitive: true }
         : {

@@ -26,6 +26,7 @@ import { ProviderRuntimeError, formatProviderError } from "./model/errors.js";
 import { openStore } from "./storage/store.js";
 import type { TranscriptStore } from "./storage/store.js";
 import { resolvePrimaryAnswer, resolveSecondaryAnswer } from "./cli/approval.js";
+import { formatToolInputSummary } from "./cli/format-tool-input.js";
 import type { ApprovalResponse, ApprovalRule } from "./permission/approval.js";
 
 function canonicalWorkspaceRoot(path: string): string {
@@ -84,6 +85,7 @@ function askLine(rl: readline.Interface): Promise<string | null> {
 
 function makeEventRenderer(): (event: TurnEvent) => void {
   let streamedText = false;
+  const sensitiveToolCalls = new Set<string>();
 
   return (event: TurnEvent) => {
     switch (event.type) {
@@ -99,6 +101,8 @@ function makeEventRenderer(): (event: TurnEvent) => void {
         break;
       case "tool_approval_required": {
         const meta = event.metadata;
+        if (meta?.sensitive) sensitiveToolCalls.add(event.id);
+        const inputSummary = formatToolInputSummary(event.input);
         if (event.name === "bash" && meta?.externalDirectoryPattern) {
           console.log(`\n[approval] bash: ${event.reason}`);
           if (meta.externalDirectoryRoot)
@@ -106,19 +110,22 @@ function makeEventRenderer(): (event: TurnEvent) => void {
           console.log(`  grants: ${meta.externalDirectoryPattern}`);
           if (meta.approvalPattern)
             console.log(`  command pattern: ${meta.approvalPattern}`);
+          if (inputSummary) console.log(`  input: ${inputSummary}`);
           if (!meta.sensitive) {
             console.log(
               `  Tip: press "a" to reuse this approval for this session/workspace.`,
             );
           }
         } else if (meta?.externalDirectoryPattern) {
-          console.log(`\n[approval] external_directory: ${event.reason}`);
+          console.log(`\n[approval] ${event.name}: ${event.reason}`);
           if (meta.externalDirectoryRoot)
             console.log(`  project: ${meta.externalDirectoryRoot}`);
           console.log(`  grants: ${meta.externalDirectoryPattern}`);
+          if (inputSummary) console.log(`  input: ${inputSummary}`);
         } else if (event.name === "bash" && meta?.approvalPattern) {
           console.log(`\n[approval] bash: ${event.reason}`);
           console.log(`  command pattern: ${meta.approvalPattern}`);
+          if (inputSummary) console.log(`  input: ${inputSummary}`);
         } else {
           console.log(`\n[approval] ${event.name}: ${event.reason}`);
           if (meta) {
@@ -132,13 +139,23 @@ function makeEventRenderer(): (event: TurnEvent) => void {
               console.log(meta.diff);
             }
           }
-          console.log(`  input: ${JSON.stringify(event.input)}`);
+          const sensitiveSummary = formatToolInputSummary(event.input, {
+            sensitive: meta?.sensitive === true,
+          });
+          console.log(`  input: ${sensitiveSummary}`);
         }
         break;
       }
-      case "tool_started":
-        console.log(`[tool:${event.name}] ...`);
+      case "tool_started": {
+        const sensitive = sensitiveToolCalls.has(event.id);
+        const summary = formatToolInputSummary(event.input, { sensitive });
+        if (summary) {
+          console.log(`[tool:${event.name}] ${summary}`);
+        } else {
+          console.log(`[tool:${event.name}] ...`);
+        }
         break;
+      }
       case "tool_result":
         console.log(`[tool:${event.message.toolName}] ${event.message.content}`);
         break;

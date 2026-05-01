@@ -176,8 +176,9 @@ Uses the Codex/OpenCode patch envelope rather than raw shell `patch`:
 
 - Must start with `*** Begin Patch` and end with `*** End Patch`.
 - Supported operations: `*** Add File`, `*** Update File`, `*** Delete File`.
-- `*** Move File` and `*** Move to:` are explicitly rejected; use delete + add.
-- Each file path may appear at most once per patch.
+- `*** Move File` is explicitly rejected; use delete + add.
+- `*** Move to:` is only valid after `*** Update File:` (see Move semantics below).
+- Each file path (including move destinations) may appear at most once per patch.
 - File paths are relative to the workspace. Absolute paths and `..` are rejected.
 
 ### Add File
@@ -223,6 +224,32 @@ Insertion-only hunks:
 
 - When `oldLines` is empty and `newLines` is non-empty, lines are inserted after the last context match position (or at end of file).
 
+### Patch authoring tips
+
+These rules matter more than the choice between `@@ context @@` and `@@ -1,3 +1,4 @@`:
+
+- `@@ context @@` is supported. A unified-style range header is optional, not required.
+- Use `changeContext` to position the cursor near the target. Use `oldLines` to identify the exact lines to replace. They serve different roles.
+- Do not make the `@@` context line the same line as the first deleted line unless you want the next match to start after it. The cursor advances after each matched context line.
+- Prefer a stable surrounding marker for context: function name, class name, section title, or the line immediately above the change.
+- When a file contains repeated text, add more `@@` context lines instead of relying on fuzzy matching.
+- If a patch fails with a context error, the cursor never reached the intended block. Re-read the file and use a better anchor.
+- If a patch fails with an old-lines error, the anchor likely matched but the exact body no longer does. Re-read the file and regenerate the hunk body from current content.
+- If diagnostics mention whitespace drift, do not assume the header format is wrong. The content likely differs only in indentation, tabs, or spacing.
+
+Recommended pattern:
+
+```text
+*** Begin Patch
+*** Update File: some/file.txt
+@@ section heading @@
+ previous line
+-old target
++new target
+ next line
+*** End Patch
+```
+
 ### Matching strategy
 
 `seekSequence` performs 4-level matching for each `oldLines` pattern:
@@ -257,6 +284,35 @@ On update, the existing file's line ending is detected (`lf` or `crlf`). Content
 ### Rejected formats
 
 - Standard unified diff headers (`---` / `+++`) inside `*** Update File` are detected and rejected with a clear error message directing the model to use `@@` hunks.
+- `*** Move to:` outside of an `*** Update File:` block is rejected.
+
+### Move semantics
+
+`*** Move to: <new_path>` can appear immediately after `*** Update File:`. It renames the file and optionally applies content changes via hunks:
+
+```text
+*** Begin Patch
+*** Update File: old/path.ts
+*** Move to: new/path.ts
+@@ class Foo @@
+-  oldMethod()
++  newMethod()
+*** End Patch
+```
+
+Behavior:
+
+- Source file must exist. Destination must not exist (neither file nor directory).
+- Both paths must resolve inside the workspace. Absolute paths and `..` are rejected.
+- Hunks are applied to the source content, then the result is written to the destination and the source is deleted.
+- If the patch contains no content changes, the file is moved as-is.
+- Permission metadata includes `moves: [{ from, to }]`. `affectedPaths` contains both source and destination.
+- Checkpoint covers both source and destination before mutation.
+- Rollback on failure: delete destination (if written), restore source content.
+- Result summary shows `moved old/path.ts -> new/path.ts (+N -N)`.
+- Read state: destination is tracked as written; source entry is removed.
+
+`*** Move File:` (standalone, without hunks) remains rejected — use delete + add for a plain rename.
 
 ### Validation and execution
 
@@ -309,7 +365,7 @@ Implemented:
    - 4-level line matching (exact → trimEnd → trim → collapseWhitespace) with cursor progression.
 	   - Structured failure diagnostics: context/oldLines separation, whitespace drift detection, ambiguous match detection, partial match percentage, actionable re-read hints.
    - CRLF preservation on update files via shared `tryApplyHunks` helper.
-   - Move File / Move to: explicitly rejected.
+   - Move File rejected; `*** Move to:` supported after `*** Update File:` with hunk application.
    - Standard unified diff (`---`/`+++`) detected and rejected with clear guidance.
    - Atomic pre-flight validation, rollback on execution failure.
    - Approval-stage hunk dry-run: non-sensitive path failures are denied before user approval.
@@ -318,7 +374,6 @@ Implemented:
 
 Defer:
 
-- move support
 - LSP diagnostics
 - automatic formatting
 - hidden-git snapshot engine

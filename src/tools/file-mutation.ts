@@ -41,6 +41,10 @@ export class ReadStateTracker {
       });
     }
   }
+
+  remove(realPath: string): void {
+    this.states.delete(realPath);
+  }
 }
 
 // --- Line ending utilities ---

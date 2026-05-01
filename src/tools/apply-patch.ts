@@ -23,7 +23,7 @@ export type PatchHunk = {
   newLines: string[];
   isEndOfFile?: boolean;
 };
-export type PatchUpdate = { type: "update"; path: string; hunks: PatchHunk[] };
+export type PatchUpdate = { type: "update"; path: string; hunks: PatchHunk[]; movePath?: string };
 export type PatchDelete = { type: "delete"; path: string };
 export type PatchOperation = PatchAdd | PatchUpdate | PatchDelete;
 
@@ -120,12 +120,17 @@ export function parsePatch(
       const path = updateMatch[1].trim();
       i++;
 
-      // Check for Move to: right after Update File header
+      let movePath: string | undefined;
       if (i < lines.length && /^\*\*\* Move to:\s*/i.test(lines[i])) {
-        return {
-          ok: false,
-          error: `Update File "${path}": *** Move to: is not supported. Use delete + add instead.`,
-        };
+        const moveToMatch = lines[i].match(/^\*\*\* Move to:\s*(.+)$/i);
+        if (!moveToMatch) {
+          return {
+            ok: false,
+            error: `Update File "${path}": *** Move to: requires a destination path`,
+          };
+        }
+        movePath = moveToMatch[1].trim();
+        i++;
       }
 
       const hunks: PatchHunk[] = [];
@@ -194,10 +199,15 @@ export function parsePatch(
           error: `Update File "${path}" has no hunks. Provide at least one hunk with @@ markers.`,
         };
       }
-      operations.push({ type: "update", path, hunks });
+      operations.push({ type: "update", path, hunks, movePath });
     } else if (deleteMatch) {
       operations.push({ type: "delete", path: deleteMatch[1].trim() });
       i++;
+    } else if (/^\*\*\* Move to:\s*/i.test(line)) {
+      return {
+        ok: false,
+        error: "*** Move to: is only valid after *** Update File:",
+      };
     } else {
       return { ok: false, error: `Invalid patch line: ${line}` };
     }
@@ -212,8 +222,12 @@ export function parsePatch(
   }
 
   const paths = operations.map((op) => op.path);
-  const uniquePaths = new Set(paths);
-  if (uniquePaths.size < paths.length) {
+  const movePaths = operations
+    .filter((op): op is PatchUpdate & { movePath: string } => op.type === "update" && !!op.movePath)
+    .map((op) => op.movePath);
+  const allPaths = [...paths, ...movePaths];
+  const uniquePaths = new Set(allPaths);
+  if (uniquePaths.size < allPaths.length) {
     return {
       ok: false,
       error:
@@ -242,6 +256,17 @@ export function resolvePatchPaths(
       return { ok: false, error: `Path is outside workspace: ${path}` };
     }
     resolved.set(path, absPath);
+
+    if (op.type === "update" && op.movePath) {
+      if (isAbsolute(op.movePath) || op.movePath.includes("..")) {
+        return { ok: false, error: `Move destination escapes workspace: ${op.movePath}` };
+      }
+      const absMove = resolveWorkspacePath(cwd, op.movePath);
+      if (!absMove) {
+        return { ok: false, error: `Move destination is outside workspace: ${op.movePath}` };
+      }
+      resolved.set(op.movePath, absMove);
+    }
   }
 
   return { ok: true, resolved };
@@ -629,10 +654,12 @@ export function buildPatchDiffMeta(
   additions: number;
   deletions: number;
   failures: string[];
+  moves: Array<{ from: string; to: string }>;
 } {
   const affectedPaths: string[] = [];
   const diffParts: string[] = [];
   const failures: string[] = [];
+  const moves: Array<{ from: string; to: string }> = [];
   let totalAdditions = 0;
   let totalDeletions = 0;
 
@@ -658,6 +685,24 @@ export function buildPatchDiffMeta(
       totalDeletions += deletions;
       if (diff) diffParts.push(diff);
     } else if (op.type === "update") {
+      if (op.movePath) {
+        affectedPaths.push(op.movePath);
+        moves.push({ from: op.path, to: op.movePath });
+        if (!sensitive) {
+          const moveInfo = resolvePathInfo(cwd, op.movePath);
+          const absMove = moveInfo?.absolutePath ?? join(cwd, op.movePath);
+          try {
+            const s = statSync(absMove);
+            if (s.isDirectory()) {
+              failures.push(`Move to "${op.movePath}": destination is an existing directory`);
+            } else {
+              failures.push(`Move to "${op.movePath}": destination file already exists`);
+            }
+          } catch {
+            // Destination doesn't exist — OK
+          }
+        }
+      }
       if (sensitive) continue;
       let oldContent = "";
       try {
@@ -670,7 +715,8 @@ export function buildPatchDiffMeta(
       if (!applied.ok) {
         failures.push(`Update File "${op.path}": ${applied.error}`);
       } else {
-        const { diff, additions, deletions } = computeDiff(oldContent, applied.result, op.path);
+        const displayPath = op.movePath ?? op.path;
+        const { diff, additions, deletions } = computeDiff(oldContent, applied.result, displayPath);
         totalAdditions += additions;
         totalDeletions += deletions;
         if (diff) diffParts.push(diff);
@@ -697,6 +743,7 @@ export function buildPatchDiffMeta(
     additions: totalAdditions,
     deletions: totalDeletions,
     failures,
+    moves,
   };
 }
 
@@ -755,6 +802,15 @@ export const applyPatchTool: ToolDefinition = {
           oldContent: string;
         }
       | {
+          type: "move";
+          path: string;
+          absPath: string;
+          movePath: string;
+          absMovePath: string;
+          newContent: string;
+          oldContent: string;
+        }
+      | {
           type: "delete";
           path: string;
           absPath: string;
@@ -803,13 +859,39 @@ export const applyPatchTool: ToolDefinition = {
             output: `Update File "${op.path}": ${applied.error}`,
           };
         }
-        pending.push({
-          type: "update",
-          path: op.path,
-          absPath,
-          newContent: applied.result,
-          oldContent,
-        });
+
+        if (op.movePath) {
+          const absMovePath = pathMap.get(op.movePath);
+          if (!absMovePath) {
+            return { ok: false, output: `Could not resolve move destination: ${op.movePath}` };
+          }
+          try {
+            const destStat = await stat(absMovePath);
+            if (destStat.isDirectory()) {
+              return { ok: false, output: `Move to "${op.movePath}" failed: destination is an existing directory` };
+            }
+            return { ok: false, output: `Move to "${op.movePath}" failed: destination file already exists` };
+          } catch {
+            // Destination doesn't exist — OK
+          }
+          pending.push({
+            type: "move",
+            path: op.path,
+            absPath,
+            movePath: op.movePath,
+            absMovePath,
+            newContent: applied.result,
+            oldContent,
+          });
+        } else {
+          pending.push({
+            type: "update",
+            path: op.path,
+            absPath,
+            newContent: applied.result,
+            oldContent,
+          });
+        }
       } else {
         let oldContent: string;
         try {
@@ -830,6 +912,10 @@ export const applyPatchTool: ToolDefinition = {
         try {
           if (op.type === "add") {
             await unlink(op.absPath);
+          } else if (op.type === "move") {
+            await unlink(op.absMovePath);
+            await mkdir(dirname(op.absPath), { recursive: true });
+            await writeFile(op.absPath, op.oldContent, "utf-8");
           } else {
             await mkdir(dirname(op.absPath), { recursive: true });
             await writeFile(op.absPath, op.oldContent, "utf-8");
@@ -851,6 +937,10 @@ export const applyPatchTool: ToolDefinition = {
             op.type === "add" ? op.content : op.newContent,
             "utf-8",
           );
+        } else if (op.type === "move") {
+          await mkdir(dirname(op.absMovePath), { recursive: true });
+          await writeFile(op.absMovePath, op.newContent, "utf-8");
+          await unlink(op.absPath);
         } else {
           await unlink(op.absPath);
         }
@@ -871,10 +961,23 @@ export const applyPatchTool: ToolDefinition = {
         if (op.type === "add" || op.type === "update") {
           try {
             const s = await stat(op.absPath);
-            context.readState.updateAfterWrite(op.absPath, s.mtimeMs);
+            const info = resolvePathInfo(context.cwd, op.path);
+            const key = info?.realPath ?? op.absPath;
+            context.readState.updateAfterWrite(key, s.mtimeMs);
           } catch {
             // ignore
           }
+        } else if (op.type === "move") {
+          try {
+            const s = await stat(op.absMovePath);
+            const destInfo = resolvePathInfo(context.cwd, op.movePath);
+            const destKey = destInfo?.realPath ?? op.absMovePath;
+            context.readState.updateAfterWrite(destKey, s.mtimeMs);
+          } catch {
+            // ignore
+          }
+          const srcInfo = resolvePathInfo(context.cwd, op.path);
+          context.readState.remove(srcInfo?.realPath ?? op.absPath);
         }
       }
     }
@@ -886,21 +989,37 @@ export const applyPatchTool: ToolDefinition = {
     let totalDel = 0;
 
     for (const op of pending) {
-      const content =
-        op.type === "add" ? op.content : op.type === "update" ? op.newContent : "";
-      const { diff, additions, deletions } = computeDiff(op.oldContent, content, op.path);
-      totalAdd += additions;
-      totalDel += deletions;
-      const pathInfo = resolvePathInfo(context.cwd, op.path);
-      const sensitive = pathInfo ? isSensitiveReadPath(pathInfo.realPath) : false;
-      if (diff && !sensitive) diffParts.push(diff);
-
-      if (op.type === "add") {
-        summaries.push(`  added ${op.path}`);
-      } else if (op.type === "update") {
-        summaries.push(`  updated ${op.path} (+${additions} -${deletions})`);
-      } else {
+      if (op.type === "delete") {
+        const { diff, additions, deletions } = computeDiff(op.oldContent, "", op.path);
+        totalAdd += additions;
+        totalDel += deletions;
+        const pathInfo = resolvePathInfo(context.cwd, op.path);
+        const sensitive = pathInfo ? isSensitiveReadPath(pathInfo.realPath) : false;
+        if (diff && !sensitive) diffParts.push(diff);
         summaries.push(`  deleted ${op.path}`);
+      } else if (op.type === "move") {
+        const displayPath = `${op.path} -> ${op.movePath}`;
+        const { diff, additions, deletions } = computeDiff(op.oldContent, op.newContent, displayPath);
+        totalAdd += additions;
+        totalDel += deletions;
+        const pathInfo = resolvePathInfo(context.cwd, op.path);
+        const sensitive = pathInfo ? isSensitiveReadPath(pathInfo.realPath) : false;
+        if (diff && !sensitive) diffParts.push(diff);
+        summaries.push(`  moved ${displayPath} (+${additions} -${deletions})`);
+      } else {
+        const content = op.type === "add" ? op.content : op.newContent;
+        const { diff, additions, deletions } = computeDiff(op.oldContent, content, op.path);
+        totalAdd += additions;
+        totalDel += deletions;
+        const pathInfo = resolvePathInfo(context.cwd, op.path);
+        const sensitive = pathInfo ? isSensitiveReadPath(pathInfo.realPath) : false;
+        if (diff && !sensitive) diffParts.push(diff);
+
+        if (op.type === "add") {
+          summaries.push(`  added ${op.path}`);
+        } else {
+          summaries.push(`  updated ${op.path} (+${additions} -${deletions})`);
+        }
       }
     }
 

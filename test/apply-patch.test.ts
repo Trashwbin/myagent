@@ -228,14 +228,53 @@ describe("parsePatch", () => {
     if (!result.ok) expect(result.error).toContain("Move File is not supported");
   });
 
-  it("rejects *** Move to: inside Update File", () => {
+  it("rejects *** Move to: inside Update File without hunks", () => {
     const patch = `*** Begin Patch
 *** Update File: a.txt
 *** Move to: b.txt
 *** End Patch`;
     const result = parsePatch(patch);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("Move to: is not supported");
+    if (!result.ok) expect(result.error).toContain("no hunks");
+  });
+
+  it("parses *** Move to: after Update File with hunks", () => {
+    const patch = `*** Begin Patch
+*** Update File: a.txt
+*** Move to: b.txt
+@@
+-old
++new
+*** End Patch`;
+    const result = parsePatch(patch);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const op = result.operations[0];
+    if (op.type !== "update") return;
+    expect(op.movePath).toBe("b.txt");
+    expect(op.hunks).toHaveLength(1);
+  });
+
+  it("rejects *** Move to: at top level", () => {
+    const patch = `*** Begin Patch
+*** Move to: b.txt
+*** End Patch`;
+    const result = parsePatch(patch);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("only valid after *** Update File");
+  });
+
+  it("rejects duplicate path between source and move destination", () => {
+    const patch = `*** Begin Patch
+*** Update File: a.txt
+*** Move to: a.txt
+@@
+-old
++new
+*** End Patch`;
+    const result = parsePatch(patch);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("duplicate");
   });
 
   it("rejects update with no hunks", () => {
@@ -1557,5 +1596,321 @@ describe("applyHunks failure diagnostics", () => {
     if (!result.ok) {
       expect(result.error).toContain("end of file");
     }
+  });
+});
+
+// --- Move to: support ---
+
+describe("resolvePatchPaths with move", () => {
+  it("resolves move destination path", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    const patch = `*** Begin Patch
+*** Update File: src/a.ts
+*** Move to: dest/b.ts
+@@
+-old
++new
+*** End Patch`;
+    const parsed = parsePatch(patch);
+    if (!parsed.ok) return;
+    const result = resolvePatchPaths(parsed.operations, tmp);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.resolved.get("src/a.ts")).toBe(join(tmp, "src/a.ts"));
+    expect(result.resolved.get("dest/b.ts")).toBe(join(tmp, "dest/b.ts"));
+    await rm(tmp, { recursive: true });
+  });
+
+  it("rejects absolute move destination", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    const patch = `*** Begin Patch
+*** Update File: a.ts
+*** Move to: /etc/evil.ts
+@@
+-old
++new
+*** End Patch`;
+    const parsed = parsePatch(patch);
+    if (!parsed.ok) return;
+    const result = resolvePatchPaths(parsed.operations, tmp);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("Move destination escapes workspace");
+    await rm(tmp, { recursive: true });
+  });
+
+  it("rejects .. traversal in move destination", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    const patch = `*** Begin Patch
+*** Update File: a.ts
+*** Move to: ../outside.ts
+@@
+-old
++new
+*** End Patch`;
+    const parsed = parsePatch(patch);
+    if (!parsed.ok) return;
+    const result = resolvePatchPaths(parsed.operations, tmp);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("Move destination escapes workspace");
+    await rm(tmp, { recursive: true });
+  });
+});
+
+describe("apply_patch move execution", () => {
+  it("moves file with content change", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "old.ts"), "line1\nold\nline3");
+    const ctx = makeContext(tmp);
+
+    const patch = `*** Begin Patch
+*** Update File: old.ts
+*** Move to: new.ts
+@@
+-old
++new
+*** End Patch`;
+
+    const result = await applyPatchTool.execute({ patch }, ctx);
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("moved old.ts -> new.ts");
+
+    const content = await readFile(join(tmp, "new.ts"), "utf-8");
+    expect(content).toBe("line1\nnew\nline3");
+    expect(existsSync(join(tmp, "old.ts"))).toBe(false);
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("moves file to nested directory", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "flat.txt"), "content");
+    const ctx = makeContext(tmp);
+
+    const patch = `*** Begin Patch
+*** Update File: flat.txt
+*** Move to: src/nested/deep.txt
+@@
+-content
++updated
+*** End Patch`;
+
+    const result = await applyPatchTool.execute({ patch }, ctx);
+    expect(result.ok).toBe(true);
+
+    const content = await readFile(join(tmp, "src", "nested", "deep.txt"), "utf-8");
+    expect(content).toBe("updated");
+    expect(existsSync(join(tmp, "flat.txt"))).toBe(false);
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("rejects move when destination already exists", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "src.txt"), "content");
+    await writeFile(join(tmp, "dest.txt"), "existing");
+    const ctx = makeContext(tmp);
+
+    const patch = `*** Begin Patch
+*** Update File: src.txt
+*** Move to: dest.txt
+@@
+-content
++new
+*** End Patch`;
+
+    const result = await applyPatchTool.execute({ patch }, ctx);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("already exists");
+
+    // Source unchanged
+    expect(await readFile(join(tmp, "src.txt"), "utf-8")).toBe("content");
+    // Destination unchanged
+    expect(await readFile(join(tmp, "dest.txt"), "utf-8")).toBe("existing");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("rejects move when destination is a directory", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "src.txt"), "content");
+    const { mkdir: mkdirAsync } = await import("node:fs/promises");
+    await mkdirAsync(join(tmp, "dest"));
+    const ctx = makeContext(tmp);
+
+    const patch = `*** Begin Patch
+*** Update File: src.txt
+*** Move to: dest
+@@
+-content
++new
+*** End Patch`;
+
+    const result = await applyPatchTool.execute({ patch }, ctx);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("directory");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("rolls back move on subsequent failure", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "src.txt"), "original");
+    const ctx = makeContext(tmp);
+
+    const patch = `*** Begin Patch
+*** Update File: src.txt
+*** Move to: dest.txt
+@@
+-original
++updated
+*** Update File: nonexistent.txt
+@@
+-old
++new
+*** End Patch`;
+
+    const result = await applyPatchTool.execute({ patch }, ctx);
+    expect(result.ok).toBe(false);
+
+    // Source restored
+    expect(await readFile(join(tmp, "src.txt"), "utf-8")).toBe("original");
+    // Destination not created
+    expect(existsSync(join(tmp, "dest.txt"))).toBe(false);
+
+    await rm(tmp, { recursive: true });
+  });
+});
+
+describe("buildPatchDiffMeta with move", () => {
+  it("includes move in metadata", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "old.txt"), "line1\nold\nline3");
+
+    const patch = `*** Begin Patch
+*** Update File: old.txt
+*** Move to: new.txt
+@@
+-old
++new
+*** End Patch`;
+
+    const parsed = parsePatch(patch);
+    if (!parsed.ok) return;
+
+    const meta = buildPatchDiffMeta(parsed.operations, tmp);
+    expect(meta.moves).toEqual([{ from: "old.txt", to: "new.txt" }]);
+    expect(meta.affectedPaths).toContain("old.txt");
+    expect(meta.affectedPaths).toContain("new.txt");
+    expect(meta.additions).toBe(1);
+    expect(meta.deletions).toBe(1);
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("reports failure when move destination exists", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "src.txt"), "content");
+    await writeFile(join(tmp, "dest.txt"), "existing");
+
+    const patch = `*** Begin Patch
+*** Update File: src.txt
+*** Move to: dest.txt
+@@
+-content
++new
+*** End Patch`;
+
+    const parsed = parsePatch(patch);
+    if (!parsed.ok) return;
+
+    const meta = buildPatchDiffMeta(parsed.operations, tmp);
+    expect(meta.failures.length).toBeGreaterThan(0);
+    expect(meta.failures[0]).toContain("already exists");
+
+    await rm(tmp, { recursive: true });
+  });
+});
+
+describe("apply_patch move permission", () => {
+  it("denies move when destination exists", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "src.txt"), "content");
+    await writeFile(join(tmp, "dest.txt"), "existing");
+
+    const patch = `*** Begin Patch
+*** Update File: src.txt
+*** Move to: dest.txt
+@@
+-content
++new
+*** End Patch`;
+
+    const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
+    expect(decision.behavior).toBe("deny");
+    expect(decision.reason).toContain("already exists");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("includes moves in approval metadata", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "src.txt"), "content");
+
+    const patch = `*** Begin Patch
+*** Update File: src.txt
+*** Move to: dest.txt
+@@
+-content
++updated
+*** End Patch`;
+
+    const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
+    expect(decision.behavior).toBe("ask");
+    expect(decision.metadata?.moves).toEqual([{ from: "src.txt", to: "dest.txt" }]);
+    expect(decision.metadata?.affectedPaths).toContain("src.txt");
+    expect(decision.metadata?.affectedPaths).toContain("dest.txt");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("marks sensitive when source or destination is sensitive", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, ".env"), "SECRET=old");
+
+    const patch = `*** Begin Patch
+*** Update File: .env
+*** Move to: backup.env
+@@
+-SECRET=old
++SECRET=new
+*** End Patch`;
+
+    const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
+    expect(decision.behavior).toBe("ask");
+    expect(decision.metadata?.sensitive).toBe(true);
+    expect(decision.metadata?.diff).toBeUndefined();
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("resolvedPaths includes move destination", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "src.txt"), "content");
+
+    const patch = `*** Begin Patch
+*** Update File: src.txt
+*** Move to: dest.txt
+@@
+-content
++updated
+*** End Patch`;
+
+    const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
+    expect(decision.behavior).toBe("ask");
+    const resolved = decision.resolvedInput as { resolvedPaths: Record<string, string> };
+    expect(resolved.resolvedPaths["src.txt"]).toBeDefined();
+    expect(resolved.resolvedPaths["dest.txt"]).toBeDefined();
+
+    await rm(tmp, { recursive: true });
   });
 });
