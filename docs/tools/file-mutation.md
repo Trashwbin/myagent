@@ -225,13 +225,30 @@ Insertion-only hunks:
 
 ### Matching strategy
 
-`seekSequence` performs 3-level matching for each `oldLines` pattern:
+`seekSequence` performs 4-level matching for each `oldLines` pattern:
 
 1. Exact match.
 2. `trimEnd()` match.
 3. `trim()` match (full trim).
+4. `collapseWhitespace` — collapses runs of `\s+` to a single space and trims. Handles tab/space mixing, inconsistent indentation, and multi-space formatting. **Ambiguity guard**: if multiple positions match at this level, the match is rejected and diagnostics report the ambiguity, prompting the model to add more `@@` context.
 
 The cursor advances after each hunk so subsequent hunks match after prior matches.
+
+### Failure diagnostics
+
+When `seekSequence` returns no match, `applyHunks` runs diagnostics via `diagnoseSeekFailure` to produce actionable error messages. Diagnostics check the entire file (not just after the cursor) at the `collapseWhitespace` level to detect near-misses.
+
+Failure categories:
+
+| Category | Detection | Message hint |
+|---|---|---|
+| Content exists earlier | exact match found before cursor position | "exists earlier in the file — a prior hunk may have shifted the cursor" |
+| Whitespace drift | fuzzy match found (collapseWhitespace level) but no exact match | "matches after whitespace normalization but differs in formatting" |
+| Ambiguous | multiple fuzzy matches found | "partially matches at N locations — Add more @@ context lines" |
+| Partial match | ≥50% of pattern lines match at some level | "partially matches near line X (N% of lines)" |
+| No match | no near-miss found | "content may have changed — Re-read the file" |
+
+All failure messages include actionable guidance (re-read file, add context, adjust patch order). Context failures and oldLines failures are reported separately — context failures identify the missing `@@` context line, while oldLines failures note where context was matched (if applicable).
 
 ### Line ending handling
 
@@ -289,7 +306,8 @@ Implemented:
    - Update File with `@@` hunks, context navigation, EOF anchor, insertion-only hunks.
    - Unified-style range headers (`@@ -1,3 +1,4 @@`) parsed and range info ignored.
    - `@@ context @@` form supported (trailing `@@` stripped); ambiguous mid-line `@@` rejected.
-   - 3-level line matching (exact → trimEnd → trim) with cursor progression.
+   - 4-level line matching (exact → trimEnd → trim → collapseWhitespace) with cursor progression.
+	   - Structured failure diagnostics: context/oldLines separation, whitespace drift detection, ambiguous match detection, partial match percentage, actionable re-read hints.
    - CRLF preservation on update files via shared `tryApplyHunks` helper.
    - Move File / Move to: explicitly rejected.
    - Standard unified diff (`---`/`+++`) detected and rejected with clear guidance.

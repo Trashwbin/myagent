@@ -306,33 +306,219 @@ function tryMatchSequence(
   return -1;
 }
 
+type SeekLevel = "exact" | "trimEnd" | "trim" | "collapseWhitespace";
+
+type SeekResult = {
+  index: number;
+  level: SeekLevel;
+};
+
+function collapseWhitespace(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
 function seekSequence(
   lines: string[],
   pattern: string[],
   startIndex: number,
   eof = false,
-): number {
-  // Pass 1: exact
+): SeekResult {
   const exact = tryMatchSequence(lines, pattern, startIndex, (a, b) => a === b, eof);
-  if (exact !== -1) return exact;
+  if (exact !== -1) return { index: exact, level: "exact" };
 
-  // Pass 2: trimEnd
-  const trimEnd = tryMatchSequence(
+  const trimEndResult = tryMatchSequence(
     lines,
     pattern,
     startIndex,
     (a, b) => a.trimEnd() === b.trimEnd(),
     eof,
   );
-  if (trimEnd !== -1) return trimEnd;
+  if (trimEndResult !== -1) return { index: trimEndResult, level: "trimEnd" };
 
-  // Pass 3: trim
-  return tryMatchSequence(
+  const trimResult = tryMatchSequence(
     lines,
     pattern,
     startIndex,
     (a, b) => a.trim() === b.trim(),
     eof,
+  );
+  if (trimResult !== -1) return { index: trimResult, level: "trim" };
+
+  const collapseResult = tryMatchSequence(
+    lines,
+    pattern,
+    startIndex,
+    (a, b) => collapseWhitespace(a) === collapseWhitespace(b),
+    eof,
+  );
+  if (collapseResult !== -1) {
+    for (let i = startIndex; i <= lines.length - pattern.length; i++) {
+      if (i === collapseResult) continue;
+      let matched = true;
+      for (let j = 0; j < pattern.length; j++) {
+        if (collapseWhitespace(lines[i + j]) !== collapseWhitespace(pattern[j])) {
+          matched = false;
+          break;
+        }
+      }
+      if (matched) return { index: -1, level: "collapseWhitespace" };
+    }
+    return { index: collapseResult, level: "collapseWhitespace" };
+  }
+
+  return { index: -1, level: "collapseWhitespace" };
+}
+
+function diagnoseSeekFailure(
+  lines: string[],
+  pattern: string[],
+): {
+  exactAnywhere: boolean;
+  fuzzyAnywhere: boolean;
+  fuzzyCount: number;
+  bestFuzzyPosition: number;
+  bestPartialPct: number;
+  bestPartialPosition: number;
+} {
+  if (pattern.length === 0) {
+    return {
+      exactAnywhere: false,
+      fuzzyAnywhere: false,
+      fuzzyCount: 0,
+      bestFuzzyPosition: -1,
+      bestPartialPct: 0,
+      bestPartialPosition: -1,
+    };
+  }
+
+  let exactAnywhere = false;
+  const fuzzyPositions: number[] = [];
+  let bestPartial = 0;
+  let bestPartialPos = -1;
+
+  for (let i = 0; i <= lines.length - pattern.length; i++) {
+    let exactMatch = true;
+    let fuzzyMatch = true;
+    let partialMatch = 0;
+    for (let j = 0; j < pattern.length; j++) {
+      if (lines[i + j] !== pattern[j]) exactMatch = false;
+      if (collapseWhitespace(lines[i + j]) !== collapseWhitespace(pattern[j])) {
+        fuzzyMatch = false;
+      } else {
+        partialMatch++;
+      }
+    }
+    if (exactMatch) exactAnywhere = true;
+    if (fuzzyMatch) fuzzyPositions.push(i);
+    if (partialMatch > bestPartial) {
+      bestPartial = partialMatch;
+      bestPartialPos = i;
+    }
+  }
+
+  return {
+    exactAnywhere,
+    fuzzyAnywhere: fuzzyPositions.length > 0,
+    fuzzyCount: fuzzyPositions.length,
+    bestFuzzyPosition: fuzzyPositions[0] ?? -1,
+    bestPartialPct: bestPartial / pattern.length,
+    bestPartialPosition: bestPartialPos,
+  };
+}
+
+function buildContextFailureMessage(
+  hunkIdx: number,
+  ctx: string,
+  seekCursor: number,
+  lines: string[],
+): string {
+  const diag = diagnoseSeekFailure(lines, [ctx]);
+
+  if (diag.exactAnywhere) {
+    return (
+      `Hunk ${hunkIdx}: context "${ctx}" not found after line ${seekCursor}. ` +
+      "This content exists earlier in the file — a prior hunk may have shifted the cursor. " +
+      "Re-read the file and adjust the patch order."
+    );
+  }
+
+  if (diag.fuzzyAnywhere && diag.fuzzyCount === 1) {
+    return (
+      `Hunk ${hunkIdx}: context "${ctx}" not found after line ${seekCursor}. ` +
+      `Similar content exists at line ${diag.bestFuzzyPosition + 1} with whitespace differences. ` +
+      "Re-read the file for exact content."
+    );
+  }
+
+  if (diag.fuzzyAnywhere && diag.fuzzyCount > 1) {
+    return (
+      `Hunk ${hunkIdx}: context "${ctx}" not found after line ${seekCursor}. ` +
+      `Similar content matches at ${diag.fuzzyCount} locations. ` +
+      "Add more @@ context lines to disambiguate, or re-read the file for current content."
+    );
+  }
+
+  if (diag.bestPartialPct >= 0.5) {
+    return (
+      `Hunk ${hunkIdx}: context "${ctx}" not found after line ${seekCursor}. ` +
+      `Partially matching content near line ${diag.bestPartialPosition + 1}. ` +
+      "The file content may have changed. Re-read the file for current content."
+    );
+  }
+
+  return (
+    `Hunk ${hunkIdx}: context "${ctx}" not found after line ${seekCursor}. ` +
+    "The file content may have changed. Re-read the file for current content."
+  );
+}
+
+function buildOldLinesFailureMessage(
+  hunkIdx: number,
+  seekCursor: number,
+  lastCtxIndex: number,
+  lines: string[],
+  oldLines: string[],
+  eof: boolean,
+): string {
+  const ctxNote =
+    lastCtxIndex >= 0 ? `context matched at line ${lastCtxIndex + 1}, ` : "";
+  const eofNote = eof ? " (expected at end of file)" : "";
+  const diag = diagnoseSeekFailure(lines, oldLines);
+
+  if (diag.exactAnywhere) {
+    return (
+      `Hunk ${hunkIdx}: ${ctxNote}expected content not found after line ${seekCursor}${eofNote}. ` +
+      "The exact content exists earlier in the file — a prior hunk may have shifted the cursor. " +
+      "Re-read the file and adjust the patch order."
+    );
+  }
+
+  if (diag.fuzzyAnywhere && diag.fuzzyCount === 1) {
+    return (
+      `Hunk ${hunkIdx}: ${ctxNote}expected content matches near line ${diag.bestFuzzyPosition + 1} ` +
+      "after whitespace normalization but differs in formatting. " +
+      "Re-read the file and use the exact current content."
+    );
+  }
+
+  if (diag.fuzzyAnywhere && diag.fuzzyCount > 1) {
+    return (
+      `Hunk ${hunkIdx}: ${ctxNote}expected content partially matches at ${diag.fuzzyCount} locations. ` +
+      "Add more @@ context lines to narrow the location, or re-read the file for current content."
+    );
+  }
+
+  if (diag.bestPartialPct >= 0.5) {
+    return (
+      `Hunk ${hunkIdx}: ${ctxNote}expected content partially matches near line ${diag.bestPartialPosition + 1} ` +
+      `(${Math.round(diag.bestPartialPct * 100)}% of lines). ` +
+      "Some lines may have changed. Re-read the file for current content."
+    );
+  }
+
+  return (
+    `Hunk ${hunkIdx}: ${ctxNote}expected content not found after line ${seekCursor}${eofNote}. ` +
+    "The file content may have changed since the patch was generated. Re-read the file for current content."
   );
 }
 
@@ -347,17 +533,19 @@ export function applyHunks(
   for (let h = 0; h < hunks.length; h++) {
     const hunk = hunks[h];
     let seekCursor = cursor;
+    let lastCtxIndex = -1;
 
     // Seek through changeContexts
     for (const ctx of hunk.changeContexts) {
-      const ctxIdx = seekSequence(currentLines, [ctx], seekCursor);
-      if (ctxIdx === -1) {
+      const result = seekSequence(currentLines, [ctx], seekCursor);
+      if (result.index === -1) {
         return {
           ok: false,
-          error: `Hunk ${h + 1}: context "${ctx}" not found`,
+          error: buildContextFailureMessage(h + 1, ctx, seekCursor, currentLines),
         };
       }
-      seekCursor = ctxIdx + 1;
+      seekCursor = result.index + 1;
+      lastCtxIndex = result.index;
     }
 
     // Insertion-only hunk (no old lines)
@@ -384,25 +572,32 @@ export function applyHunks(
     }
 
     // Normal replacement hunk
-    const idx = seekSequence(
+    const result = seekSequence(
       currentLines,
       hunk.oldLines,
       seekCursor,
       hunk.isEndOfFile ?? false,
     );
-    if (idx === -1) {
+    if (result.index === -1) {
       return {
         ok: false,
-        error: `Hunk ${h + 1} does not match file content`,
+        error: buildOldLinesFailureMessage(
+          h + 1,
+          seekCursor,
+          lastCtxIndex,
+          currentLines,
+          hunk.oldLines,
+          hunk.isEndOfFile ?? false,
+        ),
       };
     }
 
     currentLines = [
-      ...currentLines.slice(0, idx),
+      ...currentLines.slice(0, result.index),
       ...hunk.newLines,
-      ...currentLines.slice(idx + hunk.oldLines.length),
+      ...currentLines.slice(result.index + hunk.oldLines.length),
     ];
-    cursor = idx + hunk.newLines.length;
+    cursor = result.index + hunk.newLines.length;
   }
 
   return { ok: true, result: joinContentLines(currentLines, parsed.trailingNewline) };

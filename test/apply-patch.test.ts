@@ -447,7 +447,7 @@ describe("applyHunks", () => {
       { changeContexts: [], oldLines: ["hello"], newLines: ["goodbye"] },
     ]);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("does not match");
+    if (!result.ok) expect(result.error).toContain("not found");
   });
 
   it("applies replacement with context", () => {
@@ -479,7 +479,7 @@ describe("applyHunks", () => {
       { changeContexts: [], oldLines: ["goodbye"], newLines: ["hello"] },
     ]);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("does not match");
+    if (!result.ok) expect(result.error).toContain("not found");
   });
 
   it("handles addition-only hunk with context", () => {
@@ -806,7 +806,7 @@ describe("apply_patch tool", () => {
 
     const result = await applyPatchTool.execute({ patch }, ctx);
     expect(result.ok).toBe(false);
-    expect(result.output).toContain("does not match");
+    expect(result.output).toContain("partially matches");
 
     expect(await readFile(join(tmp, "app.ts"), "utf-8")).toBe("line1\nactual\nline3");
 
@@ -1163,7 +1163,7 @@ describe("buildPatchDiffMeta", () => {
 
     const meta = buildPatchDiffMeta(parsed.operations, tmp);
     expect(meta.failures.length).toBeGreaterThan(0);
-    expect(meta.failures[0]).toContain("does not match");
+    expect(meta.failures[0]).toContain("partially matches");
     expect(meta.diff).toBe("");
 
     await rm(tmp, { recursive: true });
@@ -1313,5 +1313,249 @@ describe("apply_patch permission metadata", () => {
     expect(decision.metadata?.failures).toBeUndefined();
 
     await rm(tmp, { recursive: true });
+  });
+});
+
+// --- Enhanced matching and failure diagnostics ---
+
+describe("applyHunks matching passes", () => {
+  it("matches with collapseWhitespace pass (tab→space)", () => {
+    const content = "if (x > 0) {\n\treturn true;\n}";
+    const result = applyHunks(content, [
+      {
+        changeContexts: [],
+        oldLines: ["if (x > 0) {", "return true;", "}"],
+        newLines: ["if (x > 0) {", "return false;", "}"],
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result).toBe("if (x > 0) {\nreturn false;\n}");
+  });
+
+  it("matches multi-space collapsed to single space", () => {
+    const content = "const  x  =  1;";
+    const result = applyHunks(content, [
+      {
+        changeContexts: [],
+        oldLines: ["const x = 1;"],
+        newLines: ["const x = 2;"],
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result).toBe("const x = 2;");
+  });
+
+  it("matches indented code with different tab width", () => {
+    const content = "function main() {\n    console.log('hi');\n}";
+    const result = applyHunks(content, [
+      {
+        changeContexts: [],
+        oldLines: ["function main() {", "console.log('hi');", "}"],
+        newLines: ["function main() {", "console.log('bye');", "}"],
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result).toBe("function main() {\nconsole.log('bye');\n}");
+  });
+
+  it("rejects ambiguous collapseWhitespace match", () => {
+    const content = "const  x  =  1;\nlet y = 2;\nconst  x  =  1;\nlet z = 3;";
+    const result = applyHunks(content, [
+      {
+        changeContexts: [],
+        oldLines: ["const x = 1;"],
+        newLines: ["const x = 2;"],
+      },
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("2 locations");
+      expect(result.error).toContain("@@ context");
+    }
+  });
+
+  it("accepts unambiguous collapseWhitespace match", () => {
+    const content = "const  x  =  1;\nlet y = 2;\nlet z = 3;";
+    const result = applyHunks(content, [
+      {
+        changeContexts: [],
+        oldLines: ["const x = 1;"],
+        newLines: ["const x = 2;"],
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result).toBe("const x = 2;\nlet y = 2;\nlet z = 3;");
+  });
+});
+
+describe("applyHunks failure diagnostics", () => {
+  it("reports context not found with re-read hint", () => {
+    const result = applyHunks("line1\nline2\nline3", [
+      {
+        changeContexts: ["nonexistent"],
+        oldLines: ["line1"],
+        newLines: ["line1a"],
+      },
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("context");
+      expect(result.error).toContain("nonexistent");
+      expect(result.error).toContain("not found");
+      expect(result.error).toContain("Re-read");
+    }
+  });
+
+  it("detects exact content exists earlier in file (cursor shift)", () => {
+    const result = applyHunks("target\nline1\ntarget\nline3", [
+      {
+        changeContexts: [],
+        oldLines: ["target", "line1", "target"],
+        newLines: ["CHANGED", "line1", "target"],
+      },
+      {
+        changeContexts: [],
+        oldLines: ["target"],
+        newLines: ["NEW"],
+      },
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("Hunk 2");
+      expect(result.error).toContain("earlier in the file");
+      expect(result.error).toContain("shifted the cursor");
+    }
+  });
+
+  it("detects whitespace drift when content exists before cursor", () => {
+    const content = "hello   world\nline1\nline2\nline3";
+    const result = applyHunks(content, [
+      {
+        changeContexts: [],
+        oldLines: ["line1"],
+        newLines: ["LINE1"],
+      },
+      {
+        changeContexts: [],
+        oldLines: ["hello world"],
+        newLines: ["hello earth"],
+      },
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("Hunk 2");
+      expect(result.error).toContain("whitespace normalization");
+      expect(result.error).toContain("Re-read");
+    }
+  });
+
+  it("detects whitespace drift for old lines match", () => {
+    const content = "line1\n  hello   world  \nline3";
+    const result = applyHunks(content, [
+      {
+        changeContexts: [],
+        oldLines: ["line1", "hello world", "line3"],
+        newLines: ["line1", "goodbye world", "line3"],
+      },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("reports partial match with percentage when some lines differ", () => {
+    const content = "line1\nactual\nline3";
+    const result = applyHunks(content, [
+      {
+        changeContexts: [],
+        oldLines: ["line1", "wrong", "line3"],
+        newLines: ["line1", "new", "line3"],
+      },
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("partially matches");
+      expect(result.error).toContain("67%");
+      expect(result.error).toContain("Re-read");
+    }
+  });
+
+  it("reports generic failure when no match at any level", () => {
+    const content = "alpha\nbeta\ngamma";
+    const result = applyHunks(content, [
+      {
+        changeContexts: [],
+        oldLines: ["completely", "different"],
+        newLines: ["new1", "new2"],
+      },
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("not found");
+      expect(result.error).toContain("Re-read");
+      expect(result.error).not.toContain("whitespace");
+      expect(result.error).not.toContain("partially matches");
+    }
+  });
+
+  it("includes context position in oldLines failure when context was matched", () => {
+    const content = "class A:\n  x = 1\nclass B:\n  y = 2";
+    const result = applyHunks(content, [
+      {
+        changeContexts: ["class B:"],
+        oldLines: ["  z = 3"],
+        newLines: ["  z = 4"],
+      },
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("context matched at line");
+      expect(result.error).toContain("not found");
+    }
+  });
+
+  it("reports multiple fuzzy matches with disambiguation hint", () => {
+    const content = "aa  bb\nline1\naa  bb\nline3\nline4\nline5";
+    const result = applyHunks(content, [
+      {
+        changeContexts: [],
+        oldLines: ["line1", "aa  bb", "line3"],
+        newLines: ["LINE1", "aa  bb", "LINE3"],
+      },
+      {
+        changeContexts: [],
+        oldLines: ["aa bb"],
+        newLines: ["xx"],
+      },
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("Hunk 2");
+      expect(result.error).toContain("2 locations");
+      expect(result.error).toContain("@@ context");
+    }
+  });
+
+  it("EOF anchor failure mentions end of file", () => {
+    const content = "aaa\nbbb\nccc";
+    const result = applyHunks(content, [
+      {
+        changeContexts: [],
+        oldLines: ["aaa"],
+        newLines: ["AAA"],
+      },
+      {
+        changeContexts: [],
+        oldLines: ["aaa"],
+        newLines: ["XXX"],
+        isEndOfFile: true,
+      },
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("end of file");
+    }
   });
 });
