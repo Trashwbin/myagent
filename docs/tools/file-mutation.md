@@ -92,36 +92,108 @@ type ReadFileState = {
 
 ## `apply_patch`
 
-Purpose: apply structured multi-file changes.
+Purpose: apply structured multi-file changes in one atomic operation.
 
-This should follow the Codex/OpenCode patch envelope rather than raw shell `patch`:
+Uses the Codex/OpenCode patch envelope rather than raw shell `patch`:
 
 ```text
 *** Begin Patch
 *** Add File: path/to/new.ts
-+content
++line one
++line two
 *** Update File: src/app.ts
-@@
--old
-+new
+@@ -1,3 +1,4 @@
+ context line
+-old line
++new line
++extra line
+ context line
+*** End of File
 *** Delete File: old.txt
 *** End Patch
 ```
 
-Rules:
+### Patch envelope
 
-- File paths are relative to the workspace. Absolute paths are rejected.
-- Supported operations: add, update, delete.
-- Move is deferred; use delete + add for now.
-- Every affected path must resolve inside the workspace.
-- `*** End Patch` is required so truncated patches do not execute.
-- The patch is parsed and validated before approval.
-- Approval shows the combined diff and per-file summary for non-sensitive paths.
-- Sensitive paths still require approval, but approval metadata does not read or expose file contents.
+- Must start with `*** Begin Patch` and end with `*** End Patch`.
+- Supported operations: `*** Add File`, `*** Update File`, `*** Delete File`.
+- `*** Move File` and `*** Move to:` are explicitly rejected; use delete + add.
+- Each file path may appear at most once per patch.
+- File paths are relative to the workspace. Absolute paths and `..` are rejected.
+
+### Add File
+
+- Content lines must be prefixed with `+`.
+- Blank lines within content do not need a prefix.
+- Fails if the file already exists.
+
+### Update File hunks
+
+Hunk data structure:
+
+```ts
+type PatchHunk = {
+  changeContexts: string[];  // context lines from @@ markers
+  oldLines: string[];       // lines prefixed with - or space
+  newLines: string[];       // lines prefixed with + or space
+  isEndOfFile?: boolean;    // set when *** End of File appears
+};
+```
+
+Context navigation:
+
+- `@@` — bare marker, no context.
+- `@@ functionName` — context string for disambiguation.
+- `@@ functionName @@` — same as above; trailing `@@` is stripped.
+- `@@ -1,3 +1,4 @@` — unified-style range header, range info is ignored, no context.
+- `@@ -1,3 +1,4 @@ fn greet` — unified-style range header with context.
+- Multiple `@@` lines before a hunk body are seeked sequentially to narrow the match position.
+- If `@@` appears in the middle of context text without a trailing closing `@@`, the line is rejected as ambiguous.
+
+Hunk body lines:
+
+- `-` prefix: old line to match.
+- `+` prefix: new line to insert.
+- ` ` (space) prefix or no prefix: context line, goes into both `oldLines` and `newLines`.
+
+EOF anchor:
+
+- `*** End of File` inside a hunk body sets `isEndOfFile`, causing the match to be attempted from the end of the file.
+
+Insertion-only hunks:
+
+- When `oldLines` is empty and `newLines` is non-empty, lines are inserted after the last context match position (or at end of file).
+
+### Matching strategy
+
+`seekSequence` performs 3-level matching for each `oldLines` pattern:
+
+1. Exact match.
+2. `trimEnd()` match.
+3. `trim()` match (full trim).
+
+The cursor advances after each hunk so subsequent hunks match after prior matches.
+
+### Line ending handling
+
+On update, the existing file's line ending is detected (`lf` or `crlf`). Content is normalized to LF for matching, and the original line ending is restored on write. New files (add) always use LF.
+
+### Rejected formats
+
+- Standard unified diff headers (`---` / `+++`) inside `*** Update File` are detected and rejected with a clear error message directing the model to use `@@` hunks.
+
+### Validation and execution
+
+- All operations are parsed and validated before any filesystem writes.
+- If any hunk fails to match, the tool fails without partial writes.
+- If a filesystem write fails mid-patch, all previously applied operations are rolled back (reverse-iterate, restore original content or delete newly-created files).
+- The permission system parses the patch, resolves paths, and builds combined diff metadata for approval display.
+- For non-sensitive paths, the permission system performs a dry-run hunk application before approval. If any hunk cannot apply or the target file does not exist, the patch is denied at the permission stage — the user sees the specific file and hunk that would fail.
+- Sensitive paths cannot be validated (content is not accessible to the permission system), so they still require approval and may fail at execution time.
+- Both the approval metadata path and the execution path use the same `tryApplyHunks` helper for hunk application, ensuring consistent line-ending handling and matching semantics.
 - Checkpoint covers every affected path before mutation.
-- If any hunk cannot apply, the tool fails without partial writes.
 
-`apply_patch` is implemented as the structured multi-file mutation tool. It reuses the shared permission, diff metadata, and checkpoint flow used by `edit_file` and `write_file`.
+`apply_patch` reuses the shared permission, diff metadata, and checkpoint flow used by `edit_file` and `write_file`.
 
 ## Permission Model
 
@@ -145,14 +217,26 @@ Every successful mutation creates a checkpoint before writing, even when approva
 
 For `apply_patch`, the checkpoint includes all affected paths before any write occurs. This keeps add, update, and delete operations reversible.
 
-## Initial Implementation Scope
+## Implementation Status
 
 Implemented:
 
 1. Shared mutation metadata shape.
 2. `edit_file` v1: `replace_all`, line-ending preservation, diff metadata.
 3. `write_file` with read-before-write and mtime guard.
-4. `apply_patch` with add/update/delete, required end marker, line-based hunk matching, approval metadata, checkpoint coverage, and rollback on execution failure.
+4. `apply_patch` with Codex/OpenCode-aligned grammar:
+   - Patch envelope (`*** Begin Patch` / `*** End Patch`) with strict parsing.
+   - Add File with `+` prefix enforcement.
+   - Update File with `@@` hunks, context navigation, EOF anchor, insertion-only hunks.
+   - Unified-style range headers (`@@ -1,3 +1,4 @@`) parsed and range info ignored.
+   - `@@ context @@` form supported (trailing `@@` stripped); ambiguous mid-line `@@` rejected.
+   - 3-level line matching (exact → trimEnd → trim) with cursor progression.
+   - CRLF preservation on update files via shared `tryApplyHunks` helper.
+   - Move File / Move to: explicitly rejected.
+   - Standard unified diff (`---`/`+++`) detected and rejected with clear guidance.
+   - Atomic pre-flight validation, rollback on execution failure.
+   - Approval-stage hunk dry-run: non-sensitive path failures are denied before user approval.
+   - Approval metadata with combined diff, checkpoint coverage for all affected paths.
 
 Defer:
 

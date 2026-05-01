@@ -1,26 +1,63 @@
 import { z } from "zod";
 import { readFile, writeFile, unlink, stat, mkdir } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import type { ToolDefinition, ToolContext, ToolResult } from "./tool.js";
 import { resolveWorkspacePath } from "../workspace/path.js";
 import { resolvePathInfo } from "../workspace/path-info.js";
-import { computeDiff } from "./file-mutation.js";
+import {
+  computeDiff,
+  detectLineEnding,
+  normalizeToLf,
+  applyLineEnding,
+  type LineEnding,
+} from "./file-mutation.js";
 import { isSensitiveReadPath } from "../permission/sensitive-paths.js";
 
 // --- Types ---
 
 export type PatchAdd = { type: "add"; path: string; content: string };
-export type PatchHunkLine =
-  | { prefix: " "; text: string }
-  | { prefix: "-"; text: string }
-  | { prefix: "+"; text: string };
-export type PatchHunk = PatchHunkLine[];
+export type PatchHunk = {
+  changeContexts: string[];
+  oldLines: string[];
+  newLines: string[];
+  isEndOfFile?: boolean;
+};
 export type PatchUpdate = { type: "update"; path: string; hunks: PatchHunk[] };
 export type PatchDelete = { type: "delete"; path: string };
 export type PatchOperation = PatchAdd | PatchUpdate | PatchDelete;
 
 // --- Parser ---
+
+function parseAtLineContext(
+  raw: string,
+): { contexts: string[] } | { error: string } {
+  // 1. Unified range header: -1,3 +1,4 @@ [context]
+  const unifiedMatch = raw.match(/^-?\d+(?:,\d+)?\s+\+?\d+(?:,\d+)?\s*@@(.*)$/);
+  if (unifiedMatch) {
+    const after = unifiedMatch[1].trim();
+    if (after) return { contexts: [after] };
+    return { contexts: [] };
+  }
+
+  // 2. Closing @@: context @@ (trailing @@ with nothing after)
+  const closingMatch = raw.match(/^(.+?)\s*@@\s*$/);
+  if (closingMatch) {
+    const ctx = closingMatch[1].trim();
+    if (ctx) return { contexts: [ctx] };
+    return { contexts: [] };
+  }
+
+  // 3. @@ in the middle with text after it → ambiguous → reject
+  if (raw.includes("@@")) {
+    return { error: `Ambiguous @@ header: "${raw}"` };
+  }
+
+  // 4. Bare context: anything after @@
+  const ctx = raw.trim();
+  if (ctx) return { contexts: [ctx] };
+  return { contexts: [] };
+}
 
 export function parsePatch(
   raw: string,
@@ -52,9 +89,9 @@ export function parsePatch(
     const addMatch = line.match(/^\*\*\* Add File:\s*(.+)$/);
     const updateMatch = line.match(/^\*\*\* Update File:\s*(.+)$/);
     const deleteMatch = line.match(/^\*\*\* Delete File:\s*(.+)$/);
-    const moveMatch = line.match(/^\*\*\* Move File:\s*/i);
+    const moveFileMatch = line.match(/^\*\*\* Move File:\s*/i);
 
-    if (moveMatch) {
+    if (moveFileMatch) {
       return {
         ok: false,
         error: "Move File is not supported. Use delete + add instead.",
@@ -68,8 +105,13 @@ export function parsePatch(
       while (i < lines.length && !lines[i].startsWith("***")) {
         if (lines[i].startsWith("+")) {
           contentLines.push(lines[i].slice(1));
+        } else if (lines[i].trim() !== "") {
+          return {
+            ok: false,
+            error: `Add File "${path}": content line does not start with "+": "${lines[i]}"`,
+          };
         } else {
-          contentLines.push(lines[i]);
+          contentLines.push("");
         }
         i++;
       }
@@ -77,31 +119,70 @@ export function parsePatch(
     } else if (updateMatch) {
       const path = updateMatch[1].trim();
       i++;
+
+      // Check for Move to: right after Update File header
+      if (i < lines.length && /^\*\*\* Move to:\s*/i.test(lines[i])) {
+        return {
+          ok: false,
+          error: `Update File "${path}": *** Move to: is not supported. Use delete + add instead.`,
+        };
+      }
+
       const hunks: PatchHunk[] = [];
 
-      while (i < lines.length && !lines[i].startsWith("***")) {
-        if (lines[i].trim() === "@@") {
-          i++;
-          const hunkLines: PatchHunkLine[] = [];
-          while (
-            i < lines.length &&
-            lines[i].trim() !== "@@" &&
-            !lines[i].startsWith("***")
-          ) {
+      const isSectionEnd = (idx: number) =>
+        idx >= lines.length ||
+        (lines[idx].startsWith("***") && lines[idx] !== "*** End of File");
+
+      while (!isSectionEnd(i)) {
+        if (lines[i].startsWith("---") && i + 1 < lines.length && lines[i + 1].startsWith("+++")) {
+          return {
+            ok: false,
+            error: `Update File "${path}": standard unified diff format (---/+++) is not supported. Use @@ hunks inside the patch envelope.`,
+          };
+        }
+
+        if (lines[i].startsWith("@@")) {
+          const contexts: string[] = [];
+          while (i < lines.length && lines[i].startsWith("@@")) {
+            const raw = lines[i].slice(2).trimStart();
+            const ctxResult = parseAtLineContext(raw);
+            if ("error" in ctxResult) {
+              return { ok: false, error: `Update File "${path}": ${ctxResult.error}` };
+            }
+            contexts.push(...ctxResult.contexts);
+            i++;
+          }
+
+          const oldLines: string[] = [];
+          const newLines: string[] = [];
+          let isEndOfFile = false;
+
+          while (i < lines.length && !lines[i].startsWith("@@") && !isSectionEnd(i)) {
+            if (lines[i] === "*** End of File") {
+              isEndOfFile = true;
+              i++;
+              break;
+            }
             const hLine = lines[i];
             if (hLine.startsWith("-")) {
-              hunkLines.push({ prefix: "-", text: hLine.slice(1) });
+              oldLines.push(hLine.slice(1));
             } else if (hLine.startsWith("+")) {
-              hunkLines.push({ prefix: "+", text: hLine.slice(1) });
+              newLines.push(hLine.slice(1));
             } else {
               const text = hLine.startsWith(" ") ? hLine.slice(1) : hLine;
-              hunkLines.push({ prefix: " ", text });
+              oldLines.push(text);
+              newLines.push(text);
             }
             i++;
           }
-          if (hunkLines.length > 0) {
-            hunks.push(hunkLines);
-          }
+
+          hunks.push({
+            changeContexts: contexts,
+            oldLines,
+            newLines,
+            isEndOfFile: isEndOfFile || undefined,
+          });
         } else {
           i++;
         }
@@ -135,7 +216,8 @@ export function parsePatch(
   if (uniquePaths.size < paths.length) {
     return {
       ok: false,
-      error: "Patch contains duplicate file paths. Each file should appear at most once.",
+      error:
+        "Patch contains duplicate file paths. Each file should appear at most once.",
     };
   }
 
@@ -185,31 +267,35 @@ function joinContentLines(lines: string[], trailingNewline: boolean): string {
   return trailingNewline && (body !== "" || lines.length > 0) ? `${body}\n` : body;
 }
 
-function buildOldNewLines(hunk: PatchHunk): { oldLines: string[]; newLines: string[] } {
-  const oldLines: string[] = [];
-  const newLines: string[] = [];
+type Comparator = (a: string, b: string) => boolean;
 
-  for (const line of hunk) {
-    if (line.prefix === " ") {
-      oldLines.push(line.text);
-      newLines.push(line.text);
-    } else if (line.prefix === "-") {
-      oldLines.push(line.text);
-    } else {
-      newLines.push(line.text);
+function tryMatchSequence(
+  lines: string[],
+  pattern: string[],
+  startIndex: number,
+  compare: Comparator,
+  eof: boolean,
+): number {
+  if (pattern.length === 0) return -1;
+
+  if (eof) {
+    const fromEnd = lines.length - pattern.length;
+    if (fromEnd >= startIndex) {
+      let matched = true;
+      for (let j = 0; j < pattern.length; j++) {
+        if (!compare(lines[fromEnd + j], pattern[j])) {
+          matched = false;
+          break;
+        }
+      }
+      if (matched) return fromEnd;
     }
   }
 
-  return { oldLines, newLines };
-}
-
-function findLineSequence(lines: string[], needle: string[], startIndex: number): number {
-  if (needle.length === 0) return startIndex;
-
-  for (let i = startIndex; i <= lines.length - needle.length; i++) {
+  for (let i = startIndex; i <= lines.length - pattern.length; i++) {
     let matched = true;
-    for (let j = 0; j < needle.length; j++) {
-      if (lines[i + j] !== needle[j]) {
+    for (let j = 0; j < pattern.length; j++) {
+      if (!compare(lines[i + j], pattern[j])) {
         matched = false;
         break;
       }
@@ -218,6 +304,36 @@ function findLineSequence(lines: string[], needle: string[], startIndex: number)
   }
 
   return -1;
+}
+
+function seekSequence(
+  lines: string[],
+  pattern: string[],
+  startIndex: number,
+  eof = false,
+): number {
+  // Pass 1: exact
+  const exact = tryMatchSequence(lines, pattern, startIndex, (a, b) => a === b, eof);
+  if (exact !== -1) return exact;
+
+  // Pass 2: trimEnd
+  const trimEnd = tryMatchSequence(
+    lines,
+    pattern,
+    startIndex,
+    (a, b) => a.trimEnd() === b.trimEnd(),
+    eof,
+  );
+  if (trimEnd !== -1) return trimEnd;
+
+  // Pass 3: trim
+  return tryMatchSequence(
+    lines,
+    pattern,
+    startIndex,
+    (a, b) => a.trim() === b.trim(),
+    eof,
+  );
 }
 
 export function applyHunks(
@@ -229,11 +345,51 @@ export function applyHunks(
   let cursor = 0;
 
   for (let h = 0; h < hunks.length; h++) {
-    const { oldLines, newLines } = buildOldNewLines(hunks[h]);
+    const hunk = hunks[h];
+    let seekCursor = cursor;
 
-    if (oldLines.length === 0 && newLines.length === 0) continue;
+    // Seek through changeContexts
+    for (const ctx of hunk.changeContexts) {
+      const ctxIdx = seekSequence(currentLines, [ctx], seekCursor);
+      if (ctxIdx === -1) {
+        return {
+          ok: false,
+          error: `Hunk ${h + 1}: context "${ctx}" not found`,
+        };
+      }
+      seekCursor = ctxIdx + 1;
+    }
 
-    const idx = findLineSequence(currentLines, oldLines, cursor);
+    // Insertion-only hunk (no old lines)
+    if (hunk.oldLines.length === 0) {
+      let insertIdx: number;
+      if (hunk.newLines.length === 0) continue;
+
+      if (hunk.changeContexts.length > 0) {
+        // Insert after the last context line
+        insertIdx = seekCursor;
+      } else if (hunk.isEndOfFile) {
+        insertIdx = currentLines.length;
+      } else {
+        insertIdx = currentLines.length;
+      }
+
+      currentLines = [
+        ...currentLines.slice(0, insertIdx),
+        ...hunk.newLines,
+        ...currentLines.slice(insertIdx),
+      ];
+      cursor = insertIdx + hunk.newLines.length;
+      continue;
+    }
+
+    // Normal replacement hunk
+    const idx = seekSequence(
+      currentLines,
+      hunk.oldLines,
+      seekCursor,
+      hunk.isEndOfFile ?? false,
+    );
     if (idx === -1) {
       return {
         ok: false,
@@ -243,13 +399,28 @@ export function applyHunks(
 
     currentLines = [
       ...currentLines.slice(0, idx),
-      ...newLines,
-      ...currentLines.slice(idx + oldLines.length),
+      ...hunk.newLines,
+      ...currentLines.slice(idx + hunk.oldLines.length),
     ];
-    cursor = idx + newLines.length;
+    cursor = idx + hunk.newLines.length;
   }
 
   return { ok: true, result: joinContentLines(currentLines, parsed.trailingNewline) };
+}
+
+// --- Shared hunk application (normalizes, applies, restores line ending) ---
+
+function tryApplyHunks(
+  oldContent: string,
+  hunks: PatchHunk[],
+): { ok: true; result: string } | { ok: false; error: string } {
+  const lineEnding: LineEnding = detectLineEnding(oldContent);
+  const normalized = normalizeToLf(oldContent);
+  const applied = applyHunks(normalized, hunks);
+  if (!applied.ok) return applied;
+  const resultContent =
+    lineEnding === "crlf" ? applyLineEnding(applied.result, "crlf") : applied.result;
+  return { ok: true, result: resultContent };
 }
 
 // --- Diff metadata builder (used by permission system) ---
@@ -262,9 +433,11 @@ export function buildPatchDiffMeta(
   diff: string;
   additions: number;
   deletions: number;
+  failures: string[];
 } {
   const affectedPaths: string[] = [];
   const diffParts: string[] = [];
+  const failures: string[] = [];
   let totalAdditions = 0;
   let totalDeletions = 0;
 
@@ -272,36 +445,49 @@ export function buildPatchDiffMeta(
     affectedPaths.push(op.path);
     const pathInfo = resolvePathInfo(cwd, op.path);
     const absPath = pathInfo?.absolutePath ?? join(cwd, op.path);
+    const sensitive = pathInfo ? isSensitiveReadPath(pathInfo.realPath) : false;
 
     if (op.type === "add") {
+      if (sensitive) continue;
+      try {
+        statSync(absPath);
+        failures.push(
+          `Add File "${op.path}": file already exists. Use Update File to modify existing files.`,
+        );
+        continue;
+      } catch {
+        // File doesn't exist — OK to add
+      }
       const { diff, additions, deletions } = computeDiff("", op.content, op.path);
       totalAdditions += additions;
       totalDeletions += deletions;
       if (diff) diffParts.push(diff);
     } else if (op.type === "update") {
+      if (sensitive) continue;
       let oldContent = "";
       try {
         oldContent = readFileSync(absPath, "utf-8");
       } catch {
-        // File doesn't exist — diff from empty
+        failures.push(`Update File "${op.path}": file does not exist`);
+        continue;
       }
-      const applied = applyHunks(oldContent, op.hunks);
-      if (applied.ok) {
-        const { diff, additions, deletions } = computeDiff(
-          oldContent,
-          applied.result,
-          op.path,
-        );
+      const applied = tryApplyHunks(oldContent, op.hunks);
+      if (!applied.ok) {
+        failures.push(`Update File "${op.path}": ${applied.error}`);
+      } else {
+        const { diff, additions, deletions } = computeDiff(oldContent, applied.result, op.path);
         totalAdditions += additions;
         totalDeletions += deletions;
         if (diff) diffParts.push(diff);
       }
     } else {
+      if (sensitive) continue;
       let oldContent = "";
       try {
         oldContent = readFileSync(absPath, "utf-8");
       } catch {
-        // already gone
+        failures.push(`Delete File "${op.path}": file does not exist`);
+        continue;
       }
       const { diff, additions, deletions } = computeDiff(oldContent, "", op.path);
       totalAdditions += additions;
@@ -315,6 +501,7 @@ export function buildPatchDiffMeta(
     diff: diffParts.join("\n"),
     additions: totalAdditions,
     deletions: totalDeletions,
+    failures,
   };
 }
 
@@ -357,7 +544,6 @@ export const applyPatchTool: ToolDefinition = {
       pathMap = resolved.resolved;
     }
 
-    // Pre-flight: validate all operations and capture old content before writing
     type PendingOp =
       | {
           type: "add";
@@ -415,7 +601,7 @@ export const applyPatchTool: ToolDefinition = {
             output: `Update File "${op.path}" failed: file does not exist`,
           };
         }
-        const applied = applyHunks(oldContent, op.hunks);
+        const applied = tryApplyHunks(oldContent, op.hunks);
         if (!applied.ok) {
           return {
             ok: false,

@@ -64,10 +64,11 @@ describe("parsePatch", () => {
     if (op.type !== "update") return;
     expect(op.path).toBe("src/app.ts");
     expect(op.hunks).toHaveLength(1);
-    expect(op.hunks[0]).toEqual([
-      { prefix: "-", text: "old" },
-      { prefix: "+", text: "new" },
-    ]);
+    expect(op.hunks[0]).toEqual({
+      changeContexts: [],
+      oldLines: ["old"],
+      newLines: ["new"],
+    });
   });
 
   it("parses a delete file operation", () => {
@@ -111,12 +112,11 @@ describe("parsePatch", () => {
     if (!result.ok) return;
     const op = result.operations[0];
     if (op.type !== "update") return;
-    expect(op.hunks[0]).toEqual([
-      { prefix: " ", text: "line1" },
-      { prefix: "-", text: "old" },
-      { prefix: "+", text: "new" },
-      { prefix: " ", text: "line3" },
-    ]);
+    expect(op.hunks[0]).toEqual({
+      changeContexts: [],
+      oldLines: ["line1", "old", "line3"],
+      newLines: ["line1", "new", "line3"],
+    });
   });
 
   it("parses multiple hunks", () => {
@@ -137,8 +137,73 @@ describe("parsePatch", () => {
     expect(op.hunks).toHaveLength(2);
   });
 
+  it("parses @@ with change context", () => {
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+@@ function greet():
+-old
++new
+*** End Patch`;
+    const result = parsePatch(patch);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const op = result.operations[0];
+    if (op.type !== "update") return;
+    expect(op.hunks[0].changeContexts).toEqual(["function greet():"]);
+  });
+
+  it("parses @@ -1,3 +1,4 @@ unified-style header (ignores line numbers)", () => {
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+@@ -1,3 +1,4 @@
+ line1
+-old
++new
+ line3
+*** End Patch`;
+    const result = parsePatch(patch);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const op = result.operations[0];
+    if (op.type !== "update") return;
+    expect(op.hunks[0].oldLines).toEqual(["line1", "old", "line3"]);
+    expect(op.hunks[0].newLines).toEqual(["line1", "new", "line3"]);
+  });
+
+  it("parses *** End of File as EOF anchor", () => {
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+@@
+-old
++new
+*** End of File
+*** End Patch`;
+    const result = parsePatch(patch);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const op = result.operations[0];
+    if (op.type !== "update") return;
+    expect(op.hunks[0].isEndOfFile).toBe(true);
+  });
+
+  it("parses multiple @@ context lines for nested navigation", () => {
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+@@ class Base
+@@   def method():
+-old
++new
+*** End Patch`;
+    const result = parsePatch(patch);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const op = result.operations[0];
+    if (op.type !== "update") return;
+    expect(op.hunks[0].changeContexts).toEqual(["class Base", "def method():"]);
+  });
+
   it("rejects missing Begin Patch", () => {
-    const result = parsePatch("*** Add File: x\n+content");
+    const result = parsePatch("*** Add File: x\n+content\n*** End Patch");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("Begin Patch");
   });
@@ -155,12 +220,22 @@ describe("parsePatch", () => {
     if (!result.ok) expect(result.error).toContain("Invalid patch line");
   });
 
-  it("rejects Move File", () => {
+  it("rejects *** Move File", () => {
     const result = parsePatch(
       "*** Begin Patch\n*** Move File: a.txt to b.txt\n*** End Patch",
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("Move File is not supported");
+  });
+
+  it("rejects *** Move to: inside Update File", () => {
+    const patch = `*** Begin Patch
+*** Update File: a.txt
+*** Move to: b.txt
+*** End Patch`;
+    const result = parsePatch(patch);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("Move to: is not supported");
   });
 
   it("rejects update with no hunks", () => {
@@ -185,6 +260,106 @@ describe("parsePatch", () => {
     const result = parsePatch(patch);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("End Patch");
+  });
+
+  it("rejects Add File with non-+ content line", () => {
+    const patch = `*** Begin Patch
+*** Add File: x.txt
++good line
+bad line
+*** End Patch`;
+    const result = parsePatch(patch);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('does not start with "+"');
+  });
+
+  it("rejects standard unified diff ---/+++ with clear message", () => {
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+--- a/app.ts
++++ b/app.ts
+*** End Patch`;
+    const result = parsePatch(patch);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("unified diff");
+    }
+  });
+
+  it("rejects mixed unified diff headers + valid hunks", () => {
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+--- a/app.ts
++++ b/app.ts
+@@
+-old
++new
+*** End Patch`;
+    const result = parsePatch(patch);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("unified diff");
+    }
+  });
+
+  it("parses @@ hello world @@ as context 'hello world'", () => {
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+@@ hello world @@
+-old
++new
+*** End Patch`;
+    const result = parsePatch(patch);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const op = result.operations[0];
+    if (op.type !== "update") return;
+    expect(op.hunks[0].changeContexts).toEqual(["hello world"]);
+  });
+
+  it("parses @@ -1,3 +1,4 @@ fn greet as context 'fn greet'", () => {
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+@@ -1,3 +1,4 @@ fn greet
+-old
++new
+*** End Patch`;
+    const result = parsePatch(patch);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const op = result.operations[0];
+    if (op.type !== "update") return;
+    expect(op.hunks[0].changeContexts).toEqual(["fn greet"]);
+  });
+
+  it("parses @@ context @@ followed by another @@ line", () => {
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+@@ class Base @@
+@@ method
+-old
++new
+*** End Patch`;
+    const result = parsePatch(patch);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const op = result.operations[0];
+    if (op.type !== "update") return;
+    expect(op.hunks[0].changeContexts).toEqual(["class Base", "method"]);
+  });
+
+  it("rejects ambiguous @@ with @@ in middle and no trailing close", () => {
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+@@ ctx @@ trailing
+-old
++new
+*** End Patch`;
+    const result = parsePatch(patch);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("Ambiguous");
+    }
   });
 
   it("parses add file with multiline content", () => {
@@ -260,10 +435,7 @@ describe("resolvePatchPaths", () => {
 describe("applyHunks", () => {
   it("applies a simple replacement", () => {
     const result = applyHunks("hello", [
-      [
-        { prefix: "-", text: "hello" },
-        { prefix: "+", text: "goodbye" },
-      ],
+      { changeContexts: [], oldLines: ["hello"], newLines: ["goodbye"] },
     ]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -272,10 +444,7 @@ describe("applyHunks", () => {
 
   it("does not match deleted text inside a line substring", () => {
     const result = applyHunks("hello world", [
-      [
-        { prefix: "-", text: "hello" },
-        { prefix: "+", text: "goodbye" },
-      ],
+      { changeContexts: [], oldLines: ["hello"], newLines: ["goodbye"] },
     ]);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("does not match");
@@ -283,29 +452,22 @@ describe("applyHunks", () => {
 
   it("applies replacement with context", () => {
     const result = applyHunks("line1\nline2\nline3", [
-      [
-        { prefix: " ", text: "line1" },
-        { prefix: "-", text: "line2" },
-        { prefix: "+", text: "modified" },
-        { prefix: " ", text: "line3" },
-      ],
+      {
+        changeContexts: [],
+        oldLines: ["line1", "line2", "line3"],
+        newLines: ["line1", "modified", "line3"],
+      },
     ]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.result).toBe("line1\nmodified\nline3");
   });
 
-  it("applies multiple hunks", () => {
+  it("applies multiple hunks with cursor progression", () => {
     const content = "aaa\nbbb\nccc\nbbb\nddd";
     const result = applyHunks(content, [
-      [
-        { prefix: "-", text: "bbb" },
-        { prefix: "+", text: "BBB" },
-      ],
-      [
-        { prefix: "-", text: "bbb" },
-        { prefix: "+", text: "BBB" },
-      ],
+      { changeContexts: [], oldLines: ["bbb"], newLines: ["BBB"] },
+      { changeContexts: [], oldLines: ["bbb"], newLines: ["BBB"] },
     ]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -314,22 +476,46 @@ describe("applyHunks", () => {
 
   it("fails when context does not match", () => {
     const result = applyHunks("hello world", [
-      [
-        { prefix: "-", text: "goodbye" },
-        { prefix: "+", text: "hello" },
-      ],
+      { changeContexts: [], oldLines: ["goodbye"], newLines: ["hello"] },
     ]);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("does not match");
   });
 
-  it("handles addition-only hunk", () => {
+  it("handles addition-only hunk with context", () => {
     const result = applyHunks("line1\nline3", [
-      [
-        { prefix: " ", text: "line1" },
-        { prefix: "+", text: "line2" },
-        { prefix: " ", text: "line3" },
-      ],
+      {
+        changeContexts: [],
+        oldLines: ["line1", "line3"],
+        newLines: ["line1", "line2", "line3"],
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result).toBe("line1\nline2\nline3");
+  });
+
+  it("handles pure insertion-only hunk at EOF", () => {
+    const result = applyHunks("line1\nline2", [
+      {
+        changeContexts: [],
+        oldLines: [],
+        newLines: ["line3"],
+        isEndOfFile: true,
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result).toBe("line1\nline2\nline3");
+  });
+
+  it("handles pure insertion-only hunk after context", () => {
+    const result = applyHunks("line1\nline3", [
+      {
+        changeContexts: ["line1"],
+        oldLines: [],
+        newLines: ["line2"],
+      },
     ]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -338,15 +524,83 @@ describe("applyHunks", () => {
 
   it("handles removal-only hunk", () => {
     const result = applyHunks("line1\nline2\nline3", [
-      [
-        { prefix: " ", text: "line1" },
-        { prefix: "-", text: "line2" },
-        { prefix: " ", text: "line3" },
-      ],
+      {
+        changeContexts: [],
+        oldLines: ["line1", "line2", "line3"],
+        newLines: ["line1", "line3"],
+      },
     ]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.result).toBe("line1\nline3");
+  });
+
+  it("uses changeContext to locate correct block among duplicates", () => {
+    const content = "class A:\n  x = 1\n  y = 2\nclass B:\n  x = 1\n  y = 3";
+    const result = applyHunks(content, [
+      {
+        changeContexts: ["class B:"],
+        oldLines: ["  y = 3"],
+        newLines: ["  y = 4"],
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result).toContain("class B:\n  x = 1\n  y = 4");
+    expect(result.result).toContain("class A:\n  x = 1\n  y = 2");
+  });
+
+  it("prefers EOF match when isEndOfFile is set", () => {
+    const content = "dup\nmiddle\ndup";
+    const result = applyHunks(content, [
+      {
+        changeContexts: [],
+        oldLines: ["dup"],
+        newLines: ["replaced"],
+        isEndOfFile: true,
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result).toBe("dup\nmiddle\nreplaced");
+  });
+
+  it("matches with trimEnd fallback", () => {
+    const content = "hello   \nworld";
+    const result = applyHunks(content, [
+      {
+        changeContexts: [],
+        oldLines: ["hello", "world"],
+        newLines: ["hi", "world"],
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result).toBe("hi\nworld");
+  });
+
+  it("matches with trim fallback", () => {
+    const content = "  hello  \n  world  ";
+    const result = applyHunks(content, [
+      {
+        changeContexts: [],
+        oldLines: ["hello", "world"],
+        newLines: ["hi", "world"],
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Trim matching finds the position, replacement uses newLines as-is
+    expect(result.result).toBe("hi\nworld");
+  });
+
+  it("preserves trailing newline", () => {
+    const result = applyHunks("old\n", [
+      { changeContexts: [], oldLines: ["old"], newLines: ["new"] },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result).toBe("new\n");
   });
 });
 
@@ -460,7 +714,6 @@ describe("apply_patch tool", () => {
     expect(result.ok).toBe(false);
     expect(result.output).toContain("already exists");
 
-    // File unchanged
     expect(await readFile(join(tmp, "hello.txt"), "utf-8")).toBe("existing");
 
     await rm(tmp, { recursive: true });
@@ -555,7 +808,6 @@ describe("apply_patch tool", () => {
     expect(result.ok).toBe(false);
     expect(result.output).toContain("does not match");
 
-    // File unchanged
     expect(await readFile(join(tmp, "app.ts"), "utf-8")).toBe("line1\nactual\nline3");
 
     await rm(tmp, { recursive: true });
@@ -566,7 +818,6 @@ describe("apply_patch tool", () => {
     await writeFile(join(tmp, "existing.txt"), "keep this");
     const ctx = makeContext(tmp);
 
-    // This patch: first op should succeed (add), second should fail (update with wrong context)
     const patch = `*** Begin Patch
 *** Add File: new.txt
 +new file content
@@ -579,7 +830,6 @@ describe("apply_patch tool", () => {
     const result = await applyPatchTool.execute({ patch }, ctx);
     expect(result.ok).toBe(false);
 
-    // Neither file should be changed: new.txt not created, existing.txt unchanged
     expect(existsSync(join(tmp, "new.txt"))).toBe(false);
     expect(await readFile(join(tmp, "existing.txt"), "utf-8")).toBe("keep this");
 
@@ -662,9 +912,166 @@ describe("apply_patch tool", () => {
 
     await rm(tmp, { recursive: true });
   });
-});
 
-// --- Diff metadata ---
+  it("updates with @@ -1,3 +1,4 @@ unified-style header", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "app.ts"), "line1\nold\nline3");
+    const ctx = makeContext(tmp);
+
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+@@ -1,3 +1,4 @@
+ line1
+-old
++new
+ line3
+*** End Patch`;
+
+    const result = await applyPatchTool.execute({ patch }, ctx);
+    expect(result.ok).toBe(true);
+    expect(await readFile(join(tmp, "app.ts"), "utf-8")).toBe("line1\nnew\nline3");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("updates with @@ context to locate among duplicates", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(
+      join(tmp, "app.ts"),
+      "class A:\n  x = 1\n  y = 2\nclass B:\n  x = 1\n  y = 3\n",
+    );
+    const ctx = makeContext(tmp);
+
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+@@ class B:
+-  y = 3
++  y = 4
+*** End Patch`;
+
+    const result = await applyPatchTool.execute({ patch }, ctx);
+    expect(result.ok).toBe(true);
+    const content = await readFile(join(tmp, "app.ts"), "utf-8");
+    expect(content).toContain("class B:\n  x = 1\n  y = 4");
+    expect(content).toContain("class A:\n  x = 1\n  y = 2");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("applies multi-hunk update with cursor progression", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "f.txt"), "aaa\nbbb\nccc\nbbb\nddd");
+    const ctx = makeContext(tmp);
+
+    const patch = `*** Begin Patch
+*** Update File: f.txt
+@@
+-bbb
++BBB
+@@
+-bbb
++BBB
+*** End Patch`;
+
+    const result = await applyPatchTool.execute({ patch }, ctx);
+    expect(result.ok).toBe(true);
+    expect(await readFile(join(tmp, "f.txt"), "utf-8")).toBe("aaa\nBBB\nccc\nBBB\nddd");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("insertion-only hunk adds lines at context position", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "f.txt"), "line1\nline3\n");
+    const ctx = makeContext(tmp);
+
+    const patch = `*** Begin Patch
+*** Update File: f.txt
+@@
+ line1
++line2
+ line3
+*** End Patch`;
+
+    const result = await applyPatchTool.execute({ patch }, ctx);
+    expect(result.ok).toBe(true);
+    expect(await readFile(join(tmp, "f.txt"), "utf-8")).toBe("line1\nline2\nline3\n");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("EOF anchor matches from end of file", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "f.txt"), "dup\nmiddle\ndup\n");
+    const ctx = makeContext(tmp);
+
+    const patch = `*** Begin Patch
+*** Update File: f.txt
+@@
+-dup
++replaced
+*** End of File
+*** End Patch`;
+
+    const result = await applyPatchTool.execute({ patch }, ctx);
+    expect(result.ok).toBe(true);
+    expect(await readFile(join(tmp, "f.txt"), "utf-8")).toBe("dup\nmiddle\nreplaced\n");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("CRLF file stays CRLF after update", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "crlf.txt"), "line1\r\nold\r\nline3\r\n");
+    const ctx = makeContext(tmp);
+
+    const patch = `*** Begin Patch
+*** Update File: crlf.txt
+@@
+ line1
+-old
++new
+ line3
+*** End Patch`;
+
+    const result = await applyPatchTool.execute({ patch }, ctx);
+    expect(result.ok).toBe(true);
+
+    const content = await readFile(join(tmp, "crlf.txt"), "utf-8");
+    expect(content).toContain("\r\n");
+    expect(content).not.toMatch(/(?<!\r)\n/);
+    expect(content).toContain("new");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("approval-passing patch executes with same semantics", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "app.ts"), "line1\nold\nline3");
+
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+@@ line1
+-old
++new
+*** End Patch`;
+
+    // Verify permission passes
+    const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
+    expect(decision.behavior).toBe("ask");
+    expect(decision.metadata?.additions).toBe(1);
+    expect(decision.metadata?.deletions).toBe(1);
+
+    // Verify execution produces same result
+    const ctx = makeContext(tmp);
+    const result = await applyPatchTool.execute({ patch }, ctx);
+    expect(result.ok).toBe(true);
+    const content = await readFile(join(tmp, "app.ts"), "utf-8");
+    expect(content).toBe("line1\nnew\nline3");
+
+    await rm(tmp, { recursive: true });
+  });
+});
 
 describe("buildPatchDiffMeta", () => {
   it("returns affected paths and diff stats", async () => {
@@ -704,6 +1111,63 @@ describe("buildPatchDiffMeta", () => {
 
     await rm(tmp, { recursive: true });
   });
+
+  it("Add File diff stats are +N -0", async () => {
+    const parsed = parsePatch(
+      `*** Begin Patch\n*** Add File: hello.txt\n+line1\n+line2\n+line3\n*** End Patch`,
+    );
+    if (!parsed.ok) return;
+
+    const meta = buildPatchDiffMeta(parsed.operations, "/tmp/workspace");
+    expect(meta.additions).toBe(3);
+    expect(meta.deletions).toBe(0);
+  });
+
+  it("CRLF update diff matches execution output", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "crlf.txt"), "line1\r\nold\r\nline3\r\n");
+
+    const patch = `*** Begin Patch
+*** Update File: crlf.txt
+@@
+-old
++new
+*** End Patch`;
+
+    const parsed = parsePatch(patch);
+    if (!parsed.ok) return;
+
+    const meta = buildPatchDiffMeta(parsed.operations, tmp);
+    // Before the fix, CRLF files would show whole-file rewrite (3+ additions, 3+ deletions)
+    expect(meta.additions).toBe(1);
+    expect(meta.deletions).toBe(1);
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("reports hunk failures without computing diff", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "app.ts"), "line1\nactual\nline3");
+
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+@@
+ line1
+-wrong
++new
+ line3
+*** End Patch`;
+
+    const parsed = parsePatch(patch);
+    if (!parsed.ok) return;
+
+    const meta = buildPatchDiffMeta(parsed.operations, tmp);
+    expect(meta.failures.length).toBeGreaterThan(0);
+    expect(meta.failures[0]).toContain("does not match");
+    expect(meta.diff).toBe("");
+
+    await rm(tmp, { recursive: true });
+  });
 });
 
 describe("apply_patch permission metadata", () => {
@@ -724,6 +1188,129 @@ describe("apply_patch permission metadata", () => {
     expect(decision.metadata?.affectedPaths).toEqual([".env"]);
     expect(decision.metadata?.diff).toBeUndefined();
     expect(JSON.stringify(decision.metadata)).not.toContain("TOKEN=old");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("denies update patch when hunk cannot apply", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "app.ts"), "line1\nactual\nline3");
+
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+@@
+ line1
+-wrong
++new
+ line3
+*** End Patch`;
+
+    const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
+    expect(decision.behavior).toBe("deny");
+    expect(decision.reason).toContain("will fail");
+    expect(decision.metadata?.failures).toBeDefined();
+    expect((decision.metadata!.failures as string[]).length).toBeGreaterThan(0);
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("denies update patch when file does not exist", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+
+    const patch = `*** Begin Patch
+*** Update File: nonexistent.ts
+@@
+-old
++new
+*** End Patch`;
+
+    const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
+    expect(decision.behavior).toBe("deny");
+    expect(decision.reason).toContain("does not exist");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("denies add patch when file already exists", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "hello.txt"), "existing");
+
+    const decision = checkToolPermission("apply_patch", { patch: ADD_PATCH }, "auto", tmp);
+    expect(decision.behavior).toBe("deny");
+    expect(decision.reason).toContain("already exists");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("denies add patch when path is an existing directory", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    const { mkdir: mkdirAsync } = await import("node:fs/promises");
+    await mkdirAsync(join(tmp, "src"));
+
+    const patch = `*** Begin Patch
+*** Add File: src
++content
+*** End Patch`;
+
+    const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
+    expect(decision.behavior).toBe("deny");
+    expect(decision.reason).toContain("already exists");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("denies delete patch when file does not exist", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+
+    const decision = checkToolPermission(
+      "apply_patch",
+      { patch: DELETE_PATCH("missing.txt") },
+      "auto",
+      tmp,
+    );
+    expect(decision.behavior).toBe("deny");
+    expect(decision.reason).toContain("does not exist");
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("shows diff for valid patch with both add and update", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "app.ts"), "old\n");
+
+    const patch = `*** Begin Patch
+*** Add File: new.txt
++new content
+*** Update File: app.ts
+@@
+-old
++new
+*** End Patch`;
+
+    const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
+    expect(decision.behavior).toBe("ask");
+    expect(decision.metadata?.diff).toContain("+new");
+    expect(decision.metadata?.additions).toBeGreaterThan(0);
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("does not validate hunks for sensitive paths", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, ".env"), "TOKEN=old\n");
+
+    const patch = `*** Begin Patch
+*** Update File: .env
+@@
+-TOTALLY_WRONG
++new
+*** End Patch`;
+
+    const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
+    // Sensitive: can't validate hunks, still asks for approval
+    expect(decision.behavior).toBe("ask");
+    expect(decision.metadata?.sensitive).toBe(true);
+    expect(decision.metadata?.failures).toBeUndefined();
 
     await rm(tmp, { recursive: true });
   });

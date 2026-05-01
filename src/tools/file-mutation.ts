@@ -235,11 +235,13 @@ export function computeDiff(
     return { diff: "", additions: 0, deletions: 0 };
   }
 
-  const oldLines = oldContent.split("\n");
-  const newLines = newContent.split("\n");
+  const oldLines = oldContent === "" ? [] : oldContent.split("\n");
+  const newLines = newContent === "" ? [] : newContent.split("\n");
   // Remove trailing empty element from split if content ends with \n
-  if (oldContent.endsWith("\n") && oldLines[oldLines.length - 1] === "") oldLines.pop();
-  if (newContent.endsWith("\n") && newLines[newLines.length - 1] === "") newLines.pop();
+  if (oldContent !== "" && oldContent.endsWith("\n") && oldLines[oldLines.length - 1] === "")
+    oldLines.pop();
+  if (newContent !== "" && newContent.endsWith("\n") && newLines[newLines.length - 1] === "")
+    newLines.pop();
 
   const ops = diffLines(oldLines, newLines);
   const hunks = groupHunks(ops, CONTEXT_LINES);
