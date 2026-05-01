@@ -332,6 +332,83 @@ describe("search sensitive file exclusion", () => {
     await rm(sibling, { recursive: true, force: true });
   });
 
+  it("excludes dependency/build directories from search results", async () => {
+    const root = await mkdtemp(join(tmpdir(), "myagent-workspace-"));
+    await mkdir(join(root, "src"), { recursive: true });
+    await mkdir(join(root, "node_modules", "pkg"), { recursive: true });
+    await writeFile(join(root, "src", "app.ts"), "needle in source");
+    await writeFile(join(root, "node_modules", "pkg", "index.js"), "needle in deps");
+
+    const { searchTool } = await import("../src/tools/search.js");
+    const result = await searchTool.execute(
+      { pattern: "needle", path: "." },
+      { cwd: root },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("src");
+    expect(result.output).not.toContain("node_modules");
+
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("supports caller-provided search excludes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "myagent-workspace-"));
+    await mkdir(join(root, "src"), { recursive: true });
+    await mkdir(join(root, "vendor"), { recursive: true });
+    await writeFile(join(root, "src", "app.ts"), "needle in source");
+    await writeFile(join(root, "vendor", "generated.ts"), "needle in vendor");
+
+    const { searchTool } = await import("../src/tools/search.js");
+    const result = await searchTool.execute(
+      { pattern: "needle", path: ".", exclude: ["vendor"] },
+      { cwd: root },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("src");
+    expect(result.output).not.toContain("vendor");
+
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("truncates broad search results instead of failing maxBuffer", async () => {
+    const root = await mkdtemp(join(tmpdir(), "myagent-workspace-"));
+    const lines = Array.from({ length: 260 }, (_, i) => `needle line ${i}`).join("\n");
+    await writeFile(join(root, "large.txt"), lines);
+
+    const { searchTool } = await import("../src/tools/search.js");
+    const result = await searchTool.execute(
+      { pattern: "needle", path: "." },
+      { cwd: root },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("needle line 0");
+    expect(result.output).toContain("search results truncated");
+
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("honors caller-provided max_results", async () => {
+    const root = await mkdtemp(join(tmpdir(), "myagent-workspace-"));
+    const lines = Array.from({ length: 10 }, (_, i) => `needle line ${i}`).join("\n");
+    await writeFile(join(root, "limited.txt"), lines);
+
+    const { searchTool } = await import("../src/tools/search.js");
+    const result = await searchTool.execute(
+      { pattern: "needle", path: ".", max_results: 3 },
+      { cwd: root },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("needle line 0");
+    expect(result.output).not.toContain("needle line 9");
+    expect(result.output).toContain("search results truncated");
+
+    await rm(root, { recursive: true, force: true });
+  });
+
   it("search outside workspace → ask", async () => {
     const result = checkPermission(
       "search",

@@ -60,6 +60,11 @@ export function buildApprovalPattern(
       const meta = decision.metadata ?? {};
       return (meta.absolutePath as string) ?? (input as { path: string }).path;
     }
+    case "apply_patch": {
+      const meta = decision.metadata ?? {};
+      const paths = meta.affectedPaths as string[] | undefined;
+      return paths ? paths.sort().join(",") : "patch";
+    }
     default:
       return undefined;
   }

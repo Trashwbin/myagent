@@ -24,11 +24,11 @@ edit_file / write_file / apply_patch
 
 The tools overlap at the filesystem level, but not at the intent level:
 
-| Tool          | Best for                              | Main safety property                  |
-| ------------- | ------------------------------------- | ------------------------------------- |
-| `edit_file`   | small targeted changes                | `old_string` must match existing text |
-| `write_file`  | new files and whole-file replacement  | existing files must be read first     |
-| `apply_patch` | multi-file add/update/delete/move ops | hunks must apply against context      |
+| Tool          | Best for                             | Main safety property                  |
+| ------------- | ------------------------------------ | ------------------------------------- |
+| `edit_file`   | small targeted changes               | `old_string` must match existing text |
+| `write_file`  | new files and whole-file replacement | existing files must be read first     |
+| `apply_patch` | multi-file add/update/delete ops     | hunks must apply against context      |
 
 Do not create separate permission systems for these tools. They all represent file modification and should be governed by the same `edit` permission family.
 
@@ -111,14 +111,17 @@ This should follow the Codex/OpenCode patch envelope rather than raw shell `patc
 Rules:
 
 - File paths are relative to the workspace. Absolute paths are rejected.
-- Supported operations: add, update, delete, move.
+- Supported operations: add, update, delete.
+- Move is deferred; use delete + add for now.
 - Every affected path must resolve inside the workspace.
+- `*** End Patch` is required so truncated patches do not execute.
 - The patch is parsed and validated before approval.
-- Approval shows the combined diff and per-file summary.
+- Approval shows the combined diff and per-file summary for non-sensitive paths.
+- Sensitive paths still require approval, but approval metadata does not read or expose file contents.
 - Checkpoint covers every affected path before mutation.
 - If any hunk cannot apply, the tool fails without partial writes.
 
-`apply_patch` is not the first implementation target. Build it after `write_file` and the shared mutation policy are stable.
+`apply_patch` is implemented as the structured multi-file mutation tool. It reuses the shared permission, diff metadata, and checkpoint flow used by `edit_file` and `write_file`.
 
 ## Permission Model
 
@@ -140,20 +143,20 @@ Approval metadata should include:
 
 Every successful mutation creates a checkpoint before writing, even when approval was auto-allowed by a session/workspace rule.
 
-For `apply_patch`, the checkpoint must include all affected source and destination paths before any write occurs. This keeps delete and move operations reversible.
+For `apply_patch`, the checkpoint includes all affected paths before any write occurs. This keeps add, update, and delete operations reversible.
 
 ## Initial Implementation Scope
 
-Implement first:
+Implemented:
 
 1. Shared mutation metadata shape.
 2. `edit_file` v1: `replace_all`, line-ending preservation, diff metadata.
 3. `write_file` with read-before-write and mtime guard.
-4. Tests for stale write rejection, new file creation, overwrite after read, and checkpoint creation.
+4. `apply_patch` with add/update/delete, required end marker, line-based hunk matching, approval metadata, checkpoint coverage, and rollback on execution failure.
 
 Defer:
 
-- full patch parser
+- move support
 - LSP diagnostics
 - automatic formatting
 - hidden-git snapshot engine

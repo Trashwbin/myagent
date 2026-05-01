@@ -7,6 +7,7 @@ import { writeFileTool } from "../src/tools/write.js";
 import { bashTool } from "../src/tools/bash.js";
 import { listDirTool } from "../src/tools/list-dir.js";
 import { searchTool } from "../src/tools/search.js";
+import { applyPatchTool } from "../src/tools/apply-patch.js";
 import { ReadStateTracker } from "../src/tools/file-mutation.js";
 import { runSession, runTurn } from "../src/session/loop.js";
 import type { TurnEvent } from "../src/session/loop.js";
@@ -18,6 +19,7 @@ import type { ApprovalRule } from "../src/permission/approval.js";
 import { openStore } from "../src/storage/store.js";
 import type { TranscriptStore } from "../src/storage/store.js";
 import { mkdtemp, writeFile, readFile, rm, mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -2822,6 +2824,262 @@ describe("Approval memory and abort", () => {
     expect(approvalEvent?.metadata?.diff).toContain("+new");
     expect(approvalEvent?.metadata?.additions).toBe(1);
     expect(approvalEvent?.metadata?.deletions).toBe(1);
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  // --- apply_patch integration ---
+
+  it("apply_patch creates checkpoint covering all affected paths", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, "a.txt"), "old-a");
+    await writeFile(join(tmp, "b.txt"), "old-b");
+    const registry = new ToolRegistry();
+    registry.register(applyPatchTool);
+
+    const patch = `*** Begin Patch
+*** Add File: c.txt
++new-c
+*** Update File: a.txt
+@@
+-old-a
++new-a
+*** Delete File: b.txt
+*** End Patch`;
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "apply_patch",
+          input: { patch },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(provider, registry, makeSession(tmp), "patch", {
+      approval: "auto",
+      approvalHandler: async () => "allow_once",
+    });
+
+    const result = newMessages.find(
+      (m) => m.role === "tool_result" && m.toolName === "apply_patch",
+    );
+    expect(result?.content).toContain("Applied patch");
+    expect(result?.content).toContain("[checkpoint:");
+
+    // Verify changes applied
+    expect(await readFile(join(tmp, "a.txt"), "utf-8")).toBe("new-a");
+    expect(existsSync(join(tmp, "b.txt"))).toBe(false);
+    expect(await readFile(join(tmp, "c.txt"), "utf-8")).toBe("new-c");
+
+    // Restore checkpoint
+    const match = result!.content.match(/\[checkpoint: ([^\]]+)\]/);
+    expect(match).toBeTruthy();
+    const { restoreCheckpoint } = await import("../src/workspace/checkpoint.js");
+    await restoreCheckpoint(tmp, match![1]);
+
+    // Verify restoration
+    expect(await readFile(join(tmp, "a.txt"), "utf-8")).toBe("old-a");
+    expect(await readFile(join(tmp, "b.txt"), "utf-8")).toBe("old-b");
+    expect(existsSync(join(tmp, "c.txt"))).toBe(false);
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("apply_patch is denied in never-approval mode", async () => {
+    const tmp = await tmpDir();
+    const registry = new ToolRegistry();
+    registry.register(applyPatchTool);
+
+    const patch = `*** Begin Patch
+*** Add File: x.txt
++content
+*** End Patch`;
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "apply_patch",
+          input: { patch },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(provider, registry, makeSession(tmp), "patch", {
+      approval: "never",
+    });
+
+    const result = newMessages.find(
+      (m) => m.role === "tool_result" && m.toolName === "apply_patch",
+    );
+    expect(result?.content).toContain("denied");
+    expect(existsSync(join(tmp, "x.txt"))).toBe(false);
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("apply_patch approval event includes diff and affected paths", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, "app.ts"), "old\n");
+    const registry = new ToolRegistry();
+    registry.register(applyPatchTool);
+    const events: TurnEvent[] = [];
+
+    const patch = `*** Begin Patch
+*** Add File: new.txt
++new file
+*** Update File: app.ts
+@@
+-old
++new
+*** End Patch`;
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "apply_patch",
+          input: { patch },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+    ]);
+
+    await runTurn(provider, registry, makeSession(tmp), "patch", {
+      approval: "auto",
+      approvalHandler: async () => "abort",
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    const approvalEvent = events.find(
+      (e): e is Extract<TurnEvent, { type: "tool_approval_required" }> =>
+        e.type === "tool_approval_required",
+    );
+    expect(approvalEvent).toBeDefined();
+    expect(approvalEvent?.metadata?.operation).toBe("patch");
+    expect(approvalEvent?.metadata?.affectedPaths).toEqual(["app.ts", "new.txt"]);
+    expect(approvalEvent?.metadata?.diff).toContain("+new file");
+    expect(approvalEvent?.metadata?.diff).toContain("-old");
+    expect(approvalEvent?.metadata?.diff).toContain("+new");
+    expect(typeof approvalEvent?.metadata?.additions).toBe("number");
+    expect(typeof approvalEvent?.metadata?.deletions).toBe("number");
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("apply_patch sensitive paths are not auto-approved by existing session rule", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, ".env"), "TOKEN=old\n");
+    const registry = new ToolRegistry();
+    registry.register(applyPatchTool);
+    const sessionRules: ApprovalRule[] = [
+      {
+        id: randomUUID(),
+        workspaceRoot: tmp,
+        toolName: "apply_patch",
+        pattern: ".env",
+        action: "allow",
+        scope: "session",
+        reason: "previous patch approval",
+        createdAt: Date.now(),
+      },
+    ];
+    const events: TurnEvent[] = [];
+
+    const patch = `*** Begin Patch
+*** Update File: .env
+@@
+-TOKEN=old
++TOKEN=new
+*** End Patch`;
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "apply_patch",
+          input: { patch },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(provider, registry, makeSession(tmp), "patch", {
+      approval: "auto",
+      sessionApprovalRules: sessionRules,
+      approvalHandler: async () => "abort",
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
+
+    const approvalEvent = events.find(
+      (e): e is Extract<TurnEvent, { type: "tool_approval_required" }> =>
+        e.type === "tool_approval_required",
+    );
+    expect(approvalEvent).toBeDefined();
+    expect(approvalEvent?.metadata?.sensitive).toBe(true);
+    expect(approvalEvent?.metadata?.diff).toBeUndefined();
+    expect(JSON.stringify(approvalEvent?.metadata)).not.toContain("TOKEN=old");
+    expect(newMessages.some((m) => m.role === "tool_result")).toBe(true);
+    expect(await readFile(join(tmp, ".env"), "utf-8")).toBe("TOKEN=old\n");
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("apply_patch without approvalHandler reports requires approval", async () => {
+    const tmp = await tmpDir();
+    const registry = new ToolRegistry();
+    registry.register(applyPatchTool);
+
+    const patch = `*** Begin Patch
+*** Add File: x.txt
++content
+*** End Patch`;
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "apply_patch",
+          input: { patch },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(provider, registry, makeSession(tmp), "patch", {
+      approval: "auto",
+    });
+
+    const result = newMessages.find(
+      (m) => m.role === "tool_result" && m.toolName === "apply_patch",
+    );
+    expect(result?.content).toContain("requires approval");
+    expect(existsSync(join(tmp, "x.txt"))).toBe(false);
 
     await rm(tmp, { recursive: true, force: true });
   });

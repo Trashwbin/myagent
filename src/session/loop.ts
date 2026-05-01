@@ -380,6 +380,27 @@ async function runAgentLoop(
           if (onEvent) await onEvent({ type: "tool_result", message: msg });
           continue;
         }
+      } else if (tc.name === "apply_patch") {
+        const resolvedPaths = (toolInput as { resolvedPaths?: Record<string, string> })
+          .resolvedPaths;
+        const affectedPaths = resolvedPaths ? Object.keys(resolvedPaths) : [];
+        if (affectedPaths.length > 0) {
+          try {
+            const cp = await createCheckpoint(cwd, affectedPaths);
+            checkpointId = cp.id;
+          } catch (err: any) {
+            const msg: Message = {
+              role: "tool_result",
+              toolCallId: tc.id,
+              toolName: tc.name,
+              content: `Checkpoint failed, patch not executed: ${err.message}`,
+            };
+            messages.push(msg);
+            newMessages.push(msg);
+            if (onEvent) await onEvent({ type: "tool_result", message: msg });
+            continue;
+          }
+        }
       }
 
       if (onEvent)

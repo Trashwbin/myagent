@@ -96,8 +96,8 @@ Use explicit built-in tools only:
 - `list_dir`
 - `search`
 - `edit_file`
-- `write_file` (next)
-- `apply_patch` (after write/edit stabilize)
+- `write_file`
+- `apply_patch`
 - `bash`
 
 Implementation choices:
@@ -105,7 +105,7 @@ Implementation choices:
 - file IO: Node `fs/promises`
 - search: shell out to `rg`
 - shell execution: `execa`
-- file mutation: `edit_file` for targeted replacement, `write_file` for whole-file writes, then structured `apply_patch`
+- file mutation: `edit_file` for targeted replacement, `write_file` for whole-file writes, and `apply_patch` for structured multi-file changes
 
 See [tools/file-mutation.md](tools/file-mutation.md) for the write/edit/patch tool plan.
 
@@ -187,8 +187,8 @@ repo, use git diff as the primary output.
 Implement simple local compaction after the base loop works.
 
 Status: not implemented yet. File mutation tools v1 (`write_file`, stronger
-`edit_file`, shared mutation policy) comes first because compaction should not
-be built on top of a thin write surface.
+`edit_file`, `apply_patch`, shared mutation policy) came first because
+compaction should not be built on top of a thin write surface.
 
 v0 strategy:
 

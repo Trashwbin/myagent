@@ -73,7 +73,7 @@ Excluded patterns (rg `--glob '!'`):
 
 ## file mutation policy
 
-`edit_file`, planned `write_file`, and planned `apply_patch` are different tool surfaces over the same write capability. They should share one permission family and one checkpoint path. See [../tools/file-mutation.md](../tools/file-mutation.md).
+`edit_file`, `write_file`, and `apply_patch` are different tool surfaces over the same write capability. They share one permission family and one checkpoint path. See [../tools/file-mutation.md](../tools/file-mutation.md).
 
 ## edit_file policy
 
@@ -91,7 +91,9 @@ Returns `resolvedInput`:
 { path: string, resolvedPath: string, old_string: string, new_string: string }
 ```
 
-Planned `write_file` policy adds one more safety rule for existing files: the file must have been read in the current session, and its current mtime must not be newer than the recorded read time. This prevents blind or stale whole-file overwrites.
+`write_file` adds one more safety rule for existing files: the file must have been read in the current session, and its current mtime must not be newer than the recorded read time. This prevents blind or stale whole-file overwrites.
+
+`apply_patch` is workspace-only and asks for approval like the other mutation tools. It includes affected paths and non-sensitive diff metadata in approval events. If any affected path is sensitive, approval metadata is marked sensitive and does not include file-content diffs.
 
 ## bash policy
 

@@ -10,6 +10,11 @@ import {
   detectLineEnding,
   applyLineEnding,
 } from "../tools/file-mutation.js";
+import {
+  parsePatch,
+  resolvePatchPaths,
+  buildPatchDiffMeta,
+} from "../tools/apply-patch.js";
 
 export type ApprovalMode = "auto" | "on-request" | "never";
 
@@ -59,6 +64,8 @@ export function checkToolPermission(
       return finalize(checkWriteFile(input, mode, cwd));
     case "bash":
       return finalize(checkBash(input, cwd));
+    case "apply_patch":
+      return finalize(checkApplyPatch(input, mode, cwd));
     default:
       return { behavior: "deny", reason: `unknown tool: ${toolName}` };
   }
@@ -117,9 +124,16 @@ function checkListDir(input: unknown, cwd: string): ToolPermissionDecision {
 }
 
 function checkSearch(input: unknown, cwd: string): ToolPermissionDecision {
-  const { pattern, path: searchPath = "." } = input as {
+  const {
+    pattern,
+    path: searchPath = ".",
+    exclude = [],
+    max_results = 200,
+  } = input as {
     pattern: string;
     path?: string;
+    exclude?: string[];
+    max_results?: number;
   };
   const policy = checkReadPolicy(cwd, searchPath);
   const sensitive = isSensitiveReadPath(policy.pathInfo.realPath);
@@ -150,6 +164,8 @@ function checkSearch(input: unknown, cwd: string): ToolPermissionDecision {
       resolvedPath: policy.pathInfo.absolutePath,
       realPath: policy.pathInfo.realPath,
       excludeSensitive: !sensitive,
+      exclude,
+      max_results,
     },
     metadata,
   };
@@ -313,6 +329,59 @@ function buildEditDiffMeta(
   } catch {
     return { operation: "edit" };
   }
+}
+
+function checkApplyPatch(
+  input: unknown,
+  mode: ApprovalMode,
+  cwd: string,
+): ToolPermissionDecision {
+  if (mode === "never") {
+    return { behavior: "deny", reason: "patches denied in never-approval mode" };
+  }
+
+  const { patch } = input as { patch: string };
+  const parsed = parsePatch(patch);
+  if (!parsed.ok) {
+    return { behavior: "deny", reason: `Invalid patch: ${parsed.error}` };
+  }
+
+  const { operations } = parsed;
+  const resolved = resolvePatchPaths(operations, cwd);
+  if (!resolved.ok) {
+    return { behavior: "deny", reason: resolved.error };
+  }
+
+  const affectedPaths = operations.map((op) => op.path);
+  const sensitive = operations.some((op) => {
+    const info = resolvePathInfo(cwd, op.path);
+    return info ? isSensitiveReadPath(info.realPath) : false;
+  });
+  const meta = sensitive ? undefined : buildPatchDiffMeta(operations, cwd);
+  const resolvedPathsObj: Record<string, string> = {};
+  for (const [k, v] of resolved.resolved) {
+    resolvedPathsObj[k] = v;
+  }
+
+  return {
+    behavior: "ask",
+    reason: "patch requires approval",
+    resolvedInput: {
+      patch,
+      resolvedPaths: resolvedPathsObj,
+    },
+    metadata: {
+      operation: "patch",
+      affectedPaths,
+      ...(sensitive
+        ? { sensitive: true }
+        : {
+            diff: meta?.diff,
+            additions: meta?.additions,
+            deletions: meta?.deletions,
+          }),
+    },
+  };
 }
 
 function checkBash(input: unknown, cwd: string): ToolPermissionDecision {
