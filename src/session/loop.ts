@@ -19,6 +19,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { createCheckpoint } from "../workspace/checkpoint.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { ReadStateTracker } from "../tools/file-mutation.js";
+import { isMutationTool, getCheckpointPaths } from "../tools/mutation-policy.js";
 
 export type ApprovalRequest = {
   toolName: string;
@@ -361,39 +362,18 @@ async function runAgentLoop(
 
       // Checkpoint before file mutation tools
       let checkpointId: string | undefined;
-      if (tc.name === "edit_file" || tc.name === "write_file") {
-        const filePath =
-          (toolInput as { resolvedPath?: string; path: string }).resolvedPath ??
-          (tc.input as { path: string }).path;
-        try {
-          const cp = await createCheckpoint(cwd, [filePath]);
-          checkpointId = cp.id;
-        } catch (err: any) {
-          const msg: Message = {
-            role: "tool_result",
-            toolCallId: tc.id,
-            toolName: tc.name,
-            content: `Checkpoint failed, edit not executed: ${err.message}`,
-          };
-          messages.push(msg);
-          newMessages.push(msg);
-          if (onEvent) await onEvent({ type: "tool_result", message: msg });
-          continue;
-        }
-      } else if (tc.name === "apply_patch") {
-        const resolvedPaths = (toolInput as { resolvedPaths?: Record<string, string> })
-          .resolvedPaths;
-        const affectedPaths = resolvedPaths ? Object.keys(resolvedPaths) : [];
-        if (affectedPaths.length > 0) {
+      if (isMutationTool(tc.name)) {
+        const paths = getCheckpointPaths(tc.name, toolInput);
+        if (paths.length > 0) {
           try {
-            const cp = await createCheckpoint(cwd, affectedPaths);
+            const cp = await createCheckpoint(cwd, paths);
             checkpointId = cp.id;
           } catch (err: any) {
             const msg: Message = {
               role: "tool_result",
               toolCallId: tc.id,
               toolName: tc.name,
-              content: `Checkpoint failed, patch not executed: ${err.message}`,
+              content: `Checkpoint failed, mutation not executed: ${err.message}`,
             };
             messages.push(msg);
             newMessages.push(msg);

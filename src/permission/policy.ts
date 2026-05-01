@@ -1,20 +1,20 @@
 import { resolvePathInfo } from "../workspace/path-info.js";
-import type { WorkspacePathInfo } from "../workspace/path-info.js";
 import { checkReadPolicy, isSensitiveReadPath } from "./read-policy.js";
 import { analyzeCommand } from "./command-policy.js";
 import { buildExternalDirectoryMeta } from "./external-directory.js";
-import { readFileSync } from "node:fs";
-import {
-  computeDiff,
-  normalizeToLf,
-  detectLineEnding,
-  applyLineEnding,
-} from "../tools/file-mutation.js";
 import {
   parsePatch,
   resolvePatchPaths,
   buildPatchDiffMeta,
 } from "../tools/apply-patch.js";
+import {
+  pathMeta,
+  validateMutationPath,
+  buildEditDiffMeta,
+  buildWriteDiffMeta,
+  classifyWriteTarget,
+  isSensitivePath,
+} from "../tools/mutation-policy.js";
 
 export type ApprovalMode = "auto" | "on-request" | "never";
 
@@ -24,15 +24,6 @@ export type ToolPermissionDecision = {
   resolvedInput?: unknown;
   metadata?: Record<string, unknown>;
 };
-
-function pathMeta(info: WorkspacePathInfo): Record<string, unknown> {
-  return {
-    inputPath: info.inputPath,
-    absolutePath: info.absolutePath,
-    realPath: info.realPath,
-    insideWorkspace: info.insideWorkspace,
-  };
-}
 
 export function checkToolPermission(
   toolName: string,
@@ -192,21 +183,16 @@ function checkEditFile(
     return { behavior: "deny", reason: "edits denied in never-approval mode" };
   }
 
-  const pathInfo = resolvePathInfo(cwd, path);
-  if (!pathInfo) {
-    return { behavior: "deny", reason: "path cannot be resolved" };
+  const pathResult = validateMutationPath(path, cwd);
+  if (!pathResult.ok) {
+    return { behavior: "deny", reason: pathResult.reason, metadata: pathResult.metadata };
   }
 
-  if (!pathInfo.insideWorkspace) {
-    return {
-      behavior: "deny",
-      reason: "cannot edit files outside workspace",
-      metadata: pathMeta(pathInfo),
-    };
-  }
+  const { pathInfo } = pathResult;
+  const sensitive = isSensitivePath(pathInfo.realPath);
+  const metadata: Record<string, unknown> = pathMeta(pathInfo);
 
-  const metadata = pathMeta(pathInfo);
-  if (!isSensitiveReadPath(pathInfo.realPath)) {
+  if (!sensitive) {
     Object.assign(
       metadata,
       buildEditDiffMeta(pathInfo.absolutePath, path, old_string, new_string, replace_all),
@@ -241,21 +227,25 @@ function checkWriteFile(
     return { behavior: "deny", reason: "writes denied in never-approval mode" };
   }
 
-  const pathInfo = resolvePathInfo(cwd, path);
-  if (!pathInfo) {
-    return { behavior: "deny", reason: "path cannot be resolved" };
+  const pathResult = validateMutationPath(path, cwd);
+  if (!pathResult.ok) {
+    return { behavior: "deny", reason: pathResult.reason, metadata: pathResult.metadata };
   }
 
-  if (!pathInfo.insideWorkspace) {
+  const { pathInfo } = pathResult;
+
+  if (classifyWriteTarget(pathInfo.absolutePath) === "directory") {
     return {
       behavior: "deny",
-      reason: "cannot write files outside workspace",
-      metadata: pathMeta(pathInfo),
+      reason: `cannot write file: target path is an existing directory`,
+      metadata: { ...pathMeta(pathInfo), operation: "write", target: "directory" },
     };
   }
 
-  const metadata = pathMeta(pathInfo);
-  if (!isSensitiveReadPath(pathInfo.realPath)) {
+  const sensitive = isSensitivePath(pathInfo.realPath);
+  const metadata: Record<string, unknown> = pathMeta(pathInfo);
+
+  if (!sensitive) {
     Object.assign(metadata, buildWriteDiffMeta(pathInfo.absolutePath, path, content));
   } else {
     metadata.operation = "write";
@@ -273,62 +263,6 @@ function checkWriteFile(
     },
     metadata,
   };
-}
-
-function buildWriteDiffMeta(absPath: string, displayPath: string, content: string) {
-  let oldContent = "";
-  let exists = false;
-  try {
-    oldContent = readFileSync(absPath, "utf-8");
-    exists = true;
-  } catch {
-    // New file or unreadable file; permission still asks and tool reports execution errors.
-  }
-  const diff = computeDiff(oldContent, content, displayPath);
-  return {
-    operation: exists ? "write" : "create",
-    diff: diff.diff,
-    additions: diff.additions,
-    deletions: diff.deletions,
-  };
-}
-
-function buildEditDiffMeta(
-  absPath: string,
-  displayPath: string,
-  oldString: string,
-  newString: string,
-  replaceAll: boolean,
-) {
-  try {
-    const content = readFileSync(absPath, "utf-8");
-    const lineEnding = detectLineEnding(content);
-    const normalizedContent = normalizeToLf(content);
-    const normalizedOld = normalizeToLf(oldString);
-    const normalizedNew = normalizeToLf(newString);
-
-    if (!normalizedOld || oldString === newString) {
-      return { operation: "edit" };
-    }
-    const count = normalizedContent.split(normalizedOld).length - 1;
-    if (count === 0 || (!replaceAll && count > 1)) {
-      return { operation: "edit", matchCount: count };
-    }
-    const updatedLf = replaceAll
-      ? normalizedContent.split(normalizedOld).join(normalizedNew)
-      : normalizedContent.replace(normalizedOld, normalizedNew);
-    const updated = applyLineEnding(updatedLf, lineEnding);
-    const diff = computeDiff(content, updated, displayPath);
-    return {
-      operation: "edit",
-      matchCount: count,
-      diff: diff.diff,
-      additions: diff.additions,
-      deletions: diff.deletions,
-    };
-  } catch {
-    return { operation: "edit" };
-  }
 }
 
 function checkApplyPatch(
@@ -355,7 +289,7 @@ function checkApplyPatch(
   const affectedPaths = operations.map((op) => op.path);
   const hasSensitive = operations.some((op) => {
     const info = resolvePathInfo(cwd, op.path);
-    return info ? isSensitiveReadPath(info.realPath) : false;
+    return info ? isSensitivePath(info.realPath) : false;
   });
   const meta = buildPatchDiffMeta(operations, cwd);
   const resolvedPathsObj: Record<string, string> = {};

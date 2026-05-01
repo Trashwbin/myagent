@@ -14,9 +14,9 @@ These tools have different model ergonomics, but they must share one write polic
 
 ```text
 edit_file / write_file / apply_patch
-  -> FileMutationPolicy
-  -> edit permission
-  -> checkpoint before mutation
+  -> FileMutationPolicy (shared in mutation-policy.ts)
+  -> edit permission family
+  -> checkpoint before mutation (via isMutationTool + getCheckpointPaths)
   -> diff metadata for approval/result UI
 ```
 
@@ -32,6 +32,64 @@ The tools overlap at the filesystem level, but not at the intent level:
 
 Do not create separate permission systems for these tools. They all represent file modification and should be governed by the same `edit` permission family.
 
+## Tool positioning
+
+Each tool has a distinct role and safety gate. Do not blur these boundaries:
+
+- **`edit_file`**: Small surgical edits. Relies on `old_string` matching existing content for safety. Does **not** require `read_file` before editing — the `old_string` match itself is the safety gate. Rejects empty `old_string` (directs to `write_file` instead).
+- **`write_file`**: Whole-file creation or replacement. For existing files, requires a prior `read_file` in the session and an mtime guard. This is the only tool that uses `ReadStateTracker` for read-before-write enforcement.
+- **`apply_patch`**: Multi-file atomic operations. Relies on hunk context matching and preflight validation (dry-run hunk apply in the permission check). Does not require prior `read_file`.
+
+## Shared policy layer
+
+`src/tools/mutation-policy.ts` provides shared infrastructure used by all three tools:
+
+- **`validateMutationPath`**: Workspace path resolution + boundary check. Used by `edit_file` and `write_file` permission checks.
+- **`pathMeta`**: Builds standardized path metadata (`inputPath`, `absolutePath`, `realPath`, `insideWorkspace`) for all mutation tool permission decisions.
+- **`buildEditDiffMeta` / `buildWriteDiffMeta`**: Compute approval diff metadata (operation type, diff text, additions/deletions). Moved from `policy.ts` into the shared layer so they can be tested independently and reused.
+- **`isSensitivePath`**: Thin wrapper around `isSensitiveReadPath`, used by all three tools to strip diff content from sensitive-path metadata.
+- **`isMutationTool` / `getCheckpointPaths`**: Used by the session loop to decide whether to checkpoint and which paths to cover. Replaces the three-branch `if/else` that was hard-coded in `loop.ts`.
+
+What was **not** extracted (and why):
+
+- Tool execution logic: each tool has fundamentally different execution paths (edit replacement, whole-file write, multi-file patch with rollback).
+- Read-state management: only `write_file` uses `ReadStateTracker`; extracting it would add indirection without reducing drift.
+- Patch parsing / hunk application: only `apply_patch` uses these.
+
+## Permission Model
+
+`edit_file`, `write_file`, and `apply_patch` all use the same write permission family:
+
+- Workspace path: ask in interactive modes, deny in `--approval never`.
+- Outside workspace: deny.
+- Sensitive path writes: ask like other writes; secret-read restrictions still apply to reading contents.
+
+Approval metadata is consistent across all three tools:
+
+| Field           | edit_file | write_file | apply_patch |
+| --------------- | --------- | ---------- | ----------- |
+| `operation`     | `"edit"`  | `"write"`/`"create"` | `"patch"` |
+| `absolutePath`  | yes       | yes        | —           |
+| `affectedPaths` | —         | —          | yes         |
+| `diff`          | yes*      | yes*       | yes*        |
+| `additions`     | yes*      | yes*       | yes*        |
+| `deletions`     | yes*      | yes*       | yes*        |
+| `sensitive`     | if needed | if needed  | if any path |
+| `failures`      | —         | —          | on preflight failure |
+
+\* Omitted when `sensitive` is true.
+
+Session/workspace approval memory should match by tool and resolved path or by a future shared `edit` capability, but it must not bypass checkpoints.
+
+## Checkpoints
+
+Every successful mutation creates a checkpoint before writing, even when approval was auto-allowed by a session/workspace rule. The session loop uses `isMutationTool()` to detect mutation tools and `getCheckpointPaths()` to extract the paths to checkpoint:
+
+- `edit_file` / `write_file`: single path from `resolvedPath ?? path`.
+- `apply_patch`: all paths from `resolvedPaths` keys.
+
+Failed mutations do not expose checkpoint IDs.
+
 ## `edit_file`
 
 Current role: exact string replacement in a workspace file.
@@ -44,6 +102,7 @@ v1 behavior:
 - Reject `old_string === new_string`.
 - Treat `old_string === ""` conservatively. Prefer `write_file` for creating files; `edit_file` should not become the primary file creation tool.
 - Return mutation metadata: `diff`, `additions`, `deletions`, and touched file path.
+- **No read-before-write gate.** The `old_string` match is the safety mechanism.
 
 Failure should be explicit: no match, multiple matches when `replace_all` is false, directory target, outside workspace, or stale/unread file state if that guard is later shared with `write_file`.
 
@@ -88,7 +147,7 @@ type ReadFileState = {
 
 `read_file` records state after successful reads. A partial read should not authorize a whole-file overwrite unless the implementation can prove the full file was loaded. Directory reads do not authorize file writes.
 
-`write_file` checks state only for existing files. New file creation does not require a previous read.
+`write_file` checks state only for existing files. New file creation does not require a previous read. `edit_file` and `apply_patch` do not use read state.
 
 ## `apply_patch`
 
@@ -221,9 +280,9 @@ For `apply_patch`, the checkpoint includes all affected paths before any write o
 
 Implemented:
 
-1. Shared mutation metadata shape.
-2. `edit_file` v1: `replace_all`, line-ending preservation, diff metadata.
-3. `write_file` with read-before-write and mtime guard.
+1. Shared mutation policy layer (`mutation-policy.ts`): path validation, diff metadata builders, sensitive-path guard, checkpoint helpers.
+2. `edit_file` v1: `replace_all`, line-ending preservation, diff metadata. No read-before-write gate.
+3. `write_file` with read-before-write and mtime guard (only tool using `ReadStateTracker`).
 4. `apply_patch` with Codex/OpenCode-aligned grammar:
    - Patch envelope (`*** Begin Patch` / `*** End Patch`) with strict parsing.
    - Add File with `+` prefix enforcement.
@@ -237,6 +296,7 @@ Implemented:
    - Atomic pre-flight validation, rollback on execution failure.
    - Approval-stage hunk dry-run: non-sensitive path failures are denied before user approval.
    - Approval metadata with combined diff, checkpoint coverage for all affected paths.
+5. Unified session-loop checkpoint via `isMutationTool` / `getCheckpointPaths`.
 
 Defer:
 
