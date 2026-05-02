@@ -362,159 +362,228 @@ async function chatMode(
   }
 }
 
-const program = new Command();
+// --- Extracted handlers ---
 
-program
-  .name("myagent")
-  .description("A small coding-agent runtime")
-  .option("--cwd <path>", "working directory", process.cwd())
-  .option("--provider <provider>", "model provider (fake|openai|anthropic)")
-  .option("--model <model>", "model name")
-  .option("--approval <mode>", "approval mode (auto|on-request)", "auto")
-  .option("--max-turns <n>", "max agent turns")
-  .option("--rewind <checkpointId>", "restore checkpoint and exit")
-  .option("--chat", "interactive chat mode")
-  .option("--resume <sessionId>", "resume a previous session")
-  .option("--sessions", "list historical sessions and exit")
-  .argument("[prompt]", "task prompt")
-  .action(async (prompt: string | undefined, options: Record<string, string>) => {
-    let cwd = canonicalWorkspaceRoot(options.cwd);
-    let settings = loadSettings({ workspaceRoot: cwd });
+function handleSessions(): void {
+  const store = openStore();
+  try {
+    printSessionList(store.listSessions());
+  } finally {
+    store.close();
+  }
+}
 
-    const resolveMaxTurns = () =>
-      resolveSetting<number | undefined>(
-        options.maxTurns ? parseInt(options.maxTurns, 10) : undefined,
-        process.env.MYAGENT_MAX_TURNS ? parseInt(process.env.MYAGENT_MAX_TURNS, 10) : undefined,
-        settings.maxTurns,
-        undefined,
-      );
+async function handleResume(
+  sessionId: string,
+  options: Record<string, string>,
+): Promise<void> {
+  let cwd = canonicalWorkspaceRoot(options.cwd);
+  let settings = loadSettings({ workspaceRoot: cwd });
 
-    const resolveMaxOutputTokens = () =>
-      resolveSetting<number | undefined>(
-        undefined,
-        process.env.MYAGENT_MAX_OUTPUT_TOKENS
-          ? parseInt(process.env.MYAGENT_MAX_OUTPUT_TOKENS, 10)
-          : undefined,
-        settings.maxOutputTokens,
-        undefined,
-      );
-    const explicitCwd = process.argv.includes("--cwd");
+  const resolveMaxTurns = () =>
+    resolveSetting<number | undefined>(
+      options.maxTurns ? parseInt(options.maxTurns, 10) : undefined,
+      process.env.MYAGENT_MAX_TURNS ? parseInt(process.env.MYAGENT_MAX_TURNS, 10) : undefined,
+      settings.maxTurns,
+      undefined,
+    );
 
-    // Rewind mode
-    if (options.rewind) {
-      await restoreCheckpoint(cwd, options.rewind);
-      console.log(`Restored checkpoint: ${options.rewind}`);
-      process.exit(0);
+  const resolveMaxOutputTokens = () =>
+    resolveSetting<number | undefined>(
+      undefined,
+      process.env.MYAGENT_MAX_OUTPUT_TOKENS
+        ? parseInt(process.env.MYAGENT_MAX_OUTPUT_TOKENS, 10)
+        : undefined,
+      settings.maxOutputTokens,
+      undefined,
+    );
+
+  const explicitCwd = process.argv.includes("--cwd");
+
+  const store = openStore();
+  try {
+    const session = store.getSession(sessionId);
+    if (!session) {
+      console.error(`Session not found: ${sessionId}`);
+      process.exit(1);
     }
+    if (explicitCwd && canonicalWorkspaceRoot(options.cwd) !== session.cwd) {
+      console.error(
+        `Session ${sessionId} belongs to ${session.cwd}, but --cwd is ${canonicalWorkspaceRoot(options.cwd)}. Use a future fork command to move history to another workspace.`,
+      );
+      process.exit(1);
+    }
+    cwd = session.cwd;
+    settings = loadSettings({ workspaceRoot: cwd });
+    const provider = createProvider(options, "", settings, resolveMaxOutputTokens());
+    const registry = buildRegistry();
+    await chatMode(provider, registry, session, resolveApprovalMode(process.argv, options.approval, process.env.MYAGENT_APPROVAL, settings), store, resolveMaxTurns());
+  } finally {
+    store.close();
+  }
+}
 
-    const store = openStore();
+async function handleMainRun(
+  prompt: string | undefined,
+  options: Record<string, string>,
+): Promise<void> {
+  let cwd = canonicalWorkspaceRoot(options.cwd);
+  let settings = loadSettings({ workspaceRoot: cwd });
 
-    try {
-      // Sessions list mode
-      if (options.sessions) {
-        printSessionList(store.listSessions());
-        return;
-      }
+  const resolveMaxTurns = () =>
+    resolveSetting<number | undefined>(
+      options.maxTurns ? parseInt(options.maxTurns, 10) : undefined,
+      process.env.MYAGENT_MAX_TURNS ? parseInt(process.env.MYAGENT_MAX_TURNS, 10) : undefined,
+      settings.maxTurns,
+      undefined,
+    );
 
-      // Resume mode
-      if (options.resume) {
-        const session = store.getSession(options.resume);
-        if (!session) {
-          console.error(`Session not found: ${options.resume}`);
-          process.exit(1);
-        }
-        if (explicitCwd && canonicalWorkspaceRoot(options.cwd) !== session.cwd) {
-          console.error(
-            `Session ${options.resume} belongs to ${session.cwd}, but --cwd is ${canonicalWorkspaceRoot(options.cwd)}. Use a future fork command to move history to another workspace.`,
-          );
-          process.exit(1);
-        }
-        cwd = session.cwd;
-        settings = loadSettings({ workspaceRoot: cwd });
-        const provider = createProvider(options, "", settings, resolveMaxOutputTokens());
-        const registry = buildRegistry();
-        await chatMode(provider, registry, session, resolveApprovalMode(process.argv, options.approval, process.env.MYAGENT_APPROVAL, settings), store, resolveMaxTurns());
-        return;
-      }
+  const resolveMaxOutputTokens = () =>
+    resolveSetting<number | undefined>(
+      undefined,
+      process.env.MYAGENT_MAX_OUTPUT_TOKENS
+        ? parseInt(process.env.MYAGENT_MAX_OUTPUT_TOKENS, 10)
+        : undefined,
+      settings.maxOutputTokens,
+      undefined,
+    );
 
-      // Chat mode (new session)
-      if (options.chat) {
-        const session = store.createSession({
-          workspaceRoot: cwd,
-          provider: options.provider,
-          model: options.model,
-        });
-        const provider = createProvider(options, "", settings, resolveMaxOutputTokens());
-        const registry = buildRegistry();
-        await chatMode(provider, registry, session, resolveApprovalMode(process.argv, options.approval, process.env.MYAGENT_APPROVAL, settings), store, resolveMaxTurns());
-        return;
-      }
+  // Rewind mode
+  if (options.rewind) {
+    await restoreCheckpoint(cwd, options.rewind);
+    console.log(`Restored checkpoint: ${options.rewind}`);
+    process.exit(0);
+  }
 
-      // Single-shot mode
-      if (!prompt) {
-        console.error(
-          "Prompt is required (unless using --rewind, --chat, --sessions, or --resume)",
-        );
-        process.exit(1);
-      }
-
+  const store = openStore();
+  try {
+    // Chat mode (new session)
+    if (options.chat) {
       const session = store.createSession({
         workspaceRoot: cwd,
         provider: options.provider,
         model: options.model,
       });
-      const provider = createProvider(options, prompt, settings, resolveMaxOutputTokens());
+      const provider = createProvider(options, "", settings, resolveMaxOutputTokens());
       const registry = buildRegistry();
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-      });
-      const approvalHandler = makeApprovalHandler(rl);
-      const onEvent = makeEventRenderer();
-      const readState = new ReadStateTracker();
-
-      try {
-        const { transcript, aborted, stopReason } = await runSession(
-          provider,
-          registry,
-          [{ role: "user", content: prompt }],
-          {
-            cwd,
-            approval: resolveApprovalMode(process.argv, options.approval, process.env.MYAGENT_APPROVAL, settings),
-            maxTurns: resolveMaxTurns(),
-            approvalHandler,
-            onEvent,
-            sessionApprovalRules: [],
-            store,
-            readState,
-          },
-        );
-
-        store.appendMessages(session.id, transcript);
-
-        if (aborted) {
-          console.error("\nTurn aborted.");
-          process.exit(1);
-        }
-
-        const diffStat = await getGitDiffStat(cwd);
-        if (diffStat) {
-          console.log("\n--- Changes ---");
-          console.log(diffStat);
-        }
-      } catch (err) {
-        if (err instanceof ProviderRuntimeError) {
-          console.error(`\n${formatProviderError(err)}`);
-          process.exit(1);
-        }
-        throw err;
-      } finally {
-        rl.close();
-      }
-    } finally {
-      store.close();
+      await chatMode(provider, registry, session, resolveApprovalMode(process.argv, options.approval, process.env.MYAGENT_APPROVAL, settings), store, resolveMaxTurns());
+      return;
     }
-  });
+
+    // Single-shot mode
+    if (!prompt) {
+      console.error(
+        "Prompt is required (unless using --rewind or --chat)",
+      );
+      process.exit(1);
+    }
+
+    const session = store.createSession({
+      workspaceRoot: cwd,
+      provider: options.provider,
+      model: options.model,
+    });
+    const provider = createProvider(options, prompt, settings, resolveMaxOutputTokens());
+    const registry = buildRegistry();
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    const approvalHandler = makeApprovalHandler(rl);
+    const onEvent = makeEventRenderer();
+    const readState = new ReadStateTracker();
+
+    try {
+      const { transcript, aborted, stopReason } = await runSession(
+        provider,
+        registry,
+        [{ role: "user", content: prompt }],
+        {
+          cwd,
+          approval: resolveApprovalMode(process.argv, options.approval, process.env.MYAGENT_APPROVAL, settings),
+          maxTurns: resolveMaxTurns(),
+          approvalHandler,
+          onEvent,
+          sessionApprovalRules: [],
+          store,
+          readState,
+        },
+      );
+
+      store.appendMessages(session.id, transcript);
+
+      if (aborted) {
+        console.error("\nTurn aborted.");
+        process.exit(1);
+      }
+
+      const diffStat = await getGitDiffStat(cwd);
+      if (diffStat) {
+        console.log("\n--- Changes ---");
+        console.log(diffStat);
+      }
+    } catch (err) {
+      if (err instanceof ProviderRuntimeError) {
+        console.error(`\n${formatProviderError(err)}`);
+        process.exit(1);
+      }
+      throw err;
+    } finally {
+      rl.close();
+    }
+  } finally {
+    store.close();
+  }
+}
+
+// --- Commander setup ---
+
+const program = new Command();
+
+// Global options shared across all modes
+const sharedOptions = (cmd: Command) =>
+  cmd
+    .option("--cwd <path>", "working directory", process.cwd())
+    .option("--provider <provider>", "model provider (fake|openai|anthropic)")
+    .option("--model <model>", "model name")
+    .option("--approval <mode>", "approval mode (auto|on-request)", "auto")
+    .option("--max-turns <n>", "max agent turns");
+
+// Main command: chat / single-shot
+program
+  .name("myagent")
+  .description("A small coding-agent runtime")
+  .option("--rewind <checkpointId>", "restore checkpoint and exit")
+  .option("--chat", "interactive chat mode")
+  .argument("[prompt]", "task prompt");
+
+sharedOptions(program);
+
+program.action(async (prompt: string | undefined, options: Record<string, string>) => {
+  await handleMainRun(prompt, options);
+});
+
+// Subcommand: sessions
+const sessionsCmd = program
+  .command("sessions")
+  .description("List historical sessions and exit");
+
+sessionsCmd.action(async () => {
+  handleSessions();
+});
+
+// Subcommand: resume
+const resumeCmd = program
+  .command("resume <sessionId>")
+  .description("Resume a previous session in interactive chat mode");
+
+sharedOptions(resumeCmd);
+
+resumeCmd.action(async (sessionId: string, options: Record<string, string>) => {
+  await handleResume(sessionId, options);
+});
+
+// --- Entry point ---
 
 const argv =
   process.argv[2] === "--"

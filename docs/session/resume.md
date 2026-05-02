@@ -2,12 +2,12 @@
 
 ## How resume works
 
-`--resume <sessionId>` restores a previous session and continues the conversation in chat mode.
+`myagent resume <sessionId>` restores a previous session and continues the conversation in interactive chat mode.
 
 ### Resume without --cwd
 
 ```bash
-myagent --resume abc-123 --chat
+myagent resume abc-123
 ```
 
 Looks up the session in the global store (`~/.myagent/myagent.sqlite`), loads the full transcript, and uses the stored `workspace_root` as the working directory. This works from any terminal location.
@@ -15,7 +15,7 @@ Looks up the session in the global store (`~/.myagent/myagent.sqlite`), loads th
 ### Resume with --cwd
 
 ```bash
-myagent --resume abc-123 --cwd /path/to/repo --chat
+myagent resume abc-123 --cwd /path/to/repo
 ```
 
 Looks up the session, then validates that `--cwd` matches the session's stored `workspace_root`. If they differ, the command errors — a session's workspace root is fixed and should not be silently overridden.
@@ -46,11 +46,11 @@ Future work:
 ## Session listing
 
 ```bash
-myagent --sessions
+myagent sessions
 ```
 
 Lists all sessions from the global store, showing session ID, title, workspace root, provider, model, and last update time. This works from any directory.
 
 ## Session title
 
-The title is automatically set from the first user message (first 60 characters). It is stored in the sessions table and shown by `--sessions`. Chat sessions that haven't received any input yet show as `(untitled)`.
+The title is automatically set from the first user message (first 60 characters). It is stored in the sessions table and shown by `myagent sessions`. Chat sessions that haven't received any input yet show as `(untitled)`.
