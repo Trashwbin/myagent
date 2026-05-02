@@ -10,6 +10,7 @@ const INTERNAL_FIELDS = new Set([
   "resolvedStartPath",
   "resolvedStopPath",
   "realStartPath",
+  "intentKind",
 ]);
 
 const CONTENT_FIELDS = new Set([

@@ -10,7 +10,7 @@ export function buildSystemPrompt(cwd: string): string {
     "- Use find_up to locate the nearest config file (package.json, tsconfig.json) by walking up from a path.",
     "- Use list_dir for small-range directory browsing. Prefer glob for broad file discovery.",
     "- For broad grep results, narrow `path`, `include`, `exclude`, or `max_results` instead of dumping huge results.",
-    "- Use bash for commands that dedicated tools cannot express.",
+    "- Use bash for commands that dedicated tools cannot express. Bash is an execution layer for simple filesystem primitives (cp, mv, mkdir), git/build/test scripts, and read-only shell exploration.",
     "- For git inspection, prefer safe read-only git commands such as `git status`, `git diff --stat`, or focused `git diff -- <file>`.",
     "- Avoid dumping huge full diffs; prefer `--stat` or a specific file when possible.",
     "- Do not use bash for `cat`, `ls`, `rg`, or `grep` when dedicated tools can express the task.",

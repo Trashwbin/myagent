@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { realpathSync, existsSync } from "node:fs";
 import { findProjectRoot } from "../workspace/project-root.js";
 import { isSensitiveReadPath } from "./sensitive-paths.js";
+import { parseCommand } from "./command-intent.js";
 
 // --- Types ---
 
@@ -26,6 +27,7 @@ export type CommandPolicyResult = {
   externalDirectoryRoot?: string;
   externalDirectoryReason?: "project_root" | "parent_directory";
   approvalPattern?: string;
+  intentKind?: string;
 };
 
 export type CommandUnit = {
@@ -738,10 +740,6 @@ function buildBashApprovalPattern(units: CommandUnit[]): string | undefined {
   return undefined;
 }
 
-function hasSensitivePath(paths: PathInfo[]): boolean {
-  return paths.some((p) => isSensitiveReadPath(p.resolved));
-}
-
 // --- Main analysis ---
 
 export function analyzeCommand(
@@ -752,45 +750,56 @@ export function analyzeCommand(
   const cwd = options.cwd;
   let effectiveCwd: string | undefined;
 
-  // Layer 1: Dangerous patterns → deny
-  for (const { pattern, reason } of DANGEROUS_PATTERNS) {
-    if (pattern.test(normalized)) {
-      return { effect: "dangerous", decision: "deny", reason };
-    }
-  }
-
-  // Layer 2: Command substitution → ask
-  if (hasCommandSubstitution(normalized)) {
-    return {
-      effect: "write",
-      decision: "ask",
-      reason: "command substitution requires approval",
-    };
-  }
-
-  // Layer 3: Output redirect → ask
-  if (hasOutputRedirect(normalized)) {
-    return {
-      effect: "write",
-      decision: "ask",
-      reason: "output redirect requires approval",
-    };
-  }
-
-  // Layer 3.5: Smart chain handling — cd <dir> && <readonly-cmd>
+  // Layer 0.5: Smart chain handling — cd <dir> && <readonly-cmd>
+  // Do this early so intent parsing targets the actual command, not the cd prefix.
   let analysisCommand = normalized;
   if (hasChainOperator(normalized)) {
     const cdChain = tryParseCdAndChain(normalized, cwd);
     if (cdChain) {
       effectiveCwd = cdChain.effectiveCwd;
       analysisCommand = cdChain.secondCommand;
-    } else {
-      return {
-        effect: "write",
-        decision: "ask",
-        reason: "command chain requires approval",
-      };
     }
+  }
+
+  const intent = parseCommand(analysisCommand);
+
+  const withIntent = (r: CommandPolicyResult): CommandPolicyResult => ({
+    ...r,
+    intentKind: intent.kind,
+  });
+
+  // Layer 1: Dangerous patterns → deny
+  for (const { pattern, reason } of DANGEROUS_PATTERNS) {
+    if (pattern.test(normalized)) {
+      return withIntent({ effect: "dangerous", decision: "deny", reason });
+    }
+  }
+
+  // Layer 2: Command substitution → ask
+  if (hasCommandSubstitution(normalized)) {
+    return withIntent({
+      effect: "write",
+      decision: "ask",
+      reason: "command substitution requires approval",
+    });
+  }
+
+  // Layer 3: Output redirect → ask
+  if (hasOutputRedirect(normalized)) {
+    return withIntent({
+      effect: "write",
+      decision: "ask",
+      reason: "output redirect requires approval",
+    });
+  }
+
+  // Chain handling was already done above; unsupported chains fall through here.
+  if (hasChainOperator(normalized) && analysisCommand === normalized) {
+    return withIntent({
+      effect: "write",
+      decision: "ask",
+      reason: "command chain requires approval",
+    });
   }
 
   // Layer 4: Parse into units
@@ -801,39 +810,39 @@ export function analyzeCommand(
   if (hasPipeline(analysisCommand)) {
     for (const unit of units) {
       if (SHELL_PIPELINE_TARGETS.has(unit.command)) {
-        return {
+        return withIntent({
           effect: "dangerous",
           decision: "deny",
           reason: "piping into shell is remote script execution",
           commands,
-        };
+        });
       }
       if (INTERPRETER_PIPELINE_TARGETS.has(unit.command)) {
         if (hasEvalFlag(unit)) {
-          return {
+          return withIntent({
             effect: "unknown",
             decision: "ask",
             reason: "pipeline uses interpreter eval and requires approval",
             commands,
-          };
+          });
         }
         const networkSource = units.some(
           (u) => u.command === "curl" || u.command === "wget",
         );
         if (networkSource) {
-          return {
+          return withIntent({
             effect: "dangerous",
             decision: "deny",
             reason: `remote content piped into ${unit.command} as script`,
             commands,
-          };
+          });
         }
-        return {
+        return withIntent({
           effect: "unknown",
           decision: "ask",
           reason: `interpreter ${unit.command} in pipeline requires approval`,
           commands,
-        };
+        });
       }
     }
   }
@@ -852,7 +861,7 @@ export function analyzeCommand(
     if (cls.isReadOnly) {
       const sensitivePath = paths.find((p) => isSensitiveReadPath(p.resolved));
       if (sensitivePath) {
-        return {
+        return withIntent({
           effect: "read",
           decision: "ask",
           reason: sensitivePath.insideWorkspace
@@ -863,12 +872,12 @@ export function analyzeCommand(
           sensitive: true,
           effectiveCwd,
           approvalPattern: buildBashApprovalPattern(units),
-        };
+        });
       }
       for (const p of paths) {
         if (!p.insideWorkspace) {
           const projectRoot = findProjectRoot(p.resolved, false);
-          return {
+          return withIntent({
             effect: "read",
             decision: "ask",
             reason: `command references path outside workspace: ${p.raw}`,
@@ -879,49 +888,49 @@ export function analyzeCommand(
             externalDirectoryRoot: projectRoot.root,
             externalDirectoryReason: projectRoot.reason,
             approvalPattern: buildBashApprovalPattern(units),
-          };
+          });
         }
       }
     }
 
     if (cls.decision === "deny") {
-      return {
+      return withIntent({
         effect: cls.effect,
         decision: "deny",
         reason: cls.reason,
         commands,
         paths: allPaths,
-      };
+      });
     }
     if (cls.decision === "ask") {
       if (cls.effect === "network") {
         const outsidePath = paths.find((p) => !p.insideWorkspace);
         if (outsidePath) {
           if (outsidePath.raw === "-O") {
-            return {
+            return withIntent({
               effect: "network",
               decision: "ask",
               reason: "curl -O writes file using remote filename",
               commands,
               paths: allPaths,
-            };
+            });
           }
-          return {
+          return withIntent({
             effect: "network",
             decision: "ask",
             reason: `network command writes outside workspace: ${outsidePath.raw}`,
             commands,
             paths: allPaths,
-          };
+          });
         }
       }
-      return {
+      return withIntent({
         effect: cls.effect,
         decision: "ask",
         reason: cls.reason,
         commands,
         paths: allPaths.length > 0 ? allPaths : undefined,
-      };
+      });
     }
 
     // Extract git -C effectiveCwd
@@ -935,7 +944,7 @@ export function analyzeCommand(
   if (effectiveCwd && !isInsideWorkspace(effectiveCwd, cwd)) {
     const effectiveCwdReal = canonicalPath(effectiveCwd);
     const projectRoot = findProjectRoot(effectiveCwdReal, true);
-    return {
+    return withIntent({
       effect: "read",
       decision: "ask",
       reason: "readonly command references external project",
@@ -945,15 +954,15 @@ export function analyzeCommand(
       externalDirectoryRoot: projectRoot.root,
       externalDirectoryReason: projectRoot.reason,
       approvalPattern: buildBashApprovalPattern(units),
-    };
+    });
   }
 
-  return {
+  return withIntent({
     effect: "read",
     decision: "allow",
     reason: units.length > 1 ? "read-only pipeline" : "read-only command",
     commands,
     paths: allPaths.length > 0 ? allPaths : undefined,
     approvalPattern: buildBashApprovalPattern(units),
-  };
+  });
 }

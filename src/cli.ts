@@ -107,8 +107,11 @@ function makeEventRenderer(): (event: TurnEvent) => void {
         const meta = event.metadata;
         if (meta?.sensitive) sensitiveToolCalls.add(event.id);
         const inputSummary = formatToolInputSummary(event.input);
+        const intentLabel = event.name === "bash" && meta?.intentKind
+          ? `bash (${meta.intentKind as string})`
+          : event.name;
         if (event.name === "bash" && meta?.externalDirectoryPattern) {
-          console.log(`\n[approval] bash: ${event.reason}`);
+          console.log(`\n[approval] ${intentLabel}: ${event.reason}`);
           if (meta.externalDirectoryRoot)
             console.log(`  project: ${meta.externalDirectoryRoot}`);
           console.log(`  grants: ${meta.externalDirectoryPattern}`);
@@ -121,17 +124,17 @@ function makeEventRenderer(): (event: TurnEvent) => void {
             );
           }
         } else if (meta?.externalDirectoryPattern) {
-          console.log(`\n[approval] ${event.name}: ${event.reason}`);
+          console.log(`\n[approval] ${intentLabel}: ${event.reason}`);
           if (meta.externalDirectoryRoot)
             console.log(`  project: ${meta.externalDirectoryRoot}`);
           console.log(`  grants: ${meta.externalDirectoryPattern}`);
           if (inputSummary) console.log(`  input: ${inputSummary}`);
         } else if (event.name === "bash" && meta?.approvalPattern) {
-          console.log(`\n[approval] bash: ${event.reason}`);
+          console.log(`\n[approval] ${intentLabel}: ${event.reason}`);
           console.log(`  command pattern: ${meta.approvalPattern}`);
           if (inputSummary) console.log(`  input: ${inputSummary}`);
         } else {
-          console.log(`\n[approval] ${event.name}: ${event.reason}`);
+          console.log(`\n[approval] ${intentLabel}: ${event.reason}`);
           if (meta) {
             if (meta.realPath) console.log(`  path: ${meta.realPath}`);
             if (meta.insideWorkspace === false) console.log(`  [outside workspace]`);
@@ -153,10 +156,14 @@ function makeEventRenderer(): (event: TurnEvent) => void {
       case "tool_started": {
         const sensitive = sensitiveToolCalls.has(event.id);
         const summary = formatToolInputSummary(event.input, { sensitive });
+        const intentKind = (event.input as Record<string, unknown>)?.intentKind as string | undefined;
+        const label = event.name === "bash" && intentKind
+          ? `bash (${intentKind})`
+          : event.name;
         if (summary) {
-          console.log(`[tool:${event.name}] ${summary}`);
+          console.log(`[tool:${label}] ${summary}`);
         } else {
-          console.log(`[tool:${event.name}] ...`);
+          console.log(`[tool:${label}] ...`);
         }
         break;
       }

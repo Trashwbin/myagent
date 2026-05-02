@@ -439,9 +439,11 @@ function checkBash(input: unknown, cwd: string): ToolPermissionDecision {
   if (policy.externalDirectoryReason)
     metadata.externalDirectoryReason = policy.externalDirectoryReason;
   if (policy.approvalPattern) metadata.approvalPattern = policy.approvalPattern;
+  if (policy.intentKind) metadata.intentKind = policy.intentKind;
   return {
     behavior: policy.decision,
     reason: policy.reason,
+    resolvedInput: { command, intentKind: policy.intentKind },
     metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
   };
 }

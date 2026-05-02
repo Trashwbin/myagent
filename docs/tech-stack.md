@@ -193,6 +193,7 @@ Current rules:
 - project-root-scoped outside reads: ask, then reusable through `external_directory`
 - sensitive reads: ask once only, never persisted as session/workspace rules
 - read-only bash commands: classified by command-policy v2, including `cd <dir> && <cmd>` and `git -C <dir>` effective cwd handling
+- bash has an internal `CommandIntent` semantic model: every command is parsed into an intent kind (`file_discovery`, `content_search`, `partial_read`, `fs_primitive`, `git_read`, `exec`, `unknown`) and this intent flows through policy/approval/transcript/CLI display
 - reusable bash approval patterns: `git diff *`, `git status *`, `rg *`, `npm test *`, etc.
 - file writes inside workspace: ask in interactive modes, deny in `--approval never`
 - destructive commands: deny by default

@@ -170,4 +170,13 @@ describe("formatToolInputSummary", () => {
     expect(result).toContain("content: [...]");
     expect(result).not.toContain("short");
   });
+
+  it("filters intentKind from bash input summary", () => {
+    const result = formatToolInputSummary({
+      command: "git status",
+      intentKind: "git_read",
+    });
+    expect(result).toBe('command: "git status"');
+    expect(result).not.toContain("intentKind");
+  });
 });

@@ -37,4 +37,10 @@ describe("system prompt", () => {
     expect(prompt).toContain("retry the mutation");
     expect(prompt).toContain("Do not treat the read as task completion");
   });
+
+  it("describes bash as execution layer with filesystem primitives", () => {
+    const prompt = buildSystemPrompt("/tmp/workspace");
+    expect(prompt).toContain("filesystem primitives");
+    expect(prompt).toContain("execution layer");
+  });
 });
