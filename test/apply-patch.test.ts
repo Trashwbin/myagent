@@ -1928,8 +1928,7 @@ describe("apply_patch tool description", () => {
     expect(desc).toContain("validation failure");
     expect(desc).toContain("Read");
     expect(desc).toContain("regenerate");
-    expect(desc).toContain("retry");
-    expect(desc).toContain("recovery step");
-    expect(desc).toContain("Do not end your turn");
+    expect(desc).toContain("gather updated context");
+    expect(desc).toContain("continue the modification");
   });
 });

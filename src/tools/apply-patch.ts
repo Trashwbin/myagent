@@ -865,12 +865,20 @@ const executionInputSchema = inputSchema.extend({
 
 export const applyPatchTool: ToolDefinition = {
   name: "apply_patch",
-  description: `Apply a structured multi-file patch (add, update, delete files) in one atomic operation.
-
-Recovery rules:
-- If apply_patch returns a validation failure that mentions "re-read", "content may have changed", or "context not found", Read the affected file.
-- After reading, you MUST regenerate a new patch based on the current file content and retry apply_patch. Reading is a recovery step, not the final action.
-- Do not end your turn after a Read that was triggered by a patch failure without attempting a new patch or explaining why the task cannot continue.`,
+  description: [
+    "Apply a structured multi-file patch (add, update, delete files) in one atomic operation.",
+    "",
+    "Patch grammar:",
+    "- Enclose with *** Begin Patch / *** End Patch.",
+    "- *** Add File: <path>  — lines prefixed with +",
+    "- *** Update File: <path>  — @@ context markers, -old lines, +new lines",
+    "- *** Delete File: <path>",
+    "- Preflight validation checks that old content matches before applying.",
+    "",
+    "Recovery after validation failure:",
+    "- If the error mentions re-read, content may have changed, or context not found, Read the affected file to gather updated context.",
+    "- Then regenerate a new patch based on current file content and continue the modification. If you cannot continue, explain why.",
+  ].join("\n"),
   inputSchema,
 
   async execute(input: unknown, context: ToolContext): Promise<ToolResult> {
