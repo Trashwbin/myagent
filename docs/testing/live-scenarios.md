@@ -19,6 +19,9 @@ pnpm exec tsx scripts/live-scenario.ts --list
 # Run a single scenario
 pnpm live:scenario --scenario file-mutation-happy
 
+# Also works when your shell or package runner forwards an extra `--`
+pnpm live:scenario -- --scenario file-mutation-happy
+
 # Run all scenarios
 pnpm live:scenario --all
 
@@ -51,6 +54,8 @@ If no API key is provided, the harness exits with a clear error message instead 
 | `file-mutation-happy` | Basic read → edit flow, no unnecessary bash |
 | `patch-recover` | apply_patch failure → re-read → retry |
 | `sensitive-path` | Sensitive file triggers approval, file is accessed |
+| `multi-file-patch-happy` | Real multi-file happy path with `glob` + `Read` + `apply_patch`, no bash fallback |
+| `external-directory-approval` | External directory approval plus `find_up` boundary discovery |
 
 ## Expectation model
 
@@ -65,6 +70,7 @@ Scenarios assert on these dimensions:
 - **mustMutateFiles** — files that must be modified (edit/write/patch)
 - **mustContainToolErrors** — error patterns that must appear (for recovery testing)
 - **mustNotLeakSensitive** — sensitive content must not appear in tool_started/approval events
+- **requiredApprovalTools** — tools that must trigger at least one approval request
 
 ## Transcript format
 
