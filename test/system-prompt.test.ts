@@ -16,4 +16,12 @@ describe("system prompt", () => {
     expect(prompt).toContain("do not claim it succeeded");
     expect(prompt).toContain("checkpoint id");
   });
+
+  it("contains mutation failure recovery discipline", () => {
+    const prompt = buildSystemPrompt("/tmp/workspace");
+
+    expect(prompt).toContain("recovery step");
+    expect(prompt).toContain("retry the mutation");
+    expect(prompt).toContain("Do not treat the read as task completion");
+  });
 });

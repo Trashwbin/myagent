@@ -40,6 +40,7 @@ export type TurnResult = {
   session: SessionState;
   newMessages: Message[];
   aborted?: boolean;
+  stopReason?: "end_turn" | "tool_use" | "length";
 };
 
 export type SessionOptions = {
@@ -66,6 +67,7 @@ export type TurnOptions = {
 export type SessionResult = {
   transcript: Message[];
   aborted?: boolean;
+  stopReason?: "end_turn" | "tool_use" | "length";
 };
 
 export type TurnEvent =
@@ -88,6 +90,7 @@ export type TurnEvent =
     }
   | { type: "tool_started"; id: string; name: string; input: unknown }
   | { type: "tool_result"; message: Message }
+  | { type: "turn_truncated" }
   | { type: "turn_finished" };
 
 function buildToolSchemas(registry: ToolRegistry): ToolSchema[] {
@@ -120,7 +123,7 @@ async function runAgentLoop(
   newMessages: Message[],
   cwd: string,
   options: TurnOptions,
-): Promise<{ aborted: boolean }> {
+): Promise<{ aborted: boolean; stopReason?: "end_turn" | "tool_use" | "length" }> {
   const maxTurns = options.maxTurns ?? 10;
   const toolSchemas = buildToolSchemas(registry);
   const systemPrompt = buildSystemPrompt(cwd);
@@ -128,6 +131,8 @@ async function runAgentLoop(
   const sessionRules = options.sessionApprovalRules ?? [];
   const store = options.store;
   const readState = options.readState ?? new ReadStateTracker();
+
+  let lastStopReason: "end_turn" | "tool_use" | "length" | undefined;
 
   for (let turn = 0; turn < maxTurns; turn++) {
     let assistantText = "";
@@ -152,6 +157,7 @@ async function runAgentLoop(
             });
           break;
         case "stop":
+          lastStopReason = event.reason;
           break;
       }
     }
@@ -165,7 +171,12 @@ async function runAgentLoop(
     newMessages.push(assistantMsg);
     if (onEvent) await onEvent({ type: "assistant_message", message: assistantMsg });
 
-    if (toolCalls.length === 0) break;
+    if (toolCalls.length === 0) {
+      if (lastStopReason === "length" && onEvent) {
+        await onEvent({ type: "turn_truncated" });
+      }
+      break;
+    }
 
     for (const tc of toolCalls) {
       const decision = checkToolPermission(tc.name, tc.input, options.approval, cwd);
@@ -173,9 +184,12 @@ async function runAgentLoop(
 
       let shouldExecute = false;
       let blockReason = "";
+      let validationResult = "";
 
       if (decision.behavior === "allow") {
         shouldExecute = true;
+      } else if (decision.behavior === "invalid") {
+        validationResult = decision.reason;
       } else if (decision.behavior === "deny") {
         blockReason = decision.reason;
       } else {
@@ -338,6 +352,19 @@ async function runAgentLoop(
         }
       }
 
+      if (validationResult) {
+        const msg: Message = {
+          role: "tool_result",
+          toolCallId: tc.id,
+          toolName: tc.name,
+          content: `Patch validation failed before execution: ${validationResult}`,
+        };
+        messages.push(msg);
+        newMessages.push(msg);
+        if (onEvent) await onEvent({ type: "tool_result", message: msg });
+        continue;
+      }
+
       if (!shouldExecute) {
         const msg = blockedMsg(tc, blockReason);
         messages.push(msg);
@@ -414,7 +441,7 @@ async function runAgentLoop(
   }
 
   if (onEvent) await onEvent({ type: "turn_finished" });
-  return { aborted: false };
+  return { aborted: false, stopReason: lastStopReason };
 }
 
 export async function runTurn(
@@ -428,7 +455,7 @@ export async function runTurn(
   const messages = [...session.messages, userMsg];
   const newMessages: Message[] = [userMsg];
 
-  const { aborted } = await runAgentLoop(
+  const { aborted, stopReason } = await runAgentLoop(
     provider,
     registry,
     messages,
@@ -441,6 +468,7 @@ export async function runTurn(
     session: { ...session, messages },
     newMessages,
     aborted: aborted || undefined,
+    stopReason,
   };
 }
 
@@ -453,7 +481,7 @@ export async function runSession(
   const messages = [...initialMessages];
   const transcript = [...initialMessages];
 
-  const { aborted } = await runAgentLoop(
+  const { aborted, stopReason } = await runAgentLoop(
     provider,
     registry,
     messages,
@@ -462,5 +490,5 @@ export async function runSession(
     options,
   );
 
-  return { transcript, aborted: aborted || undefined };
+  return { transcript, aborted: aborted || undefined, stopReason };
 }

@@ -161,6 +161,11 @@ function makeEventRenderer(): (event: TurnEvent) => void {
       case "tool_result":
         console.log(`[tool:${event.message.toolName}] ${event.message.content}`);
         break;
+      case "turn_truncated":
+        console.log(
+          "\n[truncated] Turn stopped because the model hit its output token limit.",
+        );
+        break;
     }
   };
 }
@@ -458,7 +463,7 @@ program
       const readState = new ReadStateTracker();
 
       try {
-        const { transcript, aborted } = await runSession(
+        const { transcript, aborted, stopReason } = await runSession(
           provider,
           registry,
           [{ role: "user", content: prompt }],

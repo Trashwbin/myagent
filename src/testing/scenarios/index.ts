@@ -25,7 +25,7 @@ const PATCH_RECOVER: ScenarioDefinition = {
   description:
     "Apply a patch with outdated context that fails, then re-read and recover.",
   prompt:
-    'Read config.ts and change PORT from 3000 to 8080 using apply_patch. The file has been recently reformatted so your first patch attempt will likely fail with a context error. If it fails, re-read the file and try again with correct content.',
+    'Change PORT from 3000 to 8080 in config.ts using apply_patch. Use the patch format *** Begin Patch / *** End Patch. The first attempt will fail because the file was reformatted. When it fails, read the file to get current content, then regenerate and retry the patch. Do not stop after reading — you must apply a corrected patch.',
   setup: {
     files: {
       "config.ts":
@@ -35,6 +35,7 @@ const PATCH_RECOVER: ScenarioDefinition = {
   expect: {
     success: true,
     requiredTools: ["read_file", "apply_patch"],
+    mustMutateFiles: ["config.ts"],
     maxTurns: 6,
   },
 };

@@ -320,10 +320,24 @@ Behavior:
 - If any hunk fails to match, the tool fails without partial writes.
 - If a filesystem write fails mid-patch, all previously applied operations are rolled back (reverse-iterate, restore original content or delete newly-created files).
 - The permission system parses the patch, resolves paths, and builds combined diff metadata for approval display.
-- For non-sensitive paths, the permission system performs a dry-run hunk application before approval. If any hunk cannot apply or the target file does not exist, the patch is denied at the permission stage — the user sees the specific file and hunk that would fail.
+- `apply_patch` performs a **preflight validation** (parse, path resolution, dry-run hunk application) before any approval or execution.
+- **Preflight failures are validation errors, not permission denials.** Hunk mismatch, update target not found, move destination conflict, and parse errors are all reported as `Patch validation failed` — they never enter the approval flow.
+- True permission denials (outside workspace, `--approval never`) remain distinct from validation failures.
+- For non-sensitive paths, the permission system performs a dry-run hunk application before approval. If any hunk cannot apply or the target file does not exist, the patch is reported as a validation failure — the user sees the specific file and hunk that would fail.
 - Sensitive paths cannot be validated (content is not accessible to the permission system), so they still require approval and may fail at execution time.
 - Both the approval metadata path and the execution path use the same `tryApplyHunks` helper for hunk application, ensuring consistent line-ending handling and matching semantics.
 - Checkpoint covers every affected path before mutation.
+- On validation failure, the model should re-read the affected files and regenerate the patch rather than requesting approval.
+
+### Failure recovery
+
+When `apply_patch` returns a validation failure (hunk mismatch, context not found, file changed), the error message includes actionable guidance like "Re-read the file". The expected recovery sequence is:
+
+1. `read_file` on the affected file(s) — this is a recovery step, not task completion.
+2. Regenerate a new patch based on the current file content.
+3. Retry `apply_patch` with the corrected patch.
+
+The model must not end its turn after a `read_file` triggered by a patch failure without either retrying the mutation or explicitly explaining why the task cannot continue. This constraint is encoded in both the tool description guidance and the system prompt.
 
 `apply_patch` reuses the shared permission, diff metadata, and checkpoint flow used by `edit_file` and `write_file`.
 

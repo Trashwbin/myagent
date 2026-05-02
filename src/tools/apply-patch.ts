@@ -643,6 +643,110 @@ function tryApplyHunks(
   return { ok: true, result: resultContent };
 }
 
+// --- Prepare / validation layer ---
+
+export type PreparedApplyPatch = {
+  patch: string;
+  operations: PatchOperation[];
+  resolvedPaths: Record<string, string>;
+  metadata: {
+    operation: "patch";
+    affectedPaths: string[];
+    diff?: string;
+    additions?: number;
+    deletions?: number;
+    failures?: string[];
+    moves?: Array<{ from: string; to: string }>;
+    sensitive?: boolean;
+  };
+};
+
+export type PrepareApplyPatchResult =
+  | { kind: "invalid"; reason: string; metadata?: Record<string, unknown> }
+  | { kind: "needs_approval"; prepared: PreparedApplyPatch }
+  | { kind: "ready"; prepared: PreparedApplyPatch };
+
+export function prepareApplyPatch(
+  input: unknown,
+  mode: string,
+  cwd: string,
+): PrepareApplyPatchResult {
+  const { patch } = input as { patch: string };
+
+  // Parse
+  const parsed = parsePatch(patch);
+  if (!parsed.ok) {
+    return { kind: "invalid", reason: `Invalid patch: ${parsed.error}` };
+  }
+
+  const { operations } = parsed;
+
+  // Resolve paths
+  const resolved = resolvePatchPaths(operations, cwd);
+  if (!resolved.ok) {
+    return { kind: "invalid", reason: resolved.error };
+  }
+
+  // Build diff metadata + dry-run
+  const meta = buildPatchDiffMeta(operations, cwd);
+  const affectedPaths = meta.affectedPaths;
+  const resolvedPathsObj: Record<string, string> = {};
+  for (const [k, v] of resolved.resolved) {
+    resolvedPathsObj[k] = v;
+  }
+
+  // If preflight found failures, the patch is invalid (not a permission issue)
+  if (meta.failures.length > 0) {
+    return {
+      kind: "invalid",
+      reason: `Patch validation failed: ${meta.failures.join("; ")}`,
+      metadata: {
+        operation: "patch" as const,
+        affectedPaths,
+        failures: meta.failures,
+        ...(meta.moves.length > 0 ? { moves: meta.moves } : {}),
+      },
+    };
+  }
+
+  // Check sensitive paths
+  const hasSensitive = operations.some((op) => {
+    const info = resolvePathInfo(cwd, op.path);
+    if (info ? isSensitiveReadPath(info.realPath) : false) return true;
+    if (op.type === "update" && op.movePath) {
+      const moveInfo = resolvePathInfo(cwd, op.movePath);
+      return moveInfo ? isSensitiveReadPath(moveInfo.realPath) : false;
+    }
+    return false;
+  });
+
+  const prepared: PreparedApplyPatch = {
+    patch,
+    operations,
+    resolvedPaths: resolvedPathsObj,
+    metadata: {
+      operation: "patch",
+      affectedPaths,
+      ...(meta.moves.length > 0 ? { moves: meta.moves } : {}),
+      ...(hasSensitive
+        ? { sensitive: true }
+        : {
+            diff: meta.diff,
+            additions: meta.additions,
+            deletions: meta.deletions,
+          }),
+    },
+  };
+
+  // Mode-based decision: never → deny (permission), otherwise needs approval
+  if (mode === "never") {
+    // This will be handled as deny by the caller
+    return { kind: "needs_approval", prepared };
+  }
+
+  return { kind: "needs_approval", prepared };
+}
+
 // --- Diff metadata builder (used by permission system) ---
 
 export function buildPatchDiffMeta(
@@ -761,8 +865,12 @@ const executionInputSchema = inputSchema.extend({
 
 export const applyPatchTool: ToolDefinition = {
   name: "apply_patch",
-  description:
-    "Apply a structured multi-file patch (add, update, delete files) in one atomic operation",
+  description: `Apply a structured multi-file patch (add, update, delete files) in one atomic operation.
+
+Recovery rules:
+- If apply_patch returns a validation failure that mentions "re-read", "content may have changed", or "context not found", read the affected file with read_file.
+- After reading, you MUST regenerate a new patch based on the current file content and retry apply_patch. Reading is a recovery step, not the final action.
+- Do not end your turn after a read_file that was triggered by a patch failure without attempting a new patch or explaining why the task cannot continue.`,
   inputSchema,
 
   async execute(input: unknown, context: ToolContext): Promise<ToolResult> {

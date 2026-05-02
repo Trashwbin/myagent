@@ -431,6 +431,50 @@ describe("evaluateScenario", () => {
     expect(failures.length).toBeGreaterThan(0);
     expect(failures[0].rule).toBe("mustNotLeakSensitive");
   });
+
+  it("mustNotTruncate passes when no truncation occurred", () => {
+    const entries = makeEntries([
+      { type: "assistant_text", text: "done" },
+    ]);
+    const messages: Message[] = [
+      { role: "user", content: "go" },
+      { role: "assistant", content: "done" },
+    ];
+
+    const failures = evaluateScenario(entries, messages, {
+      success: true,
+      mustNotTruncate: true,
+    });
+
+    expect(failures).toEqual([]);
+  });
+
+  it("mustNotTruncate fails when truncation entry is present", () => {
+    const entries = makeEntries([
+      { type: "assistant_text", text: "partial" },
+      { type: "truncated" } as TranscriptEntry["event"],
+    ]);
+
+    const failures = evaluateScenario(entries, [], {
+      success: false,
+      mustNotTruncate: true,
+    });
+
+    expect(failures).toHaveLength(1);
+    expect(failures[0].rule).toBe("mustNotTruncate");
+  });
+
+  it("mustNotTruncate is not checked when undefined", () => {
+    const entries = makeEntries([
+      { type: "truncated" } as TranscriptEntry["event"],
+    ]);
+
+    const failures = evaluateScenario(entries, [], {
+      success: false,
+    });
+
+    expect(failures).toEqual([]);
+  });
 });
 
 // --- Scenario listing ---
@@ -552,5 +596,22 @@ describe("TranscriptCapture redaction", () => {
     if (resultEntry?.event.type === "tool_result") {
       expect(resultEntry.event.content).toBe("export const VERSION = '1.0.0';");
     }
+  });
+
+  it("captures turn_truncated event", async () => {
+    const capture = new TranscriptCapture("openai", "gpt-4o", "test");
+    await capture.handler({
+      type: "assistant_message",
+      message: { role: "assistant", content: "partial text" },
+    });
+    await capture.handler({
+      type: "turn_truncated",
+    });
+
+    const entries = capture.getEntries();
+    expect(entries.some((e) => e.event.type === "truncated")).toBe(true);
+
+    const transcript = capture.buildTranscript([]);
+    expect(transcript.entries.some((e) => e.event.type === "truncated")).toBe(true);
   });
 });

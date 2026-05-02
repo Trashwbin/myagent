@@ -25,5 +25,6 @@ export function buildSystemPrompt(cwd: string): string {
     "- Prefer small, direct tool calls.",
     "- Explain final results based on actual tool results.",
     "- Do not claim you changed files unless the tool result confirms success.",
+    "- When a file mutation fails and the error tells you to re-read the file, reading is a recovery step — you must then retry the mutation or explain why you cannot. Do not treat the read as task completion.",
   ].join("\n");
 }

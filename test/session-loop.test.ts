@@ -3084,3 +3084,286 @@ describe("Approval memory and abort", () => {
     await rm(tmp, { recursive: true, force: true });
   });
 });
+
+// --- Truncation (stop reason = length) ---
+
+describe("Truncation handling", () => {
+  function makeSession(cwd: string, messages: Message[] = []): SessionState {
+    return { id: randomUUID(), cwd, messages };
+  }
+
+  it("marks stopReason as length when provider returns length stop", async () => {
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "I was cut off mid-" },
+        { type: "stop", reason: "length" },
+      ],
+    ]);
+
+    const { stopReason, aborted } = await runTurn(
+      provider,
+      new ToolRegistry(),
+      makeSession(process.cwd()),
+      "do something",
+      { approval: "auto" },
+    );
+
+    expect(stopReason).toBe("length");
+    expect(aborted).toBeFalsy();
+  });
+
+  it("emits turn_truncated event when stop reason is length", async () => {
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "partial" },
+        { type: "stop", reason: "length" },
+      ],
+    ]);
+
+    const events: TurnEvent[] = [];
+    await runTurn(provider, new ToolRegistry(), makeSession(process.cwd()), "hi", {
+      approval: "auto",
+      onEvent: (e) => { events.push(e); },
+    });
+
+    const types = events.map((e) => e.type);
+    expect(types).toContain("turn_truncated");
+    expect(types).toContain("turn_finished");
+    expect(types.indexOf("turn_truncated")).toBeLessThan(types.indexOf("turn_finished"));
+  });
+
+  it("does not emit turn_truncated on normal end_turn", async () => {
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "complete" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const events: TurnEvent[] = [];
+    const { stopReason } = await runTurn(
+      provider,
+      new ToolRegistry(),
+      makeSession(process.cwd()),
+      "hi",
+      { approval: "auto", onEvent: (e) => { events.push(e); } },
+    );
+
+    expect(stopReason).toBe("end_turn");
+    const types = events.map((e) => e.type);
+    expect(types).not.toContain("turn_truncated");
+  });
+
+  it("does not emit turn_truncated on tool_use", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
+    await writeFile(join(tmp, "f.txt"), "hi");
+
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "tc1", name: "read_file", input: { path: "f.txt" } },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    const events: TurnEvent[] = [];
+    const { stopReason } = await runTurn(provider, registry, makeSession(tmp), "read", {
+      approval: "auto",
+      onEvent: (e) => { events.push(e); },
+    });
+
+    expect(stopReason).toBe("end_turn");
+    const types = events.map((e) => e.type);
+    expect(types).not.toContain("turn_truncated");
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("truncation is not the same as aborted", async () => {
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "cut short" },
+        { type: "stop", reason: "length" },
+      ],
+    ]);
+
+    const { aborted, stopReason } = await runTurn(
+      provider,
+      new ToolRegistry(),
+      makeSession(process.cwd()),
+      "hi",
+      { approval: "auto" },
+    );
+
+    expect(aborted).toBeFalsy();
+    expect(stopReason).toBe("length");
+  });
+
+  it("runSession propagates stopReason", async () => {
+    const provider = new FakeProvider([
+      [
+        { type: "text_delta", text: "truncated output" },
+        { type: "stop", reason: "length" },
+      ],
+    ]);
+
+    const { stopReason, aborted } = await runSession(
+      provider,
+      new ToolRegistry(),
+      [{ role: "user", content: "go" }],
+      { cwd: process.cwd(), approval: "auto" },
+    );
+
+    expect(stopReason).toBe("length");
+    expect(aborted).toBeFalsy();
+  });
+});
+
+// --- Patch validation vs permission deny ---
+
+describe("Patch validation vs permission deny", () => {
+  function makeSession(cwd: string, messages: Message[] = []): SessionState {
+    return { id: randomUUID(), cwd, messages };
+  }
+
+  it("invalid patch shows validation failure, not denied", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "app.ts"), "line1\nactual\nline3");
+
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+@@
+ line1
+-wrong
++new
+ line3
+*** End Patch`;
+
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "tc1", name: "apply_patch", input: { patch } },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(applyPatchTool);
+
+    const { newMessages, aborted } = await runTurn(
+      provider,
+      registry,
+      makeSession(tmp),
+      "patch",
+      { approval: "auto" },
+    );
+
+    expect(aborted).toBeFalsy();
+    const result = newMessages.find((m) => m.role === "tool_result");
+    expect(result).toBeDefined();
+    expect(result!.content).toContain("validation failed");
+    expect(result!.content).not.toContain("denied");
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("never-approval mode still shows denied", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+
+    const patch = `*** Begin Patch
+*** Add File: new.txt
++content
+*** End Patch`;
+
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "tc1", name: "apply_patch", input: { patch } },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(applyPatchTool);
+
+    const { newMessages, aborted } = await runTurn(
+      provider,
+      registry,
+      makeSession(tmp),
+      "patch",
+      { approval: "never" },
+    );
+
+    expect(aborted).toBeFalsy();
+    const result = newMessages.find((m) => m.role === "tool_result");
+    expect(result).toBeDefined();
+    expect(result!.content).toContain("denied");
+    expect(result!.content).not.toContain("validation failed");
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("invalid patch does not trigger approval handler", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
+    await writeFile(join(tmp, "app.ts"), "line1\nactual\nline3");
+
+    const patch = `*** Begin Patch
+*** Update File: app.ts
+@@
+ line1
+-wrong
++new
+ line3
+*** End Patch`;
+
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "tc1", name: "apply_patch", input: { patch } },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "ok" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(applyPatchTool);
+
+    let handlerCalled = false;
+    const events: TurnEvent[] = [];
+    const { newMessages } = await runTurn(
+      provider,
+      registry,
+      makeSession(tmp),
+      "patch",
+      {
+        approval: "auto",
+        approvalHandler: async () => {
+          handlerCalled = true;
+          return "allow_once";
+        },
+        onEvent: (e) => { events.push(e); },
+      },
+    );
+
+    expect(handlerCalled).toBe(false);
+    expect(events.some((e) => e.type === "tool_approval_required")).toBe(false);
+    const result = newMessages.find((m) => m.role === "tool_result");
+    expect(result!.content).toContain("validation failed");
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+});

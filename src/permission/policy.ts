@@ -1,11 +1,8 @@
-import { resolvePathInfo } from "../workspace/path-info.js";
 import { checkReadPolicy, isSensitiveReadPath } from "./read-policy.js";
 import { analyzeCommand } from "./command-policy.js";
 import { buildExternalDirectoryMeta } from "./external-directory.js";
 import {
-  parsePatch,
-  resolvePatchPaths,
-  buildPatchDiffMeta,
+  prepareApplyPatch,
 } from "../tools/apply-patch.js";
 import {
   pathMeta,
@@ -19,7 +16,7 @@ import {
 export type ApprovalMode = "auto" | "on-request" | "never";
 
 export type ToolPermissionDecision = {
-  behavior: "allow" | "ask" | "deny";
+  behavior: "allow" | "ask" | "deny" | "invalid";
   reason: string;
   resolvedInput?: unknown;
   metadata?: Record<string, unknown>;
@@ -274,48 +271,13 @@ function checkApplyPatch(
     return { behavior: "deny", reason: "patches denied in never-approval mode" };
   }
 
-  const { patch } = input as { patch: string };
-  const parsed = parsePatch(patch);
-  if (!parsed.ok) {
-    return { behavior: "deny", reason: `Invalid patch: ${parsed.error}` };
-  }
+  const result = prepareApplyPatch(input, mode, cwd);
 
-  const { operations } = parsed;
-  const resolved = resolvePatchPaths(operations, cwd);
-  if (!resolved.ok) {
-    return { behavior: "deny", reason: resolved.error };
-  }
-
-  const hasSensitive = operations.some((op) => {
-    const info = resolvePathInfo(cwd, op.path);
-    if (info ? isSensitivePath(info.realPath) : false) return true;
-    if (op.type === "update" && op.movePath) {
-      const moveInfo = resolvePathInfo(cwd, op.movePath);
-      return moveInfo ? isSensitivePath(moveInfo.realPath) : false;
-    }
-    return false;
-  });
-  const meta = buildPatchDiffMeta(operations, cwd);
-  const affectedPaths = meta.affectedPaths;
-  const resolvedPathsObj: Record<string, string> = {};
-  for (const [k, v] of resolved.resolved) {
-    resolvedPathsObj[k] = v;
-  }
-
-  if (meta.failures.length > 0) {
+  if (result.kind === "invalid") {
     return {
-      behavior: "deny",
-      reason: `Patch will fail: ${meta.failures.join("; ")}`,
-      resolvedInput: {
-        patch,
-        resolvedPaths: resolvedPathsObj,
-      },
-      metadata: {
-        operation: "patch",
-        affectedPaths,
-        failures: meta.failures,
-        ...(meta.moves.length > 0 ? { moves: meta.moves } : {}),
-      },
+      behavior: "invalid",
+      reason: result.reason,
+      metadata: result.metadata,
     };
   }
 
@@ -323,21 +285,10 @@ function checkApplyPatch(
     behavior: "ask",
     reason: "patch requires approval",
     resolvedInput: {
-      patch,
-      resolvedPaths: resolvedPathsObj,
+      patch: result.prepared.patch,
+      resolvedPaths: result.prepared.resolvedPaths,
     },
-    metadata: {
-      operation: "patch",
-      affectedPaths,
-      ...(meta.moves.length > 0 ? { moves: meta.moves } : {}),
-      ...(hasSensitive
-        ? { sensitive: true }
-        : {
-            diff: meta.diff,
-            additions: meta.additions,
-            deletions: meta.deletions,
-          }),
-    },
+    metadata: result.prepared.metadata,
   };
 }
 

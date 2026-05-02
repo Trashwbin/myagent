@@ -92,6 +92,14 @@ export class TranscriptCapture {
         }
         break;
       }
+
+      case "turn_truncated":
+        this.entries.push({
+          turn: this.turn,
+          timestamp: ts,
+          event: { type: "truncated" },
+        });
+        break;
     }
   };
 
@@ -181,6 +189,8 @@ function redactEntries(entries: TranscriptEntry[]): TranscriptEntry[] {
             approval: { ...ev.approval, input: redactInput(ev.approval.input) },
           },
         };
+      case "truncated":
+        return entry;
       default:
         return entry;
     }
@@ -382,6 +392,19 @@ export function evaluateScenario(
           break;
         }
       }
+    }
+  }
+
+  // --- mustNotTruncate ---
+  if (expect.mustNotTruncate) {
+    const hasTruncation = entries.some(
+      (e) => e.event.type === "truncated",
+    );
+    if (hasTruncation) {
+      failures.push({
+        rule: "mustNotTruncate",
+        detail: "One or more turns were truncated by maxOutputTokens",
+      });
     }
   }
 

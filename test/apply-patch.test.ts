@@ -1231,7 +1231,7 @@ describe("apply_patch permission metadata", () => {
     await rm(tmp, { recursive: true });
   });
 
-  it("denies update patch when hunk cannot apply", async () => {
+  it("reports validation failure when hunk cannot apply", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
     await writeFile(join(tmp, "app.ts"), "line1\nactual\nline3");
 
@@ -1245,15 +1245,15 @@ describe("apply_patch permission metadata", () => {
 *** End Patch`;
 
     const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
-    expect(decision.behavior).toBe("deny");
-    expect(decision.reason).toContain("will fail");
+    expect(decision.behavior).toBe("invalid");
+    expect(decision.reason).toContain("validation failed");
     expect(decision.metadata?.failures).toBeDefined();
     expect((decision.metadata!.failures as string[]).length).toBeGreaterThan(0);
 
     await rm(tmp, { recursive: true });
   });
 
-  it("denies update patch when file does not exist", async () => {
+  it("reports validation failure when file does not exist", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
 
     const patch = `*** Begin Patch
@@ -1264,24 +1264,26 @@ describe("apply_patch permission metadata", () => {
 *** End Patch`;
 
     const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
-    expect(decision.behavior).toBe("deny");
+    expect(decision.behavior).toBe("invalid");
+    expect(decision.reason).toContain("validation failed");
     expect(decision.reason).toContain("does not exist");
 
     await rm(tmp, { recursive: true });
   });
 
-  it("denies add patch when file already exists", async () => {
+  it("reports validation failure when add target already exists", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
     await writeFile(join(tmp, "hello.txt"), "existing");
 
     const decision = checkToolPermission("apply_patch", { patch: ADD_PATCH }, "auto", tmp);
-    expect(decision.behavior).toBe("deny");
+    expect(decision.behavior).toBe("invalid");
+    expect(decision.reason).toContain("validation failed");
     expect(decision.reason).toContain("already exists");
 
     await rm(tmp, { recursive: true });
   });
 
-  it("denies add patch when path is an existing directory", async () => {
+  it("reports validation failure when add target is an existing directory", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
     const { mkdir: mkdirAsync } = await import("node:fs/promises");
     await mkdirAsync(join(tmp, "src"));
@@ -1292,13 +1294,14 @@ describe("apply_patch permission metadata", () => {
 *** End Patch`;
 
     const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
-    expect(decision.behavior).toBe("deny");
+    expect(decision.behavior).toBe("invalid");
+    expect(decision.reason).toContain("validation failed");
     expect(decision.reason).toContain("already exists");
 
     await rm(tmp, { recursive: true });
   });
 
-  it("denies delete patch when file does not exist", async () => {
+  it("reports validation failure when delete target does not exist", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
 
     const decision = checkToolPermission(
@@ -1307,7 +1310,8 @@ describe("apply_patch permission metadata", () => {
       "auto",
       tmp,
     );
-    expect(decision.behavior).toBe("deny");
+    expect(decision.behavior).toBe("invalid");
+    expect(decision.reason).toContain("validation failed");
     expect(decision.reason).toContain("does not exist");
 
     await rm(tmp, { recursive: true });
@@ -1832,7 +1836,7 @@ describe("buildPatchDiffMeta with move", () => {
 });
 
 describe("apply_patch move permission", () => {
-  it("denies move when destination exists", async () => {
+  it("reports validation failure when move destination exists", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-patch-"));
     await writeFile(join(tmp, "src.txt"), "content");
     await writeFile(join(tmp, "dest.txt"), "existing");
@@ -1846,7 +1850,8 @@ describe("apply_patch move permission", () => {
 *** End Patch`;
 
     const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
-    expect(decision.behavior).toBe("deny");
+    expect(decision.behavior).toBe("invalid");
+    expect(decision.reason).toContain("validation failed");
     expect(decision.reason).toContain("already exists");
 
     await rm(tmp, { recursive: true });
@@ -1912,5 +1917,19 @@ describe("apply_patch move permission", () => {
     expect(resolved.resolvedPaths["dest.txt"]).toBeDefined();
 
     await rm(tmp, { recursive: true });
+  });
+});
+
+// --- Tool description guidance ---
+
+describe("apply_patch tool description", () => {
+  it("contains recovery rules for validation failure", () => {
+    const desc = applyPatchTool.description;
+    expect(desc).toContain("validation failure");
+    expect(desc).toContain("read_file");
+    expect(desc).toContain("regenerate");
+    expect(desc).toContain("retry");
+    expect(desc).toContain("recovery step");
+    expect(desc).toContain("Do not end your turn");
   });
 });

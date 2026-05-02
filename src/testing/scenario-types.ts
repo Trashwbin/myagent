@@ -41,6 +41,9 @@ export type ScenarioExpectation = {
   /** If true, no sensitive content may appear in tool_started or approval text */
   mustNotLeakSensitive?: boolean;
 
+  /** If true, the scenario fails when any turn was truncated by maxOutputTokens */
+  mustNotTruncate?: boolean;
+
   /** Files that must be mutated (written/edited/patched) during the scenario */
   mustMutateFiles?: string[];
 };
@@ -72,7 +75,8 @@ export type TranscriptEntry = {
     | { type: "tool_call"; toolCall: TranscriptToolCall }
     | { type: "tool_result"; toolName: string; content: string; ok: boolean }
     | { type: "approval"; approval: TranscriptApproval }
-    | { type: "tool_started"; name: string; input: unknown };
+    | { type: "tool_started"; name: string; input: unknown }
+    | { type: "truncated" };
 };
 
 export type ScenarioTranscript = {
