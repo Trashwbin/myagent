@@ -36,7 +36,7 @@ export const findUpTool: ToolDefinition = {
     "- Returns the first (nearest) match found.",
     "- start_path can be a file (search starts from its directory) or a directory.",
     "- stop is an optional upper bound; the search will not go above it.",
-    "- Use find_up to locate project config files (package.json, tsconfig.json, .gitignore).",
+    "- Typical targets: package.json, tsconfig.json, .gitignore, .eslintrc.json.",
     "- Use glob for downward file discovery, grep for content search, Read for content reading.",
   ].join("\n"),
   inputSchema,

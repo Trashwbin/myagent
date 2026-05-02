@@ -45,9 +45,10 @@ export const globTool: ToolDefinition = {
     "Usage:",
     "- Returns file paths matching the given glob pattern.",
     "- Pattern examples: '**/*.ts', '*.md', 'package.json', 'apply-patch.ts'.",
+    "- Includes hidden files (dotfiles).",
     "- path must be a directory; defaults to workspace root.",
     "- Results are sorted by modification time (most recent first).",
-    "- Use glob for file discovery, grep for content search, Read for content reading.",
+    "- This is a file discovery tool. Use grep for content search, Read for content reading.",
   ].join("\n"),
   inputSchema,
 

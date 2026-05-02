@@ -36,7 +36,16 @@ export function truncateOutput(output: string): string {
 
 export const bashTool: ToolDefinition = {
   name: "bash",
-  description: "Execute a shell command",
+  description: [
+    "Execute a shell command.",
+    "",
+    "Use bash for: git operations, build/test/run scripts, simple filesystem primitives (cp, mv, mkdir),",
+    "and commands that dedicated tools cannot express.",
+    "",
+    "Prefer dedicated tools for file exploration:",
+    "- glob for file discovery, grep for content search, Read for file reading, find_up for ancestor config lookup.",
+    "- Do not use bash for `cat`, `head`, `tail`, `ls`, `rg`, or `grep` when dedicated tools can express the task.",
+  ].join("\n"),
   inputSchema,
 
   async execute(input: unknown, context: ToolContext): Promise<ToolResult> {
