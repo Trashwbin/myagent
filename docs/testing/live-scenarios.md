@@ -34,27 +34,28 @@ pnpm live:scenario --all
 
 The harness resolves provider settings from:
 
-1. CLI flags
-2. env vars
-3. layered `settings.json`
-4. defaults
+1. layered `config.json`
+2. per-scenario run overrides
+3. defaults
 
 Supported live-scenario CLI flags:
 
-| Flag | Env var | Meaning |
-| --- | --- | --- |
-| `--provider` | `MYAGENT_PROVIDER` | `openai` or `anthropic` |
-| `--model` | `MYAGENT_MODEL` | model name |
-| `--base-url` | `MYAGENT_BASE_URL` | custom provider base URL |
-| `--max-turns` | `MYAGENT_MAX_TURNS` | max turns per scenario |
-| `--output-dir` | — | transcript directory |
+| Flag | Meaning |
+| --- | --- |
+| `--scenario` | run one named scenario |
+| `--all` | run the full scenario set |
+| `--list` | list available scenarios |
+| `--output-dir` | transcript directory |
 
-Secrets stay in env vars:
+Secrets now live in layered config files, typically:
 
-- `MYAGENT_API_KEY`
-- `MYAGENT_AUTH_TOKEN`
+```text
+~/.myagent/config.json
+<workspace>/.myagent/config.local.json
+```
 
-`maxOutputTokens` is inherited from env/settings and can also be overridden per scenario through the scenario definition itself.
+`maxTurns` and `maxOutputTokens` come from config and can still be overridden per
+scenario through the scenario definition itself.
 
 ## Current scenarios
 

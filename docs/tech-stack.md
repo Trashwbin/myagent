@@ -41,49 +41,47 @@ src/model/
 
 Provider config:
 
-```text
-MYAGENT_PROVIDER=openai | anthropic
-MYAGENT_MODEL=...
-MYAGENT_BASE_URL=...
-MYAGENT_API_KEY=...
-```
-
-These can also be set via `settings.json` (see below). CLI flags and env vars
-always take precedence over file config. API keys must stay in env vars.
-
-Settings files (optional, layered):
+Config files (optional, layered):
 
 ```text
-~/.myagent/settings.json              global
-<workspace>/.myagent/settings.json    project
-<workspace>/.myagent/settings.local.json  local (gitignored)
+~/.myagent/config.json                   global
+<workspace>/.myagent/config.json         project
+<workspace>/.myagent/config.local.json   local (gitignored)
 ```
 
-Priority: CLI flags > env vars > settings.local.json > project settings > global settings > defaults.
-
-Most fields (`provider`, `model`, `maxTurns`, `approval`) follow this full
-priority chain.
-
-Current exceptions:
-
-- `baseUrl` in the main CLI has no dedicated flag yet, so it resolves as
-  `MYAGENT_BASE_URL` env var > settings > built-in default.
-- `maxOutputTokens` also has no CLI flag; it resolves as
-  `MYAGENT_MAX_OUTPUT_TOKENS` env var > settings > provider default
-  (unset for OpenAI requests, 16384 for Anthropic).
+Runtime model/provider settings now come from layered config files. `MYAGENT_HOME`
+still exists as a storage/config root override, but provider credentials and base
+URLs are no longer expected from environment variables.
 
 Supported fields:
 
 ```json
 {
+  "$schema": "https://myagent.dev/config.json",
   "provider": "openai" | "anthropic",
-  "model": "...",
-  "baseUrl": "...",
-  "maxOutputTokens": 4096,
   "maxTurns": 10,
-  "approval": "auto" | "on-request"
+  "approval": "auto" | "on-request",
+  "providers": {
+    "openai": {
+      "model": "...",
+      "baseUrl": "...",
+      "apiKey": "...",
+      "maxOutputTokens": 4096
+    },
+    "anthropic": {
+      "model": "...",
+      "baseUrl": "...",
+      "apiKey": "...",
+      "authToken": "...",
+      "maxOutputTokens": 16384
+    }
+  }
 }
 ```
+
+Top-level `model`, `baseUrl`, `apiKey`, `authToken`, and `maxOutputTokens` are
+still accepted as flat compatibility keys, but new configs should prefer the
+nested `providers.<name>` form.
 
 `maxOutputTokens` controls per-turn output length. When unset, OpenAI-compatible
 requests omit `max_tokens` and let the upstream decide the default. Anthropic
@@ -182,9 +180,9 @@ allow | ask | deny
 
 v0 can run in non-interactive modes:
 
-- `--approval never`: deny anything that needs approval
-- `--approval on-request`: ask before risky tool execution
-- `--approval auto`: allow safe read/search/test commands, ask for writes and
+- `approval: "never"`: deny anything that needs approval
+- `approval: "on-request"`: ask before risky tool execution
+- `approval: "auto"`: allow safe read/search/test commands, ask for writes and
   risky commands
 
 Current rules:
@@ -195,7 +193,7 @@ Current rules:
 - read-only bash commands: classified by command-policy v2, including `cd <dir> && <cmd>` and `git -C <dir>` effective cwd handling
 - bash has an internal `CommandIntent` semantic model: every command is parsed into an intent kind (`file_discovery`, `content_search`, `partial_read`, `fs_primitive`, `git_read`, `exec`, `unknown`) and this intent flows through policy/approval/transcript/CLI display
 - reusable bash approval patterns: `git diff *`, `git status *`, `rg *`, `npm test *`, etc.
-- file writes inside workspace: ask in interactive modes, deny in `--approval never`
+- file writes inside workspace: ask in interactive modes, deny in `approval: "never"`
 - destructive commands: deny by default
 - write/network/unknown commands: ask or deny based on policy and approval mode
 
@@ -292,9 +290,9 @@ prettier
 The first repository milestone is not a polished CLI. It is this:
 
 ```text
-myagent --provider openai --cwd /path/to/repo "modify a function and run tests"
-myagent --provider anthropic --cwd /path/to/repo "modify a function and run tests"
+cd /path/to/repo && myagent
+cd /path/to/repo && myagent resume <sessionId>
 ```
 
-Both commands should run through the same session loop and tool registry. Only
-the model adapter should differ.
+Both entry points should run through the same session loop and tool registry.
+Only the model adapter selected by config should differ.

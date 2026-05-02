@@ -34,21 +34,21 @@ function openTestStore(baseDir: string): TranscriptStore {
 // We test the routing logic, not the full chat loop.
 function makeTestProgram(): {
   program: Command;
+  mainCalled: string[];
   sessionsCalled: string[];
   resumeCalled: string[];
 } {
+  const mainCalled: string[] = [];
   const sessionsCalled: string[] = [];
   const resumeCalled: string[] = [];
 
   const program = new Command();
   program.exitOverride();
 
-  program
-    .name("myagent")
-    .argument("[prompt]", "task prompt");
+  program.name("myagent");
 
   program.action(() => {
-    // main action — no-op for routing tests
+    mainCalled.push("main");
   });
 
   program
@@ -63,7 +63,7 @@ function makeTestProgram(): {
       resumeCalled.push(sessionId);
     });
 
-  return { program, sessionsCalled, resumeCalled };
+  return { program, mainCalled, sessionsCalled, resumeCalled };
 }
 
 describe("CLI subcommand routing", () => {
@@ -79,9 +79,10 @@ describe("CLI subcommand routing", () => {
     expect(resumeCalled).toEqual(["abc-123"]);
   });
 
-  it("does not route plain prompt as subcommand", async () => {
-    const { program, sessionsCalled, resumeCalled } = makeTestProgram();
-    await program.parseAsync(["node", "myagent", "fix the bug"]);
+  it("routes plain invocation to main action", async () => {
+    const { program, mainCalled, sessionsCalled, resumeCalled } = makeTestProgram();
+    await program.parseAsync(["node", "myagent"]);
+    expect(mainCalled).toEqual(["main"]);
     expect(sessionsCalled).toEqual([]);
     expect(resumeCalled).toEqual([]);
   });

@@ -1,10 +1,8 @@
 #!/usr/bin/env node
-import "dotenv/config";
 import { Command } from "commander";
 import { resolve } from "node:path";
 import { realpathSync } from "node:fs";
 import * as readline from "node:readline";
-import { FakeProvider } from "./model/fake.js";
 import { OpenAICompatibleProvider } from "./model/openai-compatible.js";
 import { AnthropicCompatibleProvider } from "./model/anthropic-compatible.js";
 import { ToolRegistry } from "./tools/registry.js";
@@ -18,11 +16,10 @@ import { applyPatchTool } from "./tools/apply-patch.js";
 import { globTool } from "./tools/glob.js";
 import { findUpTool } from "./tools/find-up.js";
 import { ReadStateTracker } from "./tools/file-mutation.js";
-import { runTurn, runSession } from "./session/loop.js";
+import { runTurn } from "./session/loop.js";
 import type { ApprovalRequest, SessionState, TurnEvent } from "./session/loop.js";
 import type { ApprovalMode } from "./permission/rules.js";
 import type { Provider } from "./model/provider.js";
-import { restoreCheckpoint } from "./workspace/checkpoint.js";
 import { getGitDiffStat } from "./workspace/diff.js";
 import { ProviderRuntimeError, formatProviderError } from "./model/errors.js";
 import { openStore } from "./storage/store.js";
@@ -30,8 +27,14 @@ import type { TranscriptStore } from "./storage/store.js";
 import { resolvePrimaryAnswer, resolveSecondaryAnswer } from "./cli/approval.js";
 import { formatToolInputSummary } from "./cli/format-tool-input.js";
 import type { ApprovalResponse, ApprovalRule } from "./permission/approval.js";
-import { loadSettings, resolveSetting, resolveApprovalMode } from "./config/settings.js";
-import type { Settings } from "./config/settings.js";
+import {
+  loadConfig,
+  resolveApprovalMode,
+  resolveModelName,
+  resolveProviderConfig,
+  resolveProviderName,
+} from "./config/config.js";
+import type { Config, ProviderName } from "./config/config.js";
 
 function canonicalWorkspaceRoot(path: string): string {
   return realpathSync.native(resolve(path));
@@ -203,82 +206,52 @@ function printSessionList(
   }
 }
 
-function createProvider(
-  options: Record<string, string>,
-  prompt: string,
-  settings: Settings,
-  maxOutputTokens?: number,
-): Provider {
-  if (options.provider === "fake") {
-    return prompt
-      ? new FakeProvider([
-          [
-            { type: "text_delta", text: `Received task: ${prompt}` },
-            { type: "stop", reason: "end_turn" },
-          ],
-        ])
-      : new FakeProvider([]);
-  }
-
-  const provider = resolveSetting(
-    options.provider || undefined,
-    process.env.MYAGENT_PROVIDER as "openai" | "anthropic" | undefined,
-    settings.provider,
-    "openai",
-  );
-
-  const model = resolveSetting(
-    options.model || undefined,
-    process.env.MYAGENT_MODEL || undefined,
-    settings.model,
-    provider === "openai" ? "gpt-4o" : "claude-sonnet-4-5",
-  );
-
-  const baseUrl = resolveSetting<string | undefined>(
-    undefined,
-    process.env.MYAGENT_BASE_URL || undefined,
-    settings.baseUrl,
-    undefined,
-  );
+function createProvider(config: Config): Provider {
+  const provider = resolveProviderName(config);
+  const providerConfig = resolveProviderConfig(config, provider);
+  const model = resolveModelName(config, provider);
 
   if (provider === "openai") {
-    const apiKey = process.env.MYAGENT_API_KEY;
-    if (!apiKey) {
-      console.error("MYAGENT_API_KEY is required for openai provider");
+    if (!providerConfig.apiKey) {
+      console.error(
+        "OpenAI provider requires apiKey in config.providers.openai.apiKey or top-level apiKey.",
+      );
       process.exit(1);
     }
     return new OpenAICompatibleProvider({
       provider: "openai",
       model,
-      baseUrl,
-      apiKey,
-      maxOutputTokens,
+      baseUrl: providerConfig.baseUrl,
+      apiKey: providerConfig.apiKey,
+      maxOutputTokens: providerConfig.maxOutputTokens,
     });
   }
 
-  if (provider === "anthropic") {
-    const apiKey = process.env.MYAGENT_API_KEY;
-    const authToken = process.env.MYAGENT_AUTH_TOKEN;
-    if (!apiKey && !authToken) {
-      console.error(
-        "MYAGENT_API_KEY or MYAGENT_AUTH_TOKEN is required for anthropic provider",
-      );
-      process.exit(1);
-    }
-    return new AnthropicCompatibleProvider({
-      provider: "anthropic",
-      model,
-      baseUrl,
-      apiKey,
-      authToken,
-      maxOutputTokens,
-    });
+  if (!providerConfig.apiKey && !providerConfig.authToken) {
+    console.error(
+      "Anthropic provider requires apiKey or authToken in config.providers.anthropic or top-level config.",
+    );
+    process.exit(1);
   }
+  return new AnthropicCompatibleProvider({
+    provider: "anthropic",
+    model,
+    baseUrl: providerConfig.baseUrl,
+    apiKey: providerConfig.apiKey,
+    authToken: providerConfig.authToken,
+    maxOutputTokens: providerConfig.maxOutputTokens,
+  });
+}
 
-  console.error(
-    `Provider "${provider}" not supported. Use fake, openai, or anthropic.`,
-  );
-  process.exit(1);
+function resolveSessionProvider(config: Config): {
+  provider: ProviderName;
+  model: string;
+} {
+  const provider = resolveProviderName(config);
+  return {
+    provider,
+    model: resolveModelName(config, provider),
+  };
 }
 
 function buildRegistry(): ToolRegistry {
@@ -375,28 +348,10 @@ function handleSessions(): void {
 
 async function handleResume(
   sessionId: string,
-  options: Record<string, string>,
+  options: { cwd: string },
 ): Promise<void> {
   let cwd = canonicalWorkspaceRoot(options.cwd);
-  let settings = loadSettings({ workspaceRoot: cwd });
-
-  const resolveMaxTurns = () =>
-    resolveSetting<number | undefined>(
-      options.maxTurns ? parseInt(options.maxTurns, 10) : undefined,
-      process.env.MYAGENT_MAX_TURNS ? parseInt(process.env.MYAGENT_MAX_TURNS, 10) : undefined,
-      settings.maxTurns,
-      undefined,
-    );
-
-  const resolveMaxOutputTokens = () =>
-    resolveSetting<number | undefined>(
-      undefined,
-      process.env.MYAGENT_MAX_OUTPUT_TOKENS
-        ? parseInt(process.env.MYAGENT_MAX_OUTPUT_TOKENS, 10)
-        : undefined,
-      settings.maxOutputTokens,
-      undefined,
-    );
+  let config = loadConfig({ workspaceRoot: cwd });
 
   const explicitCwd = process.argv.includes("--cwd");
 
@@ -414,123 +369,44 @@ async function handleResume(
       process.exit(1);
     }
     cwd = session.cwd;
-    settings = loadSettings({ workspaceRoot: cwd });
-    const provider = createProvider(options, "", settings, resolveMaxOutputTokens());
+    config = loadConfig({ workspaceRoot: cwd });
+    const provider = createProvider(config);
     const registry = buildRegistry();
-    await chatMode(provider, registry, session, resolveApprovalMode(process.argv, options.approval, process.env.MYAGENT_APPROVAL, settings), store, resolveMaxTurns());
+    await chatMode(
+      provider,
+      registry,
+      session,
+      resolveApprovalMode(config),
+      store,
+      config.maxTurns,
+    );
   } finally {
     store.close();
   }
 }
 
-async function handleMainRun(
-  prompt: string | undefined,
-  options: Record<string, string>,
-): Promise<void> {
+async function handleMainRun(options: { cwd: string }): Promise<void> {
   let cwd = canonicalWorkspaceRoot(options.cwd);
-  let settings = loadSettings({ workspaceRoot: cwd });
-
-  const resolveMaxTurns = () =>
-    resolveSetting<number | undefined>(
-      options.maxTurns ? parseInt(options.maxTurns, 10) : undefined,
-      process.env.MYAGENT_MAX_TURNS ? parseInt(process.env.MYAGENT_MAX_TURNS, 10) : undefined,
-      settings.maxTurns,
-      undefined,
-    );
-
-  const resolveMaxOutputTokens = () =>
-    resolveSetting<number | undefined>(
-      undefined,
-      process.env.MYAGENT_MAX_OUTPUT_TOKENS
-        ? parseInt(process.env.MYAGENT_MAX_OUTPUT_TOKENS, 10)
-        : undefined,
-      settings.maxOutputTokens,
-      undefined,
-    );
-
-  // Rewind mode
-  if (options.rewind) {
-    await restoreCheckpoint(cwd, options.rewind);
-    console.log(`Restored checkpoint: ${options.rewind}`);
-    process.exit(0);
-  }
+  const config = loadConfig({ workspaceRoot: cwd });
+  const resolved = resolveSessionProvider(config);
 
   const store = openStore();
   try {
-    // Chat mode (new session)
-    if (options.chat) {
-      const session = store.createSession({
-        workspaceRoot: cwd,
-        provider: options.provider,
-        model: options.model,
-      });
-      const provider = createProvider(options, "", settings, resolveMaxOutputTokens());
-      const registry = buildRegistry();
-      await chatMode(provider, registry, session, resolveApprovalMode(process.argv, options.approval, process.env.MYAGENT_APPROVAL, settings), store, resolveMaxTurns());
-      return;
-    }
-
-    // Single-shot mode
-    if (!prompt) {
-      console.error(
-        "Prompt is required (unless using --rewind or --chat)",
-      );
-      process.exit(1);
-    }
-
     const session = store.createSession({
       workspaceRoot: cwd,
-      provider: options.provider,
-      model: options.model,
+      provider: resolved.provider,
+      model: resolved.model,
     });
-    const provider = createProvider(options, prompt, settings, resolveMaxOutputTokens());
+    const provider = createProvider(config);
     const registry = buildRegistry();
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-    const approvalHandler = makeApprovalHandler(rl);
-    const onEvent = makeEventRenderer();
-    const readState = new ReadStateTracker();
-
-    try {
-      const { transcript, aborted, stopReason } = await runSession(
-        provider,
-        registry,
-        [{ role: "user", content: prompt }],
-        {
-          cwd,
-          approval: resolveApprovalMode(process.argv, options.approval, process.env.MYAGENT_APPROVAL, settings),
-          maxTurns: resolveMaxTurns(),
-          approvalHandler,
-          onEvent,
-          sessionApprovalRules: [],
-          store,
-          readState,
-        },
-      );
-
-      store.appendMessages(session.id, transcript);
-
-      if (aborted) {
-        console.error("\nTurn aborted.");
-        process.exit(1);
-      }
-
-      const diffStat = await getGitDiffStat(cwd);
-      if (diffStat) {
-        console.log("\n--- Changes ---");
-        console.log(diffStat);
-      }
-    } catch (err) {
-      if (err instanceof ProviderRuntimeError) {
-        console.error(`\n${formatProviderError(err)}`);
-        process.exit(1);
-      }
-      throw err;
-    } finally {
-      rl.close();
-    }
+    await chatMode(
+      provider,
+      registry,
+      session,
+      resolveApprovalMode(config),
+      store,
+      config.maxTurns,
+    );
   } finally {
     store.close();
   }
@@ -540,27 +416,13 @@ async function handleMainRun(
 
 const program = new Command();
 
-// Global options shared across all modes
-const sharedOptions = (cmd: Command) =>
-  cmd
-    .option("--cwd <path>", "working directory", process.cwd())
-    .option("--provider <provider>", "model provider (fake|openai|anthropic)")
-    .option("--model <model>", "model name")
-    .option("--approval <mode>", "approval mode (auto|on-request)", "auto")
-    .option("--max-turns <n>", "max agent turns");
-
-// Main command: chat / single-shot
 program
   .name("myagent")
   .description("A small coding-agent runtime")
-  .option("--rewind <checkpointId>", "restore checkpoint and exit")
-  .option("--chat", "interactive chat mode")
-  .argument("[prompt]", "task prompt");
+  .option("--cwd <path>", "working directory", process.cwd());
 
-sharedOptions(program);
-
-program.action(async (prompt: string | undefined, options: Record<string, string>) => {
-  await handleMainRun(prompt, options);
+program.action(async (options: { cwd: string }) => {
+  await handleMainRun(options);
 });
 
 // Subcommand: sessions
@@ -577,9 +439,9 @@ const resumeCmd = program
   .command("resume <sessionId>")
   .description("Resume a previous session in interactive chat mode");
 
-sharedOptions(resumeCmd);
+resumeCmd.option("--cwd <path>", "working directory", process.cwd());
 
-resumeCmd.action(async (sessionId: string, options: Record<string, string>) => {
+resumeCmd.action(async (sessionId: string, options: { cwd: string }) => {
   await handleResume(sessionId, options);
 });
 

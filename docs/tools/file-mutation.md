@@ -60,7 +60,7 @@ What was **not** extracted (and why):
 
 `edit_file`, `write_file`, and `apply_patch` all use the same write permission family:
 
-- Workspace path: ask in interactive modes, deny in `--approval never`.
+- Workspace path: ask in interactive modes, deny in `approval: "never"`.
 - Outside workspace: deny.
 - Sensitive path writes: ask like other writes; secret-read restrictions still apply to reading contents.
 
@@ -322,7 +322,7 @@ Behavior:
 - The permission system parses the patch, resolves paths, and builds combined diff metadata for approval display.
 - `apply_patch` performs a **preflight validation** (parse, path resolution, dry-run hunk application) before any approval or execution.
 - **Preflight failures are validation errors, not permission denials.** Hunk mismatch, update target not found, move destination conflict, and parse errors are all reported as `Patch validation failed` — they never enter the approval flow.
-- True permission denials (outside workspace, `--approval never`) remain distinct from validation failures.
+- True permission denials (outside workspace, `approval: "never"`) remain distinct from validation failures.
 - For non-sensitive paths, the permission system performs a dry-run hunk application before approval. If any hunk cannot apply or the target file does not exist, the patch is reported as a validation failure — the user sees the specific file and hunk that would fail.
 - Sensitive paths cannot be validated (content is not accessible to the permission system), so they still require approval and may fail at execution time.
 - Both the approval metadata path and the execution path use the same `tryApplyHunks` helper for hunk application, ensuring consistent line-ending handling and matching semantics.
@@ -345,7 +345,7 @@ After a `Read` triggered by patch failure, the model is expected to continue the
 
 `edit_file`, `write_file`, and `apply_patch` should all use the same write permission family:
 
-- Workspace path: ask in interactive modes, deny in `--approval never`.
+- Workspace path: ask in interactive modes, deny in `approval: "never"`.
 - Outside workspace: deny.
 - Sensitive path writes: ask like other writes; secret-read restrictions still apply to reading contents.
 - Session/workspace approval memory should match by tool and resolved path or by a future shared `edit` capability, but it must not bypass checkpoints.

@@ -20,4 +20,9 @@ describe("live-scenario CLI args", () => {
     const values = parseCliValues(["--", "--scenario", "patch-recover"]);
     expect(values.scenario).toBe("patch-recover");
   });
+
+  it("parses --help", () => {
+    const values = parseCliValues(["--help"]);
+    expect(values.help).toBe(true);
+  });
 });

@@ -1,8 +1,12 @@
 #!/usr/bin/env npx tsx
-import "dotenv/config";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
-import { loadSettings, resolveSetting } from "../src/config/settings.js";
+import {
+  loadConfig,
+  resolveModelName,
+  resolveProviderConfig,
+  resolveProviderName,
+} from "../src/config/config.js";
 
 import { listScenarios, getScenario } from "../src/testing/scenarios/index.js";
 import { runScenario, formatResult } from "../src/testing/scenario-runner.js";
@@ -13,34 +17,23 @@ function printUsage(): never {
 
 Options:
   --scenario <name>      Scenario to run (required)
-  --provider <provider>  Provider: openai | anthropic (default: from MYAGENT_PROVIDER or openai)
-  --model <model>        Model name (default: from MYAGENT_MODEL)
-  --base-url <url>       API base URL (default: from MYAGENT_BASE_URL)
   --output-dir <dir>     Transcript output directory (default: .live-scenarios/)
-  --max-turns <n>        Max agent turns (default: from scenario)
   --list                 List available scenarios
   --all                  Run all scenarios
 
-Environment variables:
-  MYAGENT_PROVIDER         Default provider
-  MYAGENT_MODEL            Default model
-  MYAGENT_BASE_URL         API base URL
-  MYAGENT_API_KEY          API key (required for live runs)
-  MYAGENT_AUTH_TOKEN       Auth token (anthropic)
-  MYAGENT_MAX_OUTPUT_TOKENS  Max output tokens per turn
+Configuration:
+  Runtime provider, model, API keys, base URL, and turn limits come from
+  .myagent/config.json / config.local.json.
 `);
   process.exit(0);
 }
 
 const cliOptions = {
   scenario: { type: "string" },
-  provider: { type: "string" },
-  model: { type: "string" },
-  "base-url": { type: "string" },
   "output-dir": { type: "string" },
-  "max-turns": { type: "string" },
   list: { type: "boolean" },
   all: { type: "boolean" },
+  help: { type: "boolean", short: "h" },
 } as const;
 
 export function normalizeCliArgv(argv: string[]): string[] {
@@ -57,65 +50,27 @@ export function parseCliValues(argv: string[]) {
 }
 
 function resolveConfig(values: ReturnType<typeof parseCliValues>): LiveScenarioConfig {
-  const settings = loadSettings({ workspaceRoot: process.cwd() });
+  const config = loadConfig({ workspaceRoot: process.cwd() });
+  const provider = resolveProviderName(config);
+  const providerConfig = resolveProviderConfig(config, provider);
+  const model = resolveModelName(config, provider);
 
-  const provider = resolveSetting(
-    values.provider as "openai" | "anthropic" | undefined,
-    process.env.MYAGENT_PROVIDER as "openai" | "anthropic" | undefined,
-    settings.provider,
-    "openai",
-  );
-
-  const apiKey = process.env.MYAGENT_API_KEY;
-  const authToken = process.env.MYAGENT_AUTH_TOKEN;
-
-  if (!apiKey && !authToken) {
+  if (!providerConfig.apiKey && !providerConfig.authToken) {
     console.error(
-      "Error: MYAGENT_API_KEY (or MYAGENT_AUTH_TOKEN for anthropic) is required for live scenarios.\n" +
-        "Set it in your environment or .env file.",
+      "Error: live scenarios require apiKey or authToken in .myagent/config.json or config.local.json.",
     );
     process.exit(1);
   }
 
-  const model = resolveSetting(
-    values.model || undefined,
-    process.env.MYAGENT_MODEL || undefined,
-    settings.model,
-    provider === "openai" ? "gpt-4o" : "claude-sonnet-4-5",
-  );
-
-  const baseUrl = resolveSetting<string | undefined>(
-    values["base-url"] || undefined,
-    process.env.MYAGENT_BASE_URL || undefined,
-    settings.baseUrl,
-    undefined,
-  );
-
-  const maxTurns = resolveSetting<number | undefined>(
-    values["max-turns"] ? parseInt(values["max-turns"], 10) : undefined,
-    process.env.MYAGENT_MAX_TURNS ? parseInt(process.env.MYAGENT_MAX_TURNS, 10) : undefined,
-    settings.maxTurns,
-    undefined,
-  );
-
-  const maxOutputTokens = resolveSetting<number | undefined>(
-    undefined,
-    process.env.MYAGENT_MAX_OUTPUT_TOKENS
-      ? parseInt(process.env.MYAGENT_MAX_OUTPUT_TOKENS, 10)
-      : undefined,
-    settings.maxOutputTokens,
-    undefined,
-  );
-
   return {
     provider,
     model,
-    baseUrl,
-    apiKey,
-    authToken,
+    baseUrl: providerConfig.baseUrl,
+    apiKey: providerConfig.apiKey,
+    authToken: providerConfig.authToken,
     cwd: process.cwd(),
-    maxTurns,
-    maxOutputTokens,
+    maxTurns: config.maxTurns,
+    maxOutputTokens: providerConfig.maxOutputTokens,
     autoApprove: true,
     outputDir: values["output-dir"] ?? undefined,
   };
@@ -123,6 +78,10 @@ function resolveConfig(values: ReturnType<typeof parseCliValues>): LiveScenarioC
 
 async function main(): Promise<void> {
   const values = parseCliValues(process.argv.slice(2));
+
+  if (values.help) {
+    printUsage();
+  }
 
   if (values.list) {
     console.log("Available scenarios:");
