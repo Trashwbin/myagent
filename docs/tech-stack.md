@@ -133,9 +133,10 @@ failover only when the user configures it.
 
 Use explicit built-in tools only:
 
-- `read_file`
-- `list_dir`
-- `search`
+- `Read` — file content reading with offset/limit and line numbers
+- `list_dir` — small-range directory browsing
+- `grep` — file content search (uses ripgrep internally)
+- `glob` — file discovery by name pattern (uses ripgrep internally)
 - `edit_file`
 - `write_file`
 - `apply_patch`
@@ -144,9 +145,16 @@ Use explicit built-in tools only:
 Implementation choices:
 
 - file IO: Node `fs/promises`
-- search: shell out to `rg`
+- search: shell out to `rg` (ripgrep)
+- glob: shell out to `rg --files` (ripgrep)
 - shell execution: `execa`
 - file mutation: `edit_file` for targeted replacement, `write_file` for whole-file writes, and `apply_patch` for structured multi-file changes
+
+Recommended exploration workflow:
+
+1. `glob` — find relevant files by name pattern
+2. `grep` — locate specific content within files
+3. `Read` — read targeted sections with offset/limit
 
 See [tools/file-mutation.md](tools/file-mutation.md) for the write/edit/patch tool plan.
 

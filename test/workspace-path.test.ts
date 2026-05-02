@@ -30,7 +30,7 @@ describe("read_file outside workspace", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: `../${sibling.split("/").at(-1)}/secret.txt` },
         },
         { type: "stop", reason: "tool_use" },
@@ -71,7 +71,7 @@ describe("read_file outside workspace", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: `../${sibling.split("/").at(-1)}/data.txt` },
         },
         { type: "stop", reason: "tool_use" },
@@ -109,7 +109,7 @@ describe("read_file outside workspace", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: `../${sibling.split("/").at(-1)}/data.txt` },
         },
         { type: "stop", reason: "tool_use" },
@@ -148,7 +148,7 @@ describe("read_file outside workspace", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: "outside/secret.txt" },
         },
         { type: "stop", reason: "tool_use" },
@@ -184,7 +184,7 @@ describe("read_file outside workspace", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: ".env" },
         },
         { type: "stop", reason: "tool_use" },
@@ -267,7 +267,7 @@ describe("read_file tool guard", () => {
     const result = await readFileTool.execute({ path: "file.txt" }, { cwd: root });
 
     expect(result.ok).toBe(true);
-    expect(result.output).toBe("content");
+    expect(result.output).toBe("1: content");
 
     await rm(root, { recursive: true, force: true });
   });
@@ -409,9 +409,9 @@ describe("search sensitive file exclusion", () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it("search outside workspace → ask", async () => {
+  it("grep outside workspace → ask", async () => {
     const result = checkPermission(
-      "search",
+      "grep",
       { pattern: "test", path: "/etc" },
       "auto",
       process.cwd(),
@@ -420,9 +420,9 @@ describe("search sensitive file exclusion", () => {
     expect(result.reason).toContain("outside workspace");
   });
 
-  it("search inside workspace → allow", async () => {
+  it("grep inside workspace → allow", async () => {
     const result = checkPermission(
-      "search",
+      "grep",
       { pattern: "test", path: "." },
       "auto",
       process.cwd(),

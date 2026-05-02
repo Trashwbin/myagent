@@ -15,6 +15,7 @@ import { writeFileTool } from "./tools/write.js";
 import { bashTool } from "./tools/bash.js";
 import { listDirTool } from "./tools/list-dir.js";
 import { applyPatchTool } from "./tools/apply-patch.js";
+import { globTool } from "./tools/glob.js";
 import { ReadStateTracker } from "./tools/file-mutation.js";
 import { runTurn, runSession } from "./session/loop.js";
 import type { ApprovalRequest, SessionState, TurnEvent } from "./session/loop.js";
@@ -281,6 +282,7 @@ function buildRegistry(): ToolRegistry {
   registry.register(bashTool);
   registry.register(listDirTool);
   registry.register(applyPatchTool);
+  registry.register(globTool);
   return registry;
 }
 

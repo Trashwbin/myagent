@@ -25,12 +25,16 @@ const DEFAULT_EXCLUDED_DIRS = [
 ];
 
 const inputSchema = z.object({
-  pattern: z.string().describe("Search pattern"),
+  pattern: z.string().describe("Search pattern (regex or literal string)"),
   path: z
     .string()
     .optional()
     .default(".")
     .describe("Directory to search in, absolute or relative to workspace root"),
+  include: z
+    .string()
+    .optional()
+    .describe("Glob pattern to include (e.g. '*.ts', '*.{js,jsx}')"),
   exclude: z
     .array(z.string().min(1))
     .optional()
@@ -44,6 +48,20 @@ const inputSchema = z.object({
     .optional()
     .default(DEFAULT_MAX_RESULTS)
     .describe("Maximum number of matching lines to return"),
+  before_context: z
+    .number()
+    .int()
+    .min(0)
+    .max(10)
+    .optional()
+    .describe("Number of lines before each match to show"),
+  after_context: z
+    .number()
+    .int()
+    .min(0)
+    .max(10)
+    .optional()
+    .describe("Number of lines after each match to show"),
 });
 
 const executionInputSchema = inputSchema.extend({
@@ -117,15 +135,34 @@ function capturedStdout(err: unknown): string {
 }
 
 export const searchTool: ToolDefinition = {
-  name: "search",
-  description: "Search for a pattern in the workspace",
+  name: "grep",
+  description: [
+    "Search for a pattern in file contents. Uses ripgrep internally when available.",
+    "",
+    "Usage:",
+    "- Searches file contents, not filenames. Use glob for file discovery.",
+    "- Returns file path, line number, and matched text for each result.",
+    "- Use before_context/after_context to see surrounding lines.",
+    "- Use include to narrow to specific file types (e.g. '*.ts').",
+    "- Use max_results to limit output size.",
+    "- For large files, prefer grep to locate content, then use Read with offset/limit.",
+  ].join("\n"),
   inputSchema,
 
   async execute(input: unknown, context: ToolContext): Promise<ToolResult> {
     const parsed = executionInputSchema.parse(input);
-    const { pattern, exclude, max_results: maxResults } = parsed;
+    const {
+      pattern,
+      include,
+      exclude,
+      max_results: maxResults,
+      before_context: beforeContext,
+      after_context: afterContext,
+    } = parsed;
     const excludeSensitive =
-      context.permissionResolved && parsed.excludeSensitive === false ? false : true;
+      context.permissionResolved && parsed.excludeSensitive === false
+        ? false
+        : true;
 
     let absPath: string;
     if (parsed.resolvedPath && context.permissionResolved) {
@@ -140,7 +177,7 @@ export const searchTool: ToolDefinition = {
         return {
           ok: false,
           output:
-            "search requires permission-resolved input for external/sensitive paths",
+            "grep requires permission-resolved input for external/sensitive paths",
         };
       }
       absPath = pathInfo.absolutePath;
@@ -152,15 +189,35 @@ export const searchTool: ToolDefinition = {
       let stdout: string;
       if (useRg) {
         const baseArgs = ["-n", "--no-heading", "--color", "never"];
-        const defaultGlobArgs = rgExcludeGlobs(exclude).flatMap((g) => ["--glob", g]);
+        if (beforeContext) baseArgs.push("-B", String(beforeContext));
+        if (afterContext) baseArgs.push("-A", String(afterContext));
+        const defaultGlobArgs = rgExcludeGlobs(exclude).flatMap((g) => [
+          "--glob",
+          g,
+        ]);
+        const includeArgs = include
+          ? ["--glob", include]
+          : [];
         const globArgs =
           excludeSensitive !== false
             ? sensitiveRgExcludeGlobs().flatMap((g) => ["--glob", g])
             : [];
         const result = await execFileAsync(
           "rg",
-          [...baseArgs, ...defaultGlobArgs, ...globArgs, "--", pattern, absPath],
-          { cwd: context.cwd, timeout: 10_000, maxBuffer: SEARCH_MAX_BUFFER },
+          [
+            ...baseArgs,
+            ...defaultGlobArgs,
+            ...includeArgs,
+            ...globArgs,
+            "--",
+            pattern,
+            absPath,
+          ],
+          {
+            cwd: context.cwd,
+            timeout: 10_000,
+            maxBuffer: SEARCH_MAX_BUFFER,
+          },
         );
         stdout = result.stdout;
       } else {
@@ -168,10 +225,28 @@ export const searchTool: ToolDefinition = {
           ...grepExcludeArgs(exclude),
           ...(excludeSensitive !== false ? sensitiveGrepExcludeArgs() : []),
         ];
+        const contextArgs: string[] = [];
+        if (beforeContext) contextArgs.push("-B", String(beforeContext));
+        if (afterContext) contextArgs.push("-A", String(afterContext));
+        const includeArgs = include
+          ? ["--include", include]
+          : [];
         const result = await execFileAsync(
           "grep",
-          ["-rn", ...excludeArgs, "-e", pattern, absPath],
-          { cwd: context.cwd, timeout: 10_000, maxBuffer: SEARCH_MAX_BUFFER },
+          [
+            "-rn",
+            ...excludeArgs,
+            ...includeArgs,
+            ...contextArgs,
+            "-e",
+            pattern,
+            absPath,
+          ],
+          {
+            cwd: context.cwd,
+            timeout: 10_000,
+            maxBuffer: SEARCH_MAX_BUFFER,
+          },
         );
         stdout = result.stdout;
       }

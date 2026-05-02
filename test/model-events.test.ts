@@ -6,7 +6,7 @@ describe("ModelEvent / FakeProvider", () => {
   it("emits events in order", async () => {
     const events: ModelEvent[] = [
       { type: "text_delta", text: "Hello" },
-      { type: "tool_call", id: "1", name: "read_file", input: { path: "a.txt" } },
+      { type: "tool_call", id: "1", name: "Read", input: { path: "a.txt" } },
       { type: "stop", reason: "tool_use" },
     ];
     const provider = new FakeProvider([events]);

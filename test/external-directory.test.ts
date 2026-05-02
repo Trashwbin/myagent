@@ -6,8 +6,8 @@ import {
 } from "../src/permission/external-directory.js";
 
 describe("buildExternalDirectoryPattern", () => {
-  it("uses parent directory for read_file", () => {
-    expect(buildExternalDirectoryPattern("read_file", "/ext/project/pkg.json")).toBe(
+  it("uses parent directory for Read", () => {
+    expect(buildExternalDirectoryPattern("Read", "/ext/project/pkg.json")).toBe(
       "/ext/project/*",
     );
   });
@@ -18,8 +18,14 @@ describe("buildExternalDirectoryPattern", () => {
     );
   });
 
-  it("uses the path itself for search", () => {
-    expect(buildExternalDirectoryPattern("search", "/ext/project/src")).toBe(
+  it("uses the path itself for grep", () => {
+    expect(buildExternalDirectoryPattern("grep", "/ext/project/src")).toBe(
+      "/ext/project/src/*",
+    );
+  });
+
+  it("uses the path itself for glob", () => {
+    expect(buildExternalDirectoryPattern("glob", "/ext/project/src")).toBe(
       "/ext/project/src/*",
     );
   });
@@ -60,10 +66,11 @@ describe("matchesExternalDirectory", () => {
 });
 
 describe("isExternalDirTool", () => {
-  it("returns true for read_file, list_dir, search", () => {
-    expect(isExternalDirTool("read_file")).toBe(true);
+  it("returns true for Read, list_dir, grep, glob", () => {
+    expect(isExternalDirTool("Read")).toBe(true);
     expect(isExternalDirTool("list_dir")).toBe(true);
-    expect(isExternalDirTool("search")).toBe(true);
+    expect(isExternalDirTool("grep")).toBe(true);
+    expect(isExternalDirTool("glob")).toBe(true);
   });
 
   it("returns false for other tools", () => {

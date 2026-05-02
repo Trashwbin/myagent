@@ -222,7 +222,7 @@ describe("OpenAI adapter error handling", () => {
                 {
                   index: 0,
                   id: "c1",
-                  function: { name: "read_file", arguments: "{bad" },
+                  function: { name: "Read", arguments: "{bad" },
                 },
               ],
             },

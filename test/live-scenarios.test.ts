@@ -38,14 +38,14 @@ describe("TranscriptCapture", () => {
     await capture.handler({
       type: "tool_call",
       id: "tc1",
-      name: "read_file",
+      name: "Read",
       input: { path: "app.ts" },
     });
 
     await capture.handler({
       type: "tool_started",
       id: "tc1",
-      name: "read_file",
+      name: "Read",
       input: { path: "app.ts" },
     });
 
@@ -54,7 +54,7 @@ describe("TranscriptCapture", () => {
       message: {
         role: "tool_result",
         toolCallId: "tc1",
-        toolName: "read_file",
+        toolName: "Read",
         content: "file contents here",
       },
     });
@@ -66,14 +66,14 @@ describe("TranscriptCapture", () => {
     const toolCallEntry = entries.find((e) => e.event.type === "tool_call");
     expect(toolCallEntry).toBeDefined();
     if (toolCallEntry?.event.type === "tool_call") {
-      expect(toolCallEntry.event.toolCall.name).toBe("read_file");
+      expect(toolCallEntry.event.toolCall.name).toBe("Read");
     }
 
     const resultEntry = entries.find((e) => e.event.type === "tool_result");
     expect(resultEntry).toBeDefined();
     if (resultEntry?.event.type === "tool_result") {
       expect(resultEntry.event.ok).toBe(true);
-      expect(resultEntry.event.toolName).toBe("read_file");
+      expect(resultEntry.event.toolName).toBe("Read");
     }
   });
 
@@ -159,16 +159,16 @@ describe("evaluateScenario", () => {
         { type: "assistant_text", text: "I'll read the file" },
         {
           type: "tool_call",
-          toolCall: { id: "1", name: "read_file", input: { path: "app.ts" } },
+          toolCall: { id: "1", name: "Read", input: { path: "app.ts" } },
         },
         {
           type: "tool_started",
-          name: "read_file",
+          name: "Read",
           input: { path: "app.ts" },
         },
         {
           type: "tool_result",
-          toolName: "read_file",
+          toolName: "Read",
           content: "file content",
           ok: true,
         },
@@ -193,14 +193,14 @@ describe("evaluateScenario", () => {
 
     const messages: Message[] = [
       { role: "user", content: "edit app.ts" },
-      { role: "assistant", content: "I'll read the file", toolCalls: [{ id: "1", name: "read_file", input: { path: "app.ts" } }] },
-      { role: "tool_result", toolCallId: "1", toolName: "read_file", content: "file content" },
+      { role: "assistant", content: "I'll read the file", toolCalls: [{ id: "1", name: "Read", input: { path: "app.ts" } }] },
+      { role: "tool_result", toolCallId: "1", toolName: "Read", content: "file content" },
       { role: "assistant", content: "Done" },
     ];
 
     const failures = evaluateScenario(entries, messages, {
       success: true,
-      requiredTools: ["read_file"],
+      requiredTools: ["Read"],
       mustMutateFiles: ["app.ts"],
       maxTurns: 5,
     });
@@ -219,7 +219,7 @@ describe("evaluateScenario", () => {
 
     const failures = evaluateScenario(entries, messages, {
       success: true,
-      requiredTools: ["read_file"],
+      requiredTools: ["Read"],
     });
 
     expect(failures).toHaveLength(1);
@@ -291,7 +291,7 @@ describe("evaluateScenario", () => {
     const entries = makeEntries([
       {
         type: "tool_started",
-        name: "read_file",
+        name: "Read",
         input: { path: ".env", content: "DATABASE_URL=postgres://user:pass@host/db" },
       },
     ]);
@@ -309,12 +309,12 @@ describe("evaluateScenario", () => {
     const entries = makeEntries([
       {
         type: "tool_started",
-        name: "read_file",
+        name: "Read",
         input: { path: ".env" },
       },
       {
         type: "tool_result",
-        toolName: "read_file",
+        toolName: "Read",
         content: "[file contents redacted]",
         ok: true,
       },
@@ -349,7 +349,7 @@ describe("evaluateScenario", () => {
     const entries = makeEntries([
       {
         type: "tool_result",
-        toolName: "read_file",
+        toolName: "Read",
         content: "app.ts content here",
         ok: true,
       },
@@ -507,7 +507,7 @@ describe("TranscriptCapture redaction", () => {
       message: {
         role: "tool_result",
         toolCallId: "tc1",
-        toolName: "read_file",
+        toolName: "Read",
         content: "DATABASE_URL=postgres://user:pass@host/mydb\nSECRET_KEY=abc123",
       },
     });
@@ -586,7 +586,7 @@ describe("TranscriptCapture redaction", () => {
       message: {
         role: "tool_result",
         toolCallId: "tc1",
-        toolName: "read_file",
+        toolName: "Read",
         content: "export const VERSION = '1.0.0';",
       },
     });

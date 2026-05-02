@@ -31,7 +31,7 @@ describe("OpenAI convertMessages", () => {
       {
         role: "assistant",
         content: "",
-        toolCalls: [{ id: "tc1", name: "read_file", input: { path: "a.txt" } }],
+        toolCalls: [{ id: "tc1", name: "Read", input: { path: "a.txt" } }],
       },
     ]);
     expect(result[0]).toMatchObject({
@@ -41,7 +41,7 @@ describe("OpenAI convertMessages", () => {
         {
           id: "tc1",
           type: "function",
-          function: { name: "read_file", arguments: '{"path":"a.txt"}' },
+          function: { name: "Read", arguments: '{"path":"a.txt"}' },
         },
       ],
     });
@@ -64,7 +64,7 @@ describe("OpenAI convertMessages", () => {
         role: "tool_result",
         content: "file contents",
         toolCallId: "tc1",
-        toolName: "read_file",
+        toolName: "Read",
       },
     ]);
     expect(result).toEqual([
@@ -78,13 +78,13 @@ describe("OpenAI convertMessages", () => {
       {
         role: "assistant",
         content: "Let me read that file.",
-        toolCalls: [{ id: "tc1", name: "read_file", input: { path: "package.json" } }],
+        toolCalls: [{ id: "tc1", name: "Read", input: { path: "package.json" } }],
       },
       {
         role: "tool_result",
         content: '{ "name": "myagent" }',
         toolCallId: "tc1",
-        toolName: "read_file",
+        toolName: "Read",
       },
     ]);
 
@@ -137,7 +137,7 @@ describe("OpenAI convertMessages", () => {
                         {
                           index: 0,
                           id: "call_1",
-                          function: { name: "read_" },
+                          function: { name: "Re", arguments: "" },
                         },
                       ],
                     },
@@ -151,7 +151,7 @@ describe("OpenAI convertMessages", () => {
                       tool_calls: [
                         {
                           index: 0,
-                          function: { name: "file", arguments: '{"path"' },
+                          function: { name: "ad", arguments: '{"path"' },
                         },
                       ],
                     },
@@ -184,7 +184,7 @@ describe("OpenAI convertMessages", () => {
       {
         type: "tool_call",
         id: "call_1",
-        name: "read_file",
+        name: "Read",
         input: { path: "package.json" },
       },
       { type: "stop", reason: "tool_use" },

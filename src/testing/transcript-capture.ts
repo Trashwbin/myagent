@@ -308,11 +308,11 @@ export function evaluateScenario(
     for (const file of expect.mustReadFiles) {
       const read =
         toolResults.some(
-          (e) => e.event.toolName === "read_file" && e.event.content.includes(file),
+          (e) => e.event.toolName === "Read" && e.event.content.includes(file),
         ) ||
         toolCalls.some((e) => {
           const ev = e.event as { type: "tool_call"; toolCall: { name: string; input: unknown } };
-          if (ev.toolCall.name !== "read_file") return false;
+          if (ev.toolCall.name !== "Read") return false;
           const input = ev.toolCall.input as { path?: string };
           return input.path?.includes(file);
         });

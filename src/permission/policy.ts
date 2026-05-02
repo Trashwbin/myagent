@@ -40,12 +40,14 @@ export function checkToolPermission(
   };
 
   switch (toolName) {
-    case "read_file":
-      return finalize(checkReadFile(input, cwd));
+    case "Read":
+      return finalize(checkRead(input, cwd));
     case "list_dir":
       return finalize(checkListDir(input, cwd));
-    case "search":
-      return finalize(checkSearch(input, cwd));
+    case "grep":
+      return finalize(checkGrep(input, cwd));
+    case "glob":
+      return finalize(checkGlob(input, cwd));
     case "edit_file":
       return finalize(checkEditFile(input, mode, cwd));
     case "write_file":
@@ -59,8 +61,8 @@ export function checkToolPermission(
   }
 }
 
-function checkReadFile(input: unknown, cwd: string): ToolPermissionDecision {
-  const { path } = input as { path: string };
+function checkRead(input: unknown, cwd: string): ToolPermissionDecision {
+  const { path, offset, limit } = input as { path: string; offset?: number; limit?: number };
   const policy = checkReadPolicy(cwd, path);
   const sensitive = isSensitiveReadPath(policy.pathInfo.realPath);
   const metadata: Record<string, unknown> = {
@@ -70,7 +72,7 @@ function checkReadFile(input: unknown, cwd: string): ToolPermissionDecision {
   if (!policy.pathInfo.insideWorkspace && !sensitive) {
     Object.assign(
       metadata,
-      buildExternalDirectoryMeta("read_file", policy.pathInfo.realPath),
+      buildExternalDirectoryMeta("Read", policy.pathInfo.realPath),
     );
   }
   return {
@@ -78,6 +80,8 @@ function checkReadFile(input: unknown, cwd: string): ToolPermissionDecision {
     reason: policy.reason,
     resolvedInput: {
       path,
+      offset,
+      limit,
       resolvedPath: policy.pathInfo.absolutePath,
       realPath: policy.pathInfo.realPath,
     },
@@ -111,23 +115,30 @@ function checkListDir(input: unknown, cwd: string): ToolPermissionDecision {
   };
 }
 
-function checkSearch(input: unknown, cwd: string): ToolPermissionDecision {
+function checkGrep(input: unknown, cwd: string): ToolPermissionDecision {
   const {
     pattern,
     path: searchPath = ".",
+    include,
     exclude = [],
     max_results = 200,
+    before_context,
+    after_context,
   } = input as {
     pattern: string;
     path?: string;
+    include?: string;
     exclude?: string[];
     max_results?: number;
+    before_context?: number;
+    after_context?: number;
   };
   const policy = checkReadPolicy(cwd, searchPath);
   const sensitive = isSensitiveReadPath(policy.pathInfo.realPath);
 
   const reasonMap: Record<string, string> = {
-    "sensitive file read requires approval": "sensitive path search requires approval",
+    "sensitive file read requires approval":
+      "sensitive path search requires approval",
     "file is outside workspace": "search path is outside workspace",
     "workspace read is safe": "workspace search is safe",
   };
@@ -139,7 +150,7 @@ function checkSearch(input: unknown, cwd: string): ToolPermissionDecision {
   if (!policy.pathInfo.insideWorkspace && !sensitive) {
     Object.assign(
       metadata,
-      buildExternalDirectoryMeta("search", policy.pathInfo.realPath),
+      buildExternalDirectoryMeta("grep", policy.pathInfo.realPath),
     );
   }
 
@@ -152,8 +163,49 @@ function checkSearch(input: unknown, cwd: string): ToolPermissionDecision {
       resolvedPath: policy.pathInfo.absolutePath,
       realPath: policy.pathInfo.realPath,
       excludeSensitive: !sensitive,
+      include,
       exclude,
       max_results,
+      before_context,
+      after_context,
+    },
+    metadata,
+  };
+}
+
+function checkGlob(input: unknown, cwd: string): ToolPermissionDecision {
+  const {
+    pattern,
+    path: searchPath = ".",
+    limit = 100,
+  } = input as {
+    pattern: string;
+    path?: string;
+    limit?: number;
+  };
+  const policy = checkReadPolicy(cwd, searchPath);
+  const sensitive = isSensitiveReadPath(policy.pathInfo.realPath);
+
+  const metadata: Record<string, unknown> = {
+    ...pathMeta(policy.pathInfo),
+    sensitive,
+  };
+  if (!policy.pathInfo.insideWorkspace && !sensitive) {
+    Object.assign(
+      metadata,
+      buildExternalDirectoryMeta("glob", policy.pathInfo.realPath),
+    );
+  }
+
+  return {
+    behavior: policy.behavior,
+    reason: policy.reason,
+    resolvedInput: {
+      pattern,
+      path: searchPath,
+      limit,
+      resolvedPath: policy.pathInfo.absolutePath,
+      realPath: policy.pathInfo.realPath,
     },
     metadata,
   };

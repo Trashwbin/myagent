@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { formatToolInputSummary } from "../src/cli/format-tool-input.js";
 
 describe("formatToolInputSummary", () => {
-  it("formats search input", () => {
+  it("formats grep input", () => {
     const result = formatToolInputSummary({
       pattern: "TODO",
       path: "src/",
@@ -20,7 +20,7 @@ describe("formatToolInputSummary", () => {
     expect(result).toBe('path: "/tmp/project"');
   });
 
-  it("formats read_file input", () => {
+  it("formats Read input", () => {
     const result = formatToolInputSummary({ path: "app.ts" });
     expect(result).toBe('path: "app.ts"');
   });
@@ -107,12 +107,20 @@ describe("formatToolInputSummary", () => {
       realPath: "/ws/app.ts",
       excludeSensitive: true,
       resolvedPaths: { a: "/ws/a" },
+      offset: 1,
+      limit: 100,
+      before_context: 2,
+      after_context: 2,
     });
     expect(result).toBe('path: "app.ts"');
     expect(result).not.toContain("resolvedPath");
     expect(result).not.toContain("realPath");
     expect(result).not.toContain("excludeSensitive");
     expect(result).not.toContain("resolvedPaths");
+    expect(result).not.toContain("offset");
+    expect(result).not.toContain("limit");
+    expect(result).not.toContain("before_context");
+    expect(result).not.toContain("after_context");
   });
 
   it("returns empty string for empty input", () => {

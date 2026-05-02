@@ -32,12 +32,12 @@ describe("Anthropic convertMessages", () => {
       {
         role: "assistant",
         content: "",
-        toolCalls: [{ id: "tu1", name: "read_file", input: { path: "a.txt" } }],
+        toolCalls: [{ id: "tu1", name: "Read", input: { path: "a.txt" } }],
       },
     ]);
     expect(result[0]).toMatchObject({
       role: "assistant",
-      content: [{ type: "tool_use", id: "tu1", name: "read_file" }],
+      content: [{ type: "tool_use", id: "tu1", name: "Read" }],
     });
   });
 
@@ -64,7 +64,7 @@ describe("Anthropic convertMessages", () => {
         role: "tool_result",
         content: "file contents",
         toolCallId: "tu1",
-        toolName: "read_file",
+        toolName: "Read",
       },
     ]);
     expect(result).toEqual([
@@ -81,13 +81,13 @@ describe("Anthropic convertMessages", () => {
         role: "tool_result",
         content: "file a",
         toolCallId: "tu1",
-        toolName: "read_file",
+        toolName: "Read",
       },
       {
         role: "tool_result",
         content: "file b",
         toolCallId: "tu2",
-        toolName: "read_file",
+        toolName: "Read",
       },
     ]);
     expect(result).toHaveLength(1);
@@ -101,13 +101,13 @@ describe("Anthropic convertMessages", () => {
       {
         role: "assistant",
         content: "",
-        toolCalls: [{ id: "tu1", name: "read_file", input: { path: "package.json" } }],
+        toolCalls: [{ id: "tu1", name: "Read", input: { path: "package.json" } }],
       },
       {
         role: "tool_result",
         content: '{ "name": "myagent" }',
         toolCallId: "tu1",
-        toolName: "read_file",
+        toolName: "Read",
       },
       {
         role: "assistant",

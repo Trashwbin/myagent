@@ -105,7 +105,7 @@ describe("appendMessages + getSession", () => {
     const base = await tmpBaseDir();
     const store = openTestStore(base);
     const session = store.createSession({ workspaceRoot: "/tmp/ws" });
-    const toolCalls = [{ id: "tc1", name: "read_file", input: { path: "a.ts" } }];
+    const toolCalls = [{ id: "tc1", name: "Read", input: { path: "a.ts" } }];
     store.appendMessages(session.id, [
       { role: "assistant", content: "let me check", toolCalls },
     ]);
@@ -123,7 +123,7 @@ describe("appendMessages + getSession", () => {
         role: "tool_result",
         content: "file contents",
         toolCallId: "tc2",
-        toolName: "read_file",
+        toolName: "Read",
       },
     ]);
     const restored = store.getSession(session.id)!;
@@ -131,7 +131,7 @@ describe("appendMessages + getSession", () => {
       role: "tool_result",
       content: "file contents",
       toolCallId: "tc2",
-      toolName: "read_file",
+      toolName: "Read",
     });
     await cleanup();
   });
@@ -344,7 +344,7 @@ describe("multi-turn integration with runTurn", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: "data.txt" },
         },
         { type: "stop", reason: "tool_use" },
@@ -450,7 +450,7 @@ describe("permission_rules", () => {
       toolName: "bash",
       pattern: "npm test",
     });
-    const match = store.findMatchingRule("/tmp/ws", "read_file", "npm test");
+    const match = store.findMatchingRule("/tmp/ws", "Read", "npm test");
     expect(match).toBeUndefined();
     await cleanup();
   });

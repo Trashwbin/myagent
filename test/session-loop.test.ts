@@ -89,7 +89,7 @@ describe("Session loop (runSession wrapper)", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc1", name: "read_file", input: { path: "hello.txt" } },
+        { type: "tool_call", id: "tc1", name: "Read", input: { path: "hello.txt" } },
         { type: "stop", reason: "tool_use" },
       ],
       [
@@ -113,7 +113,7 @@ describe("Session loop (runSession wrapper)", () => {
     expect(transcript[2]).toMatchObject({
       role: "tool_result",
       toolCallId: "tc1",
-      content: "hello world",
+      content: "1: hello world",
     });
     expect(transcript[3]).toMatchObject({
       role: "assistant",
@@ -636,7 +636,7 @@ describe("TurnEvent ordering", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc1", name: "read_file", input: { path: "f.txt" } },
+        { type: "tool_call", id: "tc1", name: "Read", input: { path: "f.txt" } },
         { type: "stop", reason: "tool_use" },
       ],
       [
@@ -660,7 +660,7 @@ describe("TurnEvent ordering", () => {
     expect(startedIdx).toBeLessThan(resultIdx);
 
     const resultEvent = events[resultIdx] as Extract<TurnEvent, { type: "tool_result" }>;
-    expect(resultEvent.message.content).toBe("hi");
+    expect(resultEvent.message.content).toBe("1: hi");
 
     await rm(tmp, { recursive: true });
   });
@@ -714,7 +714,7 @@ describe("TurnEvent ordering", () => {
     const provider = new FakeProvider([
       [
         { type: "text_delta", text: "Reading." },
-        { type: "tool_call", id: "tc1", name: "read_file", input: { path: "test.txt" } },
+        { type: "tool_call", id: "tc1", name: "Read", input: { path: "test.txt" } },
         { type: "stop", reason: "tool_use" },
       ],
       [
@@ -740,7 +740,7 @@ describe("TurnEvent ordering", () => {
     // Transcript integrity
     expect(updated.messages).toHaveLength(4);
     expect(updated.messages[1].content).toBe("Reading.");
-    expect(updated.messages[2].content).toBe("hello");
+    expect(updated.messages[2].content).toBe("1: hello");
     expect(updated.messages[3].content).toBe("Done.");
 
     // newMessages is subset
@@ -768,7 +768,7 @@ describe("TurnEvent ordering", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: `../${sibling.split("/").at(-1)}/data.txt` },
         },
         { type: "stop", reason: "tool_use" },
@@ -1267,7 +1267,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, "a.txt") },
         },
         { type: "stop", reason: "tool_use" },
@@ -1284,7 +1284,7 @@ describe("Approval memory and abort", () => {
       sessionApprovalRules: sessionRules,
     });
     expect(handlerCalled).toBe(1);
-    expect(r1.newMessages.find((m) => m.role === "tool_result")?.content).toBe("aaa");
+    expect(r1.newMessages.find((m) => m.role === "tool_result")?.content).toBe("1: aaa");
 
     // External_directory rule was saved
     expect(sessionRules.some((r) => r.toolName === "external_directory")).toBe(true);
@@ -1295,7 +1295,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc2",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, "b.txt") },
         },
         { type: "stop", reason: "tool_use" },
@@ -1311,7 +1311,7 @@ describe("Approval memory and abort", () => {
       sessionApprovalRules: sessionRules,
     });
     expect(handlerCalled).toBe(1);
-    expect(r2.newMessages.find((m) => m.role === "tool_result")?.content).toBe("bbb");
+    expect(r2.newMessages.find((m) => m.role === "tool_result")?.content).toBe("1: bbb");
 
     await rm(ws, { recursive: true, force: true });
     await rm(ext, { recursive: true, force: true });
@@ -1340,7 +1340,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext1, "a.txt") },
         },
         { type: "stop", reason: "tool_use" },
@@ -1363,7 +1363,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc2",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext2, "b.txt") },
         },
         { type: "stop", reason: "tool_use" },
@@ -1407,7 +1407,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, "a.txt") },
         },
         { type: "stop", reason: "tool_use" },
@@ -1430,7 +1430,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc2",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, ".env") },
         },
         { type: "stop", reason: "tool_use" },
@@ -1535,7 +1535,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "search",
+          name: "grep",
           input: { pattern: "TODO", path: ext },
         },
         { type: "stop", reason: "tool_use" },
@@ -1558,7 +1558,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc2",
-          name: "search",
+          name: "grep",
           input: { pattern: "fix", path: ext },
         },
         { type: "stop", reason: "tool_use" },
@@ -1598,7 +1598,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, "pkg.json") },
         },
         { type: "stop", reason: "tool_use" },
@@ -1627,7 +1627,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc2",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, "other.txt") },
         },
         { type: "stop", reason: "tool_use" },
@@ -1648,7 +1648,7 @@ describe("Approval memory and abort", () => {
       store,
     });
     expect(handlerCalled).toBe(false);
-    expect(r2.newMessages.find((m) => m.role === "tool_result")?.content).toBe("other");
+    expect(r2.newMessages.find((m) => m.role === "tool_result")?.content).toBe("1: other");
 
     await rm(ws, { recursive: true, force: true });
     await rm(ext, { recursive: true, force: true });
@@ -1672,7 +1672,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, "shared.txt") },
         },
         { type: "stop", reason: "tool_use" },
@@ -1696,7 +1696,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc2",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, "shared.txt") },
         },
         { type: "stop", reason: "tool_use" },
@@ -1752,19 +1752,19 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, "src", "permission", "a.ts") },
         },
         {
           type: "tool_call",
           id: "tc2",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, "src", "session", "b.ts") },
         },
         {
           type: "tool_call",
           id: "tc3",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, "src", "tools", "c.ts") },
         },
         { type: "stop", reason: "tool_use" },
@@ -1787,9 +1787,9 @@ describe("Approval memory and abort", () => {
     // All three reads succeeded
     const results = newMessages.filter((m) => m.role === "tool_result");
     expect(results).toHaveLength(3);
-    expect(results[0].content).toBe("perm");
-    expect(results[1].content).toBe("sess");
-    expect(results[2].content).toBe("tool");
+    expect(results[0].content).toBe("1: perm");
+    expect(results[1].content).toBe("1: sess");
+    expect(results[2].content).toBe("1: tool");
 
     // One external_directory rule covering the project root
     expect(sessionRules.length).toBe(1);
@@ -1822,13 +1822,13 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, "src", "a.ts") },
         },
         {
           type: "tool_call",
           id: "tc2",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, ".env") },
         },
         { type: "stop", reason: "tool_use" },
@@ -1849,8 +1849,8 @@ describe("Approval memory and abort", () => {
     expect(handlerCalled).toBe(2);
 
     const results = newMessages.filter((m) => m.role === "tool_result");
-    expect(results[0].content).toBe("code");
-    expect(results[1].content).toBe("SECRET=x");
+    expect(results[0].content).toBe("1: code");
+    expect(results[1].content).toBe("1: SECRET=x");
 
     await rm(ws, { recursive: true, force: true });
     await rm(ext, { recursive: true, force: true });
@@ -1886,7 +1886,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc2",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, "src", "session", "loop.ts") },
         },
         { type: "stop", reason: "tool_use" },
@@ -1915,7 +1915,7 @@ describe("Approval memory and abort", () => {
     // Both tool results present
     const results = newMessages.filter((m) => m.role === "tool_result");
     expect(results).toHaveLength(2);
-    expect(results[1].content).toBe("loop code");
+    expect(results[1].content).toBe("1: loop code");
 
     // Two rules: external_directory + bash pattern
     expect(sessionRules.some((r) => r.toolName === "external_directory")).toBe(true);
@@ -2012,7 +2012,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: ".env" },
         },
         { type: "stop", reason: "tool_use" },
@@ -2035,7 +2035,7 @@ describe("Approval memory and abort", () => {
       },
     );
 
-    expect(newMessages.find((m) => m.role === "tool_result")?.content).toBe("SECRET=abc");
+    expect(newMessages.find((m) => m.role === "tool_result")?.content).toBe("1: SECRET=abc");
     expect(sessionRules).toHaveLength(0);
 
     await rm(tmp, { recursive: true, force: true });
@@ -2061,7 +2061,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: ".env" },
         },
         { type: "stop", reason: "tool_use" },
@@ -2080,7 +2080,7 @@ describe("Approval memory and abort", () => {
     });
 
     expect(r1.newMessages.find((m) => m.role === "tool_result")?.content).toBe(
-      "SECRET=abc",
+      "1: SECRET=abc",
     );
     expect(sessionRules).toHaveLength(0);
 
@@ -2090,7 +2090,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc2",
-          name: "read_file",
+          name: "Read",
           input: { path: ".env" },
         },
         { type: "stop", reason: "tool_use" },
@@ -2127,7 +2127,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: ".env" },
         },
         { type: "stop", reason: "tool_use" },
@@ -2151,7 +2151,7 @@ describe("Approval memory and abort", () => {
       },
     );
 
-    expect(newMessages.find((m) => m.role === "tool_result")?.content).toBe("SECRET=abc");
+    expect(newMessages.find((m) => m.role === "tool_result")?.content).toBe("1: SECRET=abc");
     expect(store.listPermissionRules(tmp)).toHaveLength(0);
 
     await rm(tmp, { recursive: true, force: true });
@@ -2220,7 +2220,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, ".env") },
         },
         { type: "stop", reason: "tool_use" },
@@ -2309,7 +2309,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: ".env" },
         },
         { type: "stop", reason: "tool_use" },
@@ -2357,7 +2357,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: "data.txt" },
         },
         { type: "stop", reason: "tool_use" },
@@ -2389,11 +2389,11 @@ describe("Approval memory and abort", () => {
       },
     );
 
-    // read_file succeeded
+    // Read succeeded
     const readResult = newMessages.find(
-      (m) => m.role === "tool_result" && m.toolName === "read_file",
+      (m) => m.role === "tool_result" && m.toolName === "Read",
     );
-    expect(readResult?.content).toBe("original");
+    expect(readResult?.content).toBe("1: original");
 
     // write_file succeeded with checkpoint
     const writeResult = newMessages.find(
@@ -2474,7 +2474,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: "data.txt" },
         },
         { type: "stop", reason: "tool_use" },
@@ -2567,7 +2567,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc0",
-          name: "read_file",
+          name: "Read",
           input: { path: "f.txt" },
         },
         {
@@ -2600,7 +2600,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc-read2",
-          name: "read_file",
+          name: "Read",
           input: { path: "f.txt" },
         },
         {
@@ -2650,7 +2650,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: join(ext, "a.txt") },
         },
         { type: "stop", reason: "tool_use" },
@@ -2711,7 +2711,7 @@ describe("Approval memory and abort", () => {
         {
           type: "tool_call",
           id: "tc1",
-          name: "read_file",
+          name: "Read",
           input: { path: "data.txt" },
         },
         {
@@ -2741,7 +2741,7 @@ describe("Approval memory and abort", () => {
     );
 
     const results = newMessages.filter((m) => m.role === "tool_result");
-    expect(results[0].content).toBe("original content");
+    expect(results[0].content).toBe("1: original content");
     expect(results[1].content).toContain("Wrote data.txt");
 
     const content = await readFile(join(tmp, "data.txt"), "utf-8");
@@ -3160,7 +3160,7 @@ describe("Truncation handling", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc1", name: "read_file", input: { path: "f.txt" } },
+        { type: "tool_call", id: "tc1", name: "Read", input: { path: "f.txt" } },
         { type: "stop", reason: "tool_use" },
       ],
       [

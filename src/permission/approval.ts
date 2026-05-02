@@ -49,9 +49,10 @@ export function buildApprovalPattern(
       if (meta.approvalPattern) return meta.approvalPattern as string;
       return (input as { command: string }).command ?? "";
     }
-    case "read_file":
+    case "Read":
     case "list_dir":
-    case "search": {
+    case "grep":
+    case "glob": {
       const meta = decision.metadata ?? {};
       return (meta.realPath as string) ?? (input as { path?: string }).path;
     }

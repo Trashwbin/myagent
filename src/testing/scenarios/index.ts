@@ -13,7 +13,7 @@ const FILE_MUTATION_HAPPY: ScenarioDefinition = {
   },
   expect: {
     success: true,
-    requiredTools: ["read_file"],
+    requiredTools: ["Read"],
     mustMutateFiles: ["app.ts"],
     forbiddenTools: ["bash"],
     maxTurns: 4,
@@ -34,7 +34,7 @@ const PATCH_RECOVER: ScenarioDefinition = {
   },
   expect: {
     success: true,
-    requiredTools: ["read_file", "apply_patch"],
+    requiredTools: ["Read", "apply_patch"],
     mustMutateFiles: ["config.ts"],
     maxTurns: 6,
   },
@@ -54,7 +54,7 @@ const SENSITIVE_PATH: ScenarioDefinition = {
   expect: {
     success: false,
     mustReachFiles: [".env"],
-    requiredTools: ["read_file"],
+    requiredTools: ["Read"],
     maxTurns: 5,
   },
 };

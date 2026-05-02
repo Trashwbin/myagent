@@ -17,7 +17,16 @@ const executionInputSchema = inputSchema.extend({
 
 export const listDirTool: ToolDefinition = {
   name: "list_dir",
-  description: "List directory contents",
+  description: [
+    "List directory contents for small-range browsing.",
+    "",
+    "Usage:",
+    "- Shows entries in a single directory, sorted alphabetically.",
+    "- Directories are suffixed with `/`.",
+    "- For broad file discovery, prefer glob.",
+    "- For content search, prefer grep.",
+    "- Supports offset and limit for pagination.",
+  ].join("\n"),
   inputSchema,
 
   async execute(input: unknown, context: ToolContext): Promise<ToolResult> {

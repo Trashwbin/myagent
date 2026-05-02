@@ -1926,7 +1926,7 @@ describe("apply_patch tool description", () => {
   it("contains recovery rules for validation failure", () => {
     const desc = applyPatchTool.description;
     expect(desc).toContain("validation failure");
-    expect(desc).toContain("read_file");
+    expect(desc).toContain("Read");
     expect(desc).toContain("regenerate");
     expect(desc).toContain("retry");
     expect(desc).toContain("recovery step");

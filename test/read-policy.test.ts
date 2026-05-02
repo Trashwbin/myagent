@@ -212,7 +212,7 @@ describe("checkReadPolicy", () => {
   });
 });
 
-describe("checkToolPermission search", () => {
+describe("checkToolPermission grep", () => {
   let tmpDir: string;
 
   afterEach(async () => {
@@ -224,7 +224,7 @@ describe("checkToolPermission search", () => {
     await writeFile(join(tmpDir, ".env"), "SECRET=abc");
 
     const decision = checkToolPermission(
-      "search",
+      "grep",
       { pattern: "SECRET", path: ".env" },
       "auto",
       tmpDir,
@@ -239,7 +239,7 @@ describe("checkToolPermission search", () => {
     await writeFile(join(tmpDir, "todo.md"), "SECRET=abc");
 
     const decision = checkToolPermission(
-      "search",
+      "grep",
       { pattern: "SECRET", path: "." },
       "auto",
       tmpDir,

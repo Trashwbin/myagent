@@ -1,6 +1,6 @@
 import { findProjectRoot } from "../workspace/project-root.js";
 
-const EXTERNAL_DIR_TOOLS = ["read_file", "list_dir", "search"];
+const EXTERNAL_DIR_TOOLS = ["Read", "list_dir", "grep", "glob"];
 
 export function isExternalDirTool(toolName: string): boolean {
   return EXTERNAL_DIR_TOOLS.includes(toolName);
@@ -27,7 +27,7 @@ export function buildExternalDirectoryMeta(
   toolName: string,
   realPath: string,
 ): ExternalDirectoryMeta {
-  const isDir = toolName === "list_dir" || toolName === "search";
+  const isDir = toolName === "list_dir" || toolName === "grep" || toolName === "glob";
   const projectRoot = findProjectRoot(realPath, isDir);
   const root = projectRoot.root;
   return {

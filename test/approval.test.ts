@@ -24,27 +24,39 @@ describe("buildApprovalPattern", () => {
     expect(pattern).toBe("ls -la");
   });
 
-  it("uses realPath from metadata for read_file", () => {
+  it("uses realPath from metadata for Read", () => {
     const decision = makeDecision({
       metadata: { realPath: "/project/.env", absolutePath: "/project/.env" },
     });
-    const pattern = buildApprovalPattern("read_file", { path: ".env" }, decision);
+    const pattern = buildApprovalPattern("Read", { path: ".env" }, decision);
     expect(pattern).toBe("/project/.env");
   });
 
-  it("falls back to input path for read_file when no metadata", () => {
+  it("falls back to input path for Read when no metadata", () => {
     const decision = makeDecision({ metadata: undefined });
-    const pattern = buildApprovalPattern("read_file", { path: ".env" }, decision);
+    const pattern = buildApprovalPattern("Read", { path: ".env" }, decision);
     expect(pattern).toBe(".env");
   });
 
-  it("uses realPath from metadata for search", () => {
+  it("uses realPath from metadata for grep", () => {
     const decision = makeDecision({
       metadata: { realPath: "/project/src", absolutePath: "/project/src" },
     });
     const pattern = buildApprovalPattern(
-      "search",
+      "grep",
       { pattern: "TODO", path: "src" },
+      decision,
+    );
+    expect(pattern).toBe("/project/src");
+  });
+
+  it("uses realPath from metadata for glob", () => {
+    const decision = makeDecision({
+      metadata: { realPath: "/project/src", absolutePath: "/project/src" },
+    });
+    const pattern = buildApprovalPattern(
+      "glob",
+      { pattern: "*.ts", path: "src" },
       decision,
     );
     expect(pattern).toBe("/project/src");
@@ -82,8 +94,8 @@ describe("matchesApprovalRule", () => {
     const decision = makeDecision({
       metadata: { realPath: "/project/.env" },
     });
-    const result = matchesApprovalRule("read_file", { path: ".env" }, decision, {
-      toolName: "read_file",
+    const result = matchesApprovalRule("Read", { path: ".env" }, decision, {
+      toolName: "Read",
       pattern: "/project/.env",
     });
     expect(result).toBe(true);
@@ -94,11 +106,11 @@ describe("matchesApprovalRule", () => {
       metadata: { realPath: "/project/.env" },
     });
     const result = matchesApprovalRule(
-      "search",
+      "grep",
       { pattern: "x", path: ".env" },
       decision,
       {
-        toolName: "read_file",
+        toolName: "Read",
         pattern: "/project/.env",
       },
     );
@@ -109,8 +121,8 @@ describe("matchesApprovalRule", () => {
     const decision = makeDecision({
       metadata: { realPath: "/project/.env" },
     });
-    const result = matchesApprovalRule("read_file", { path: ".env" }, decision, {
-      toolName: "read_file",
+    const result = matchesApprovalRule("Read", { path: ".env" }, decision, {
+      toolName: "Read",
       pattern: "/other/.env",
     });
     expect(result).toBe(false);
@@ -149,12 +161,12 @@ describe("createSessionRule", () => {
 });
 
 describe("matchesApprovalRule with external_directory", () => {
-  it("matches read_file under approved external directory", () => {
+  it("matches Read under approved external directory", () => {
     const decision = makeDecision({
       metadata: { realPath: "/ext/project/package.json", sensitive: false },
     });
     const result = matchesApprovalRule(
-      "read_file",
+      "Read",
       { path: "/ext/project/package.json" },
       decision,
       { toolName: "external_directory", pattern: "/ext/project/*" },
@@ -162,12 +174,12 @@ describe("matchesApprovalRule with external_directory", () => {
     expect(result).toBe(true);
   });
 
-  it("matches search under approved external directory", () => {
+  it("matches grep under approved external directory", () => {
     const decision = makeDecision({
       metadata: { realPath: "/ext/project/src", sensitive: false },
     });
     const result = matchesApprovalRule(
-      "search",
+      "grep",
       { pattern: "TODO", path: "/ext/project/src" },
       decision,
       { toolName: "external_directory", pattern: "/ext/project/*" },
@@ -180,7 +192,7 @@ describe("matchesApprovalRule with external_directory", () => {
       metadata: { realPath: "/ext/other/file.txt", sensitive: false },
     });
     const result = matchesApprovalRule(
-      "read_file",
+      "Read",
       { path: "/ext/other/file.txt" },
       decision,
       { toolName: "external_directory", pattern: "/ext/project/*" },
@@ -193,7 +205,7 @@ describe("matchesApprovalRule with external_directory", () => {
       metadata: { realPath: "/ext/project/.env", sensitive: true },
     });
     const result = matchesApprovalRule(
-      "read_file",
+      "Read",
       { path: "/ext/project/.env" },
       decision,
       { toolName: "external_directory", pattern: "/ext/project/*" },

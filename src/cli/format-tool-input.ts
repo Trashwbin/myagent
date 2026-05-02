@@ -3,6 +3,10 @@ const INTERNAL_FIELDS = new Set([
   "realPath",
   "excludeSensitive",
   "resolvedPaths",
+  "offset",
+  "limit",
+  "before_context",
+  "after_context",
 ]);
 
 const CONTENT_FIELDS = new Set([

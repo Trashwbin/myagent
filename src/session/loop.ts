@@ -333,7 +333,7 @@ async function runAgentLoop(
                 });
               }
             }
-            // Save non-bash tool rules (read_file, list_dir, search, edit_file)
+            // Save non-bash tool rules (Read, list_dir, grep, glob, edit_file)
             if (tc.name !== "bash" && !extDirPattern && pattern) {
               if (response === "allow_for_session") {
                 sessionRules.push(

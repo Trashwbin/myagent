@@ -43,10 +43,11 @@ describe("isMutationTool", () => {
   });
 
   it("rejects non-mutation tools", () => {
-    expect(isMutationTool("read_file")).toBe(false);
+    expect(isMutationTool("Read")).toBe(false);
     expect(isMutationTool("bash")).toBe(false);
-    expect(isMutationTool("search")).toBe(false);
+    expect(isMutationTool("grep")).toBe(false);
     expect(isMutationTool("list_dir")).toBe(false);
+    expect(isMutationTool("glob")).toBe(false);
   });
 });
 

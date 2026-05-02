@@ -4,13 +4,18 @@ import { checkPermission } from "../src/permission/rules.js";
 const CWD = process.cwd();
 
 describe("Permission rules", () => {
-  it("allows read_file", () => {
-    const result = checkPermission("read_file", { path: "a.txt" }, "auto", CWD);
+  it("allows Read", () => {
+    const result = checkPermission("Read", { path: "a.txt" }, "auto", CWD);
     expect(result.behavior).toBe("allow");
   });
 
-  it("allows search", () => {
-    const result = checkPermission("search", { pattern: "test" }, "auto", CWD);
+  it("allows grep", () => {
+    const result = checkPermission("grep", { pattern: "test" }, "auto", CWD);
+    expect(result.behavior).toBe("allow");
+  });
+
+  it("allows glob", () => {
+    const result = checkPermission("glob", { pattern: "*.ts" }, "auto", CWD);
     expect(result.behavior).toBe("allow");
   });
 
@@ -34,10 +39,10 @@ describe("Permission rules", () => {
     expect(result.behavior).toBe("deny");
   });
 
-  it("denies approval-required read/search/bash in never mode", () => {
+  it("denies approval-required Read/grep/bash in never mode", () => {
     const cases = [
-      ["read_file", { path: "/etc/passwd" }],
-      ["search", { pattern: "test", path: "/etc" }],
+      ["Read", { path: "/etc/passwd" }],
+      ["grep", { pattern: "test", path: "/etc" }],
       ["bash", { command: "node script.js" }],
     ] as const;
 
@@ -113,15 +118,15 @@ describe("Permission rules", () => {
     expect(result.behavior).toBe("deny");
   });
 
-  it("asks for read_file outside workspace", () => {
-    const result = checkPermission("read_file", { path: "/etc/passwd" }, "auto", CWD);
+  it("asks for Read outside workspace", () => {
+    const result = checkPermission("Read", { path: "/etc/passwd" }, "auto", CWD);
     expect(result.behavior).toBe("ask");
     expect(result.reason).toContain("outside workspace");
   });
 
-  it("asks for search outside workspace", () => {
+  it("asks for grep outside workspace", () => {
     const result = checkPermission(
-      "search",
+      "grep",
       { pattern: "test", path: "/etc" },
       "auto",
       CWD,
@@ -130,8 +135,24 @@ describe("Permission rules", () => {
     expect(result.reason).toContain("outside workspace");
   });
 
-  it("allows search in workspace", () => {
-    const result = checkPermission("search", { pattern: "test", path: "." }, "auto", CWD);
+  it("allows grep in workspace", () => {
+    const result = checkPermission("grep", { pattern: "test", path: "." }, "auto", CWD);
     expect(result.behavior).toBe("allow");
+  });
+
+  it("allows glob in workspace", () => {
+    const result = checkPermission("glob", { pattern: "*.ts", path: "." }, "auto", CWD);
+    expect(result.behavior).toBe("allow");
+  });
+
+  it("asks for glob outside workspace", () => {
+    const result = checkPermission(
+      "glob",
+      { pattern: "*.ts", path: "/etc" },
+      "auto",
+      CWD,
+    );
+    expect(result.behavior).toBe("ask");
+    expect(result.reason).toContain("outside workspace");
   });
 });
