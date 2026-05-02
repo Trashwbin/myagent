@@ -48,6 +48,8 @@ export function checkToolPermission(
       return finalize(checkGrep(input, cwd));
     case "glob":
       return finalize(checkGlob(input, cwd));
+    case "find_up":
+      return finalize(checkFindUp(input, cwd));
     case "edit_file":
       return finalize(checkEditFile(input, mode, cwd));
     case "write_file":
@@ -207,6 +209,83 @@ function checkGlob(input: unknown, cwd: string): ToolPermissionDecision {
       resolvedPath: policy.pathInfo.absolutePath,
       realPath: policy.pathInfo.realPath,
     },
+    metadata,
+  };
+}
+
+function checkFindUp(input: unknown, cwd: string): ToolPermissionDecision {
+  const {
+    name,
+    start_path: startPath = ".",
+    stop,
+  } = input as {
+    name: string;
+    start_path?: string;
+    stop?: string;
+  };
+  const policy = checkReadPolicy(cwd, startPath);
+  const sensitive = isSensitiveReadPath(policy.pathInfo.realPath);
+
+  const metadata: Record<string, unknown> = {
+    ...pathMeta(policy.pathInfo),
+    sensitive,
+  };
+  if (!policy.pathInfo.insideWorkspace && !sensitive) {
+    Object.assign(
+      metadata,
+      buildExternalDirectoryMeta("find_up", policy.pathInfo.realPath),
+    );
+  }
+
+  const resolvedInput: Record<string, unknown> = {
+    name,
+    start_path: startPath,
+    resolvedStartPath: policy.pathInfo.absolutePath,
+    realStartPath: policy.pathInfo.realPath,
+  };
+
+  if (stop) {
+    const stopPolicy = checkReadPolicy(cwd, stop);
+    const stopSensitive = isSensitiveReadPath(stopPolicy.pathInfo.realPath);
+
+    const stopMetadata: Record<string, unknown> = {
+      ...pathMeta(stopPolicy.pathInfo),
+      sensitive: stopSensitive,
+    };
+    if (!stopPolicy.pathInfo.insideWorkspace && !stopSensitive) {
+      Object.assign(
+        stopMetadata,
+        buildExternalDirectoryMeta("find_up", stopPolicy.pathInfo.realPath),
+      );
+    }
+
+    if (stopPolicy.behavior === "deny") {
+      return {
+        behavior: "deny",
+        reason: `find_up stop path denied: ${stopPolicy.reason}`,
+        metadata: stopMetadata,
+      };
+    }
+
+    resolvedInput.stop = stop;
+    resolvedInput.resolvedStopPath = stopPolicy.pathInfo.absolutePath;
+
+    if (stopPolicy.behavior === "ask") {
+      return {
+        behavior: "ask",
+        reason: stopSensitive
+          ? "sensitive stop path requires approval"
+          : "stop path is outside workspace",
+        resolvedInput,
+        metadata: stopMetadata,
+      };
+    }
+  }
+
+  return {
+    behavior: policy.behavior,
+    reason: policy.reason,
+    resolvedInput,
     metadata,
   };
 }

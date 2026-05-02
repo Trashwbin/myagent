@@ -5,6 +5,7 @@ import { searchTool } from "../src/tools/search.js";
 import { editFileTool } from "../src/tools/edit.js";
 import { bashTool } from "../src/tools/bash.js";
 import { globTool } from "../src/tools/glob.js";
+import { findUpTool } from "../src/tools/find-up.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 describe("ToolRegistry", () => {
@@ -15,12 +16,14 @@ describe("ToolRegistry", () => {
     registry.register(editFileTool);
     registry.register(bashTool);
     registry.register(globTool);
+    registry.register(findUpTool);
 
     expect(registry.get("Read")).toBe(readFileTool);
     expect(registry.get("grep")).toBe(searchTool);
     expect(registry.get("edit_file")).toBe(editFileTool);
     expect(registry.get("bash")).toBe(bashTool);
     expect(registry.get("glob")).toBe(globTool);
+    expect(registry.get("find_up")).toBe(findUpTool);
   });
 
   it("returns undefined for unknown tools", () => {
@@ -39,7 +42,7 @@ describe("ToolRegistry", () => {
   });
 
   it("all tools have name, description, inputSchema, and execute", () => {
-    const tools = [readFileTool, searchTool, editFileTool, bashTool, globTool];
+    const tools = [readFileTool, searchTool, editFileTool, bashTool, globTool, findUpTool];
     for (const tool of tools) {
       expect(tool.name).toBeTruthy();
       expect(tool.description).toBeTruthy();
@@ -66,6 +69,10 @@ describe("ToolRegistry", () => {
 
     expect(properties(globTool)).not.toContain("resolvedPath");
     expect(properties(globTool)).not.toContain("realPath");
+
+    expect(properties(findUpTool)).not.toContain("resolvedStartPath");
+    expect(properties(findUpTool)).not.toContain("resolvedStopPath");
+    expect(properties(findUpTool)).not.toContain("realStartPath");
 
     expect(properties(editFileTool)).not.toContain("resolvedPath");
   });

@@ -52,7 +52,8 @@ export function buildApprovalPattern(
     case "Read":
     case "list_dir":
     case "grep":
-    case "glob": {
+    case "glob":
+    case "find_up": {
       const meta = decision.metadata ?? {};
       return (meta.realPath as string) ?? (input as { path?: string }).path;
     }

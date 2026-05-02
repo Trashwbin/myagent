@@ -48,6 +48,7 @@ describe("isMutationTool", () => {
     expect(isMutationTool("grep")).toBe(false);
     expect(isMutationTool("list_dir")).toBe(false);
     expect(isMutationTool("glob")).toBe(false);
+    expect(isMutationTool("find_up")).toBe(false);
   });
 });
 

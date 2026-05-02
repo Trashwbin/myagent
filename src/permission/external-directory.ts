@@ -1,6 +1,6 @@
 import { findProjectRoot } from "../workspace/project-root.js";
 
-const EXTERNAL_DIR_TOOLS = ["Read", "list_dir", "grep", "glob"];
+const EXTERNAL_DIR_TOOLS = ["Read", "list_dir", "grep", "glob", "find_up"];
 
 export function isExternalDirTool(toolName: string): boolean {
   return EXTERNAL_DIR_TOOLS.includes(toolName);

@@ -137,6 +137,7 @@ Use explicit built-in tools only:
 - `list_dir` — small-range directory browsing
 - `grep` — file content search (uses ripgrep internally)
 - `glob` — file discovery by name pattern (uses ripgrep internally)
+- `find_up` — find nearest ancestor file/directory by name (e.g. package.json, tsconfig.json)
 - `edit_file`
 - `write_file`
 - `apply_patch`
@@ -147,14 +148,16 @@ Implementation choices:
 - file IO: Node `fs/promises`
 - search: shell out to `rg` (ripgrep)
 - glob: shell out to `rg --files` (ripgrep)
+- find_up: Node `fs.existsSync` with parent directory walk
 - shell execution: `execa`
 - file mutation: `edit_file` for targeted replacement, `write_file` for whole-file writes, and `apply_patch` for structured multi-file changes
 
 Recommended exploration workflow:
 
-1. `glob` — find relevant files by name pattern
-2. `grep` — locate specific content within files
-3. `Read` — read targeted sections with offset/limit
+1. `find_up` — locate project boundary and config files by walking up
+2. `glob` — find relevant files by name pattern within a subtree
+3. `grep` — locate specific content within files
+4. `Read` — read targeted sections with offset/limit
 
 See [tools/file-mutation.md](tools/file-mutation.md) for the write/edit/patch tool plan.
 

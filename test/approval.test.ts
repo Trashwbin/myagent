@@ -62,6 +62,18 @@ describe("buildApprovalPattern", () => {
     expect(pattern).toBe("/project/src");
   });
 
+  it("uses realPath from metadata for find_up", () => {
+    const decision = makeDecision({
+      metadata: { realPath: "/project/src", absolutePath: "/project/src" },
+    });
+    const pattern = buildApprovalPattern(
+      "find_up",
+      { name: "package.json", start_path: "src" },
+      decision,
+    );
+    expect(pattern).toBe("/project/src");
+  });
+
   it("uses realPath from metadata for list_dir", () => {
     const decision = makeDecision({
       metadata: { realPath: "/project/.ssh", absolutePath: "/project/.ssh" },

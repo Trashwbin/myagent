@@ -7,6 +7,9 @@ const INTERNAL_FIELDS = new Set([
   "limit",
   "before_context",
   "after_context",
+  "resolvedStartPath",
+  "resolvedStopPath",
+  "realStartPath",
 ]);
 
 const CONTENT_FIELDS = new Set([

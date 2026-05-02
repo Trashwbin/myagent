@@ -7,6 +7,7 @@ export function buildSystemPrompt(cwd: string): string {
     "- Use Read for file content inspection. It supports offset/limit for reading specific line ranges.",
     "- Use grep to search file contents by pattern.",
     "- Use glob to find files by name pattern.",
+    "- Use find_up to locate the nearest config file (package.json, tsconfig.json) by walking up from a path.",
     "- Use list_dir for small-range directory browsing. Prefer glob for broad file discovery.",
     "- For broad grep results, narrow `path`, `include`, `exclude`, or `max_results` instead of dumping huge results.",
     "- Use bash for commands that dedicated tools cannot express.",

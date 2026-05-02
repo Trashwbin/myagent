@@ -66,11 +66,12 @@ describe("matchesExternalDirectory", () => {
 });
 
 describe("isExternalDirTool", () => {
-  it("returns true for Read, list_dir, grep, glob", () => {
+  it("returns true for Read, list_dir, grep, glob, find_up", () => {
     expect(isExternalDirTool("Read")).toBe(true);
     expect(isExternalDirTool("list_dir")).toBe(true);
     expect(isExternalDirTool("grep")).toBe(true);
     expect(isExternalDirTool("glob")).toBe(true);
+    expect(isExternalDirTool("find_up")).toBe(true);
   });
 
   it("returns false for other tools", () => {

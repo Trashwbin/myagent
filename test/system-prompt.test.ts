@@ -11,6 +11,7 @@ describe("system prompt", () => {
     expect(prompt).toContain("offset/limit");
     expect(prompt).toContain("Use grep to search file contents");
     expect(prompt).toContain("Use glob to find files by name pattern");
+    expect(prompt).toContain("find_up to locate the nearest config file");
     expect(prompt).toContain("edit_file");
     expect(prompt).toContain("write_file");
     expect(prompt).toContain("apply_patch");

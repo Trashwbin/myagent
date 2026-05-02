@@ -155,4 +155,25 @@ describe("Permission rules", () => {
     expect(result.behavior).toBe("ask");
     expect(result.reason).toContain("outside workspace");
   });
+
+  it("allows find_up in workspace", () => {
+    const result = checkPermission(
+      "find_up",
+      { name: "package.json", start_path: "." },
+      "auto",
+      CWD,
+    );
+    expect(result.behavior).toBe("allow");
+  });
+
+  it("asks for find_up outside workspace", () => {
+    const result = checkPermission(
+      "find_up",
+      { name: "package.json", start_path: "/etc" },
+      "auto",
+      CWD,
+    );
+    expect(result.behavior).toBe("ask");
+    expect(result.reason).toContain("outside workspace");
+  });
 });
