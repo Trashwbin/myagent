@@ -36,16 +36,19 @@ function makeTestProgram(): {
   program: Command;
   mainCalled: string[];
   sessionsCalled: string[];
-  resumeCalled: string[];
+  resumeCalled: Array<{ sessionId: string; cwd: string }>;
+  tuiCalled: string[];
 } {
   const mainCalled: string[] = [];
   const sessionsCalled: string[] = [];
-  const resumeCalled: string[] = [];
+  const resumeCalled: Array<{ sessionId: string; cwd: string }> = [];
+  const tuiCalled: string[] = [];
 
   const program = new Command();
   program.exitOverride();
 
   program.name("myagent");
+  program.option("--cwd <path>", "working directory", process.cwd());
 
   program.action(() => {
     mainCalled.push("main");
@@ -60,10 +63,16 @@ function makeTestProgram(): {
   program
     .command("resume <sessionId>")
     .action((sessionId) => {
-      resumeCalled.push(sessionId);
+      resumeCalled.push({ sessionId, cwd: program.opts<{ cwd: string }>().cwd });
     });
 
-  return { program, mainCalled, sessionsCalled, resumeCalled };
+  program
+    .command("tui")
+    .action(() => {
+      tuiCalled.push(program.opts<{ cwd: string }>().cwd);
+    });
+
+  return { program, mainCalled, sessionsCalled, resumeCalled, tuiCalled };
 }
 
 describe("CLI subcommand routing", () => {
@@ -76,15 +85,49 @@ describe("CLI subcommand routing", () => {
   it("routes 'resume <id>' subcommand", async () => {
     const { program, resumeCalled } = makeTestProgram();
     await program.parseAsync(["node", "myagent", "resume", "abc-123"]);
-    expect(resumeCalled).toEqual(["abc-123"]);
+    expect(resumeCalled[0].sessionId).toBe("abc-123");
   });
 
   it("routes plain invocation to main action", async () => {
-    const { program, mainCalled, sessionsCalled, resumeCalled } = makeTestProgram();
+    const { program, mainCalled, sessionsCalled, resumeCalled, tuiCalled } = makeTestProgram();
     await program.parseAsync(["node", "myagent"]);
     expect(mainCalled).toEqual(["main"]);
     expect(sessionsCalled).toEqual([]);
     expect(resumeCalled).toEqual([]);
+    expect(tuiCalled).toEqual([]);
+  });
+
+  it("routes 'tui' subcommand", async () => {
+    const { program, tuiCalled } = makeTestProgram();
+    await program.parseAsync(["node", "myagent", "tui"]);
+    expect(tuiCalled).toHaveLength(1);
+  });
+
+  it("applies root --cwd after resume subcommand", async () => {
+    const { program, resumeCalled } = makeTestProgram();
+    await program.parseAsync([
+      "node",
+      "myagent",
+      "resume",
+      "abc-123",
+      "--cwd",
+      "/tmp/project",
+    ]);
+    expect(resumeCalled).toEqual([
+      { sessionId: "abc-123", cwd: "/tmp/project" },
+    ]);
+  });
+
+  it("applies root --cwd after tui subcommand", async () => {
+    const { program, tuiCalled } = makeTestProgram();
+    await program.parseAsync([
+      "node",
+      "myagent",
+      "tui",
+      "--cwd",
+      "/tmp/project",
+    ]);
+    expect(tuiCalled).toEqual(["/tmp/project"]);
   });
 });
 

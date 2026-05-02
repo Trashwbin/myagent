@@ -1,5 +1,5 @@
-import BetterSqlite3 from "better-sqlite3";
 import { mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -46,8 +46,30 @@ export type StoreOptions = {
   baseDir?: string;
 };
 
+type SqliteStatement = {
+  run(...args: unknown[]): unknown;
+  get(...args: unknown[]): unknown;
+  all(...args: unknown[]): unknown[];
+};
+
+type SqliteDatabase = {
+  exec(sql: string): unknown;
+  prepare(sql: string): SqliteStatement;
+  transaction<T extends (...args: never[]) => unknown>(fn: T): T;
+  close(): void;
+};
+
+const require = createRequire(import.meta.url);
+
 function now(): number {
   return Date.now();
+}
+
+function openSqliteDatabase(dbPath: string): SqliteDatabase {
+  const BetterSqlite3 = require("better-sqlite3") as {
+    new (path: string): SqliteDatabase;
+  };
+  return new BetterSqlite3(dbPath);
 }
 
 function serializeMessage(msg: Message): Record<string, unknown> {
@@ -78,9 +100,9 @@ export function openStore(options?: StoreOptions): TranscriptStore {
     options?.baseDir ?? process.env.MYAGENT_HOME ?? join(homedir(), ".myagent");
   mkdirSync(baseDir, { recursive: true });
   const dbPath = join(baseDir, "myagent.sqlite");
-  const db = new BetterSqlite3(dbPath);
+  const db = openSqliteDatabase(dbPath);
 
-  db.pragma("journal_mode = WAL");
+  db.exec("PRAGMA journal_mode = WAL");
 
   db.exec(`CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,

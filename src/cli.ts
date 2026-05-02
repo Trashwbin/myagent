@@ -412,6 +412,37 @@ async function handleMainRun(options: { cwd: string }): Promise<void> {
   }
 }
 
+async function handleTui(options: { cwd: string }): Promise<void> {
+  const cwd = canonicalWorkspaceRoot(options.cwd);
+  const config = loadConfig({ workspaceRoot: cwd });
+  const resolved = resolveSessionProvider(config);
+
+  const store = openStore();
+  try {
+    const session = store.createSession({
+      workspaceRoot: cwd,
+      provider: resolved.provider,
+      model: resolved.model,
+    });
+    const provider = createProvider(config);
+    const registry = buildRegistry();
+
+    const { launchTui } = await import("./tui/index.js");
+    await launchTui({
+      session,
+      provider,
+      providerName: resolved.provider,
+      modelName: resolved.model,
+      registry,
+      approval: resolveApprovalMode(config),
+      store,
+      maxTurns: config.maxTurns,
+    });
+  } finally {
+    store.close();
+  }
+}
+
 // --- Commander setup ---
 
 const program = new Command();
@@ -439,10 +470,17 @@ const resumeCmd = program
   .command("resume <sessionId>")
   .description("Resume a previous session in interactive chat mode");
 
-resumeCmd.option("--cwd <path>", "working directory", process.cwd());
+resumeCmd.action(async (sessionId: string) => {
+  await handleResume(sessionId, program.opts<{ cwd: string }>());
+});
 
-resumeCmd.action(async (sessionId: string, options: { cwd: string }) => {
-  await handleResume(sessionId, options);
+// Subcommand: tui
+const tuiCmd = program
+  .command("tui")
+  .description("Launch interactive TUI chat mode");
+
+tuiCmd.action(async () => {
+  await handleTui(program.opts<{ cwd: string }>());
 });
 
 // --- Entry point ---

@@ -66,12 +66,21 @@ describe("config paths", () => {
 
 describe("loadConfig", () => {
   let tmp: string;
+  let originalHome: string | undefined;
 
   beforeEach(async () => {
     tmp = await mkdtemp(join(tmpdir(), "myagent-config-"));
+    originalHome = process.env.MYAGENT_HOME;
+    process.env.MYAGENT_HOME = join(tmp, "empty-home");
+    await mkdir(process.env.MYAGENT_HOME, { recursive: true });
   });
 
   afterEach(async () => {
+    if (originalHome === undefined) {
+      delete process.env.MYAGENT_HOME;
+    } else {
+      process.env.MYAGENT_HOME = originalHome;
+    }
     await rm(tmp, { recursive: true, force: true });
   });
 
