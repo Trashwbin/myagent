@@ -1,132 +1,152 @@
 # Live Scenario Testing
 
-Live scenarios are multi-turn regression tests that run against a real model API. They assert on **behavior boundaries** (tool usage, task completion, sensitive content handling), not on fixed output text.
+Live scenarios are multi-turn regression tests that run against a real model API. They assert on behavior boundaries rather than fixed wording.
 
-## When to use
+## Purpose
 
-- Before releasing tool changes that affect the agent loop, permission system, or patch semantics
-- When investigating whether a model provider handles a specific tool pattern correctly
-- As a semi-automated quality gate alongside deterministic unit tests
+Use live scenarios when a change affects:
 
-Normal `pnpm test` runs only deterministic unit tests. Live scenarios require API credentials and are run separately.
+- tool selection
+- permission / approval behavior
+- patch recovery
+- external-directory reads
+- session-loop completion behavior
+
+Normal `pnpm test` remains deterministic and does not require API credentials. Live scenarios are a separate layer on top.
 
 ## Running
 
 ```bash
-# List available scenarios
+# List scenarios
 pnpm exec tsx scripts/live-scenario.ts --list
 
-# Run a single scenario
+# Run one scenario
 pnpm live:scenario --scenario file-mutation-happy
 
-# Also works when your shell or package runner forwards an extra `--`
+# Also works when the package runner forwards an extra separator
 pnpm live:scenario -- --scenario file-mutation-happy
 
 # Run all scenarios
 pnpm live:scenario --all
-
-# Specify provider/model overrides
-pnpm live:scenario --scenario sensitive-path --provider openai --model gpt-4o
 ```
 
 ## Configuration
 
-Set via CLI flags or environment variables:
+The harness resolves provider settings from:
 
-| Flag | Env var | Description |
-|------|---------|-------------|
-| `--provider` | `MYAGENT_PROVIDER` | `openai` or `anthropic` (default: openai) |
-| `--model` | `MYAGENT_MODEL` | Model name |
-| `--base-url` | `MYAGENT_BASE_URL` | API base URL |
-| `--max-turns` | `MYAGENT_MAX_TURNS` | Max agent turns per scenario |
-| `--output-dir` | — | Transcript output directory (default: `.live-scenarios/`) |
-| — | `MYAGENT_API_KEY` | API key (required) |
-| — | `MYAGENT_AUTH_TOKEN` | Auth token (anthropic) |
+1. CLI flags
+2. env vars
+3. layered `settings.json`
+4. defaults
 
-`provider`, `model`, `baseUrl`, `maxTurns`, and `maxOutputTokens` are also resolved from `settings.json` (see docs/tech-stack.md). Most fields follow CLI flags > env vars > settings > defaults; `maxOutputTokens` has no CLI flag and resolves as env var > settings > provider default. API keys must be in env vars.
+Supported live-scenario CLI flags:
 
-If no API key is provided, the harness exits with a clear error message instead of hanging.
+| Flag | Env var | Meaning |
+| --- | --- | --- |
+| `--provider` | `MYAGENT_PROVIDER` | `openai` or `anthropic` |
+| `--model` | `MYAGENT_MODEL` | model name |
+| `--base-url` | `MYAGENT_BASE_URL` | custom provider base URL |
+| `--max-turns` | `MYAGENT_MAX_TURNS` | max turns per scenario |
+| `--output-dir` | — | transcript directory |
 
-## Scenarios
+Secrets stay in env vars:
 
-| Name | What it tests |
-|------|---------------|
-| `file-mutation-happy` | Basic read → edit flow, no unnecessary bash |
-| `patch-recover` | apply_patch failure → re-read → retry |
-| `sensitive-path` | Sensitive file triggers approval, file is accessed |
-| `multi-file-patch-happy` | Real multi-file happy path with `glob` + `Read` + `apply_patch`, no bash fallback |
-| `external-directory-approval` | External directory approval plus `find_up` boundary discovery |
+- `MYAGENT_API_KEY`
+- `MYAGENT_AUTH_TOKEN`
+
+`maxOutputTokens` is inherited from env/settings and can also be overridden per scenario through the scenario definition itself.
+
+## Current scenarios
+
+| Name | What it covers |
+| --- | --- |
+| `file-mutation-happy` | simple `Read` → `edit_file` success path |
+| `patch-recover` | `apply_patch` validation failure → `Read` → corrected retry |
+| `sensitive-path` | sensitive file access and approval/redaction behavior |
+| `multi-file-patch-happy` | realistic `glob` + `Read` + `apply_patch` multi-file happy path |
+| `external-directory-approval` | external-directory approval plus `find_up` boundary discovery |
+
+The harness previously experimented with a truncation scenario. That is not part of the current regression gate because provider-side truncation behavior was not stable enough across real gateways/models.
 
 ## Expectation model
 
-Scenarios assert on these dimensions:
+Current expectation fields:
 
-- **success** — whether the task completes with a final assistant message
-- **requiredTools** — tools that must be called at least once
-- **forbiddenTools** — tools that must not be called
-- **maxTurns** — upper bound on agent turns
-- **mustReadFiles** — files that must appear in read_file calls
-- **mustReachFiles** — files that must be accessed by any tool
-- **mustMutateFiles** — files that must be modified (edit/write/patch)
-- **mustContainToolErrors** — error patterns that must appear (for recovery testing)
-- **mustNotLeakSensitive** — sensitive content must not appear in tool_started/approval events
-- **requiredApprovalTools** — tools that must trigger at least one approval request
+- `success`
+- `requiredTools`
+- `forbiddenTools`
+- `maxTurns`
+- `mustReadFiles`
+- `mustReachFiles`
+- `mustMutateFiles`
+- `mustContainToolErrors`
+- `mustNotLeakSensitive`
+- `mustNotTruncate`
+- `requiredApprovalTools`
+
+Important semantics:
+
+- `success: true` means the scenario must end without a blocking tool error and without a final unfinished assistant tool call.
+- `mustContainToolErrors` is how recovery scenarios assert that a failure actually happened before the model recovered.
+- `requiredApprovalTools` is how approval scenarios assert that the runtime genuinely prompted, not that the model merely mentioned approval.
 
 ## Transcript format
 
-Transcripts are written as JSON to the output directory. Each transcript contains:
+Each run writes a JSON transcript into `.live-scenarios/`.
+
+Structure:
 
 ```json
 {
-  "scenario": "file-mutation-happy",
+  "scenario": "multi-file-patch-happy",
   "provider": "openai",
-  "model": "gpt-4o",
+  "model": "mimo-v2.5-pro",
   "startedAt": "...",
   "finishedAt": "...",
   "entries": [
-    {
-      "turn": 1,
-      "timestamp": 0.5,
-      "event": {
-        "type": "assistant_text",
-        "text": "I'll read the file"
-      }
-    },
-    {
-      "turn": 1,
-      "timestamp": 1.2,
-      "event": {
-        "type": "tool_call",
-        "toolCall": { "id": "...", "name": "read_file", "input": { "path": "app.ts" } }
-      }
-    }
+    { "turn": 0, "timestamp": 0.2, "event": { "type": "tool_call", "toolCall": { "name": "glob" } } },
+    { "turn": 1, "timestamp": 0.8, "event": { "type": "tool_result", "toolName": "glob", "content": "...", "ok": true } }
   ],
-  "messages": [...]
+  "messages": []
 }
 ```
 
-Entry types: `assistant_text`, `tool_call`, `tool_started`, `tool_result`, `approval`.
+Entry types:
+
+- `assistant_text`
+- `tool_call`
+- `tool_started`
+- `tool_result`
+- `approval`
+- `truncated`
+
+Transcripts are redacted before being written, so secret-bearing content is not stored verbatim.
 
 ## Architecture
 
-```
+```text
 src/testing/
-  scenario-types.ts      Types: ScenarioDefinition, ScenarioExpectation, TranscriptEntry, ScenarioResult
-  transcript-capture.ts   TranscriptCapture (event handler) + evaluateScenario (assertion engine)
-  scenario-runner.ts      Orchestrator: provider setup, workspace isolation, session execution
-  scenarios/
-    index.ts              Scenario definitions and lookup
+  scenario-types.ts
+  transcript-capture.ts
+  scenario-runner.ts
+  scenarios/index.ts
 
 scripts/
-  live-scenario.ts        CLI entry point
-
-test/
-  live-scenarios.test.ts  Unit tests for evaluator and capture (no API needed)
+  live-scenario.ts
 ```
 
-## Adding a new scenario
+- `scenario-types.ts` defines scenario input/output and expectation types.
+- `transcript-capture.ts` turns `TurnEvent` into structured transcript entries and evaluates expectations.
+- `scenario-runner.ts` builds an isolated workspace, registers tools, runs a real session, and writes the transcript.
+- `scenarios/index.ts` contains the current scenario set.
+- `scripts/live-scenario.ts` is the CLI entry point.
 
-1. Add a `ScenarioDefinition` to `src/testing/scenarios/index.ts`
-2. Define `setup.files` for workspace content, `prompt` for the task, and `expect` for assertions
-3. Run it: `pnpm live:scenario --scenario your-new-scenario`
-4. Verify the transcript in `.live-scenarios/`
+## Current gaps
+
+The harness is strong enough to gate:
+
+- multi-file happy path behavior
+- patch recovery behavior
+- external directory approval behavior
+
+It is not yet a stable gate for provider-specific truncation behavior.

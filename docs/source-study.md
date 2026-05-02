@@ -1,208 +1,119 @@
 # Source Study
 
-Reference snapshots:
+Reference snapshots used for design study:
 
-- Codex: `openai/codex` at `d92c909ee`
-- OpenCode: `anomalyco/opencode` at `65ba1f6`
-- Claude-Code reference: `codeaashu/claude-code` at `6a25909`
-- Claude-Code sourcemap mirror: `yasasbanukaofficial/claude-code` at `a371abb`
+- Codex: `openai/codex`
+- OpenCode: `anomalyco/opencode`
+- Claude-code sourcemap mirror: `yasasbanukaofficial/claude-code`
 
-## Judgment
-
-Use OpenCode as the main structural reference, Codex as the safety and execution
-reference, and the Claude-Code sourcemap mirror as a product-structure reference.
-Do not copy code from the Claude-Code mirror into this project.
-
-The reason is simple:
-
-- OpenCode has the clearest TypeScript module boundaries for a small runtime:
-  `session`, `tool`, `permission`, `snapshot`, `storage`, `provider`.
-- Codex has the strongest engineering examples for command approval, sandbox
-  policy, patch flow, compaction semantics, and context assembly.
-- `yasasbanukaofficial/claude-code` is closer to the Claude Code source shape
-  because it is presented as an npm sourcemap recovery. It is still not an
-  official open-source release, has no license, and its README says the original
-  code is proprietary.
-- `codeaashu/claude-code` is now secondary; keep it only as a comparison copy.
-
-## What To Borrow
+## Current borrowing strategy
 
 ### From Codex
 
-Relevant files:
+Main ideas we adopted:
 
-- `codex-rs/core/src/exec_policy.rs`
-- `codex-rs/core/src/compact.rs`
-- `codex-rs/core/src/apply_patch.rs`
-- `codex-rs/core/src/context/*`
-- `codex-rs/core/src/session/*`
-
-Borrow the ideas:
-
-- command approval is separate from command execution
-- policy decisions should return explicit `allow`, `ask`, or `deny`
-- safe command detection needs both allow rules and danger heuristics
-- compaction is a history replacement operation, not just a summary string
-- patches should be structured operations with clear failure output
-
-Do not borrow yet:
-
-- full sandbox implementation
-- plugin system
-- MCP integration
-- app server protocol
-- subagents
+- patch grammar and patch envelope as a first-class tool
+- clear split between command analysis/policy and execution
+- shell safety as a subsystem, not a few ad hoc string checks
+- reusable command-family approval patterns
 
 ### From OpenCode
 
-Relevant files:
+Main ideas we adopted:
 
-- `packages/opencode/src/session/session.ts`
-- `packages/opencode/src/session/processor.ts`
-- `packages/opencode/src/session/compaction.ts`
-- `packages/opencode/src/tool/registry.ts`
-- `packages/opencode/src/tool/read.ts`
-- `packages/opencode/src/tool/edit.ts`
-- `packages/opencode/src/tool/write.ts`
-- `packages/opencode/src/tool/apply_patch.ts`
-- `packages/opencode/src/tool/bash.ts`
-- `packages/opencode/src/permission/*`
-- `packages/opencode/src/snapshot/*`
-- `packages/opencode/src/storage/*`
+- tool registry with explicit descriptions and schemas
+- split file exploration into:
+  - `Read`
+  - `grep`
+  - `glob`
+  - `find_up`
+- separate `edit_file`, `write_file`, and `apply_patch`
+- real-model live scenario harness instead of only unit tests
 
-Borrow the ideas:
+### From Claude-style agent structure
 
-- tools are registered definitions with name, schema, description, and execute
-- session owns messages, permission state, compaction status, and revert data
-- snapshots are first-class data, not an afterthought
-- persistence should model sessions and message parts separately
-- built-in tools should be enough before custom tools exist
-- file mutation uses multiple tools (`edit`, `write`, `apply_patch`) but one
-  edit permission family
+Main ideas we adopted:
 
-Do not borrow yet:
+- reading costs matter
+- tool-specific guidance should live closer to the tool, not all in one system prompt
+- file read/edit/write/patch surfaces benefit from distinct contracts
 
-- plugin tools
-- LSP tools
-- web fetch/search
-- task/subagent tool
-- desktop/app/server layers
+## Current runtime shape
 
-### From Claude-Code Sourcemap Mirror
+The current runtime is no longer the early v0 shape. At this point it includes:
 
-Relevant files:
+### Tools
 
-- `source/claude-code-yasas/src/QueryEngine.ts`
-- `source/claude-code-yasas/src/query.ts`
-- `source/claude-code-yasas/src/Tool.ts`
-- `source/claude-code-yasas/src/tools.ts`
-- `source/claude-code-yasas/src/tools/BashTool/*`
-- `source/claude-code-yasas/src/tools/FileReadTool/*`
-- `source/claude-code-yasas/src/tools/FileEditTool/*`
-- `source/claude-code-yasas/src/tools/FileWriteTool/*`
-- `source/claude-code-yasas/src/utils/fileHistory.ts`
-- `source/claude-code-yasas/src/utils/sessionStorage.ts`
-- `source/claude-code-yasas/src/services/compact/*`
-- `source/claude-code-yasas/src/services/SessionMemory/*`
+- `Read`
+- `list_dir`
+- `grep`
+- `glob`
+- `find_up`
+- `edit_file`
+- `write_file`
+- `apply_patch`
+- `bash`
 
-Borrow the ideas:
+### Mutation model
 
-- a query engine can be a single conversation owner
-- permissions can be injected as a callback into tool execution
-- file history snapshots can be attached to tool turns
-- transcript recording should happen during the loop, not only at the end
-- bash safety is its own subsystem, not a few string checks
-- file read/edit/write tools have separate prompts, UI/result rendering, and
-  validation layers
+- `edit_file` for surgical replacements
+- `write_file` for whole-file creation/replacement
+- `apply_patch` for multi-file atomic changes
 
-Be careful:
+All three share:
 
-- this repository is a leaked-source mirror, not an official open-source release
-- there is no license, so use it for design study only
-- many UI, bridge, analytics, remote, MCP, and companion modules are not useful
-  for this project
+- one write permission family
+- checkpoint integration
+- diff/metadata conventions
 
-## V0 Architecture
+### Permission model
 
-```text
-src/
-  cli.ts
-  config.ts
-  model/
-    provider.ts
-    openai-compatible.ts
-    anthropic-compatible.ts
-    types.ts
-  session/
-    loop.ts
-    message.ts
-    transcript-store.ts
-    compaction.ts
-  tools/
-    tool.ts
-    registry.ts
-    read.ts
-    list-dir.ts
-    search.ts
-    edit.ts
-    bash.ts
-  permission/
-    approval.ts
-    command-policy.ts
-    external-directory.ts
-    policy.ts
-    read-policy.ts
-    rules.ts
-    sensitive-paths.ts
-  workspace/
-    diff.ts
-    checkpoint.ts
-    path-info.ts
-    path.ts
-    project-root.ts
-```
+- `allow`
+- `ask`
+- `deny`
+- `invalid`
 
-## V0 Implementation Order
+`invalid` is the important newer addition. It separates tool validation failure from permission denial, especially for `apply_patch` preflight.
 
-Current completed baseline:
+### Bash model
 
-1. CLI accepts `--cwd`, `--provider`, `--model`, `--chat`, `--resume`, `--sessions`, `--rewind`, and a user prompt.
-2. OpenAI-compatible and Anthropic-compatible clients support streaming text and tool calls.
-3. Tool registry exposes `read_file`, `list_dir`, `search`, `edit_file`, and `bash`.
-4. Permission engine returns `allow`, `ask`, or `deny`, with approval memory, external directory rules, bash approval patterns, and sensitive read handling.
-5. Session loop persists every message and tool result to SQLite through the global store.
-6. Workspace layer captures checkpoints before edits and can rewind by checkpoint id.
-7. CLI prints `git diff --stat` after completed chat or single-shot runs when the workspace is a git repository.
+`bash` now has an internal semantic layer:
 
-Next implementation focus:
+- `file_discovery`
+- `content_search`
+- `partial_read`
+- `fs_primitive`
+- `git_read`
+- `exec`
+- `unknown`
 
-1. Sync docs with implementation whenever permission/session behavior changes.
-2. Add file mutation tools v1: `write_file`, stronger `edit_file`, shared mutation metadata, and read-before-write mtime guard.
-3. Add compaction v0 after the write surface is stable.
+This intent flows through:
 
-## Provider Boundary
+- command policy
+- approval metadata
+- CLI labels
+- transcripts
 
-Support two first-class formats in v0:
+### Live scenario layer
 
-- OpenAI-compatible: OpenAI SDK, custom `baseURL`, tool calls, streaming chunks.
-- Anthropic-compatible: Anthropic Messages format, custom `baseURL`, tool use,
-  streaming events.
+The harness now has stable high-value scenarios for:
 
-Do not build a provider marketplace. The internal boundary should be small:
+- simple mutation happy path
+- patch recovery
+- sensitive path access
+- real multi-file patch happy path
+- external-directory approval
 
-```ts
-type ProviderKind = "openai" | "anthropic";
+Provider-side truncation is observable in the runtime, but is not currently used as a stable live regression gate.
 
-type ModelEvent =
-  | { type: "text_delta"; text: string }
-  | { type: "tool_call"; id: string; name: string; input: unknown }
-  | { type: "stop"; reason: "end_turn" | "tool_use" | "length" };
-```
+## Current project direction
 
-The session loop should only understand `ModelEvent`. Each provider adapter is
-responsible for translating its native request and stream format.
+The highest-value work is no longer “add more tools”.
 
-## First Hard Boundary
+The current focus is:
 
-The project should become impressive by being small and complete. If a feature
-does not help the basic edit-test-diff loop, it stays out of v0.
+1. keep tool contracts and docs aligned with implementation
+2. keep permission, approval, and transcript semantics coherent
+3. strengthen real-model live scenarios around actual workflows
+
+That is where the remaining engineering leverage is.

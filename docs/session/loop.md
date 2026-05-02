@@ -1,168 +1,142 @@
 # Session Loop
 
-## Core functions
+## Core structure
 
-### runTurn
+`src/session/loop.ts` drives the runtime:
 
-`runTurn(provider, registry, session, userInput, options) → TurnResult`
+- builds tool schemas from the registry
+- streams model output
+- collects tool calls
+- runs permission checks
+- handles approval
+- executes tools
+- appends transcript messages
 
-Appends the user input as a message, runs the model+tool loop until the model stops emitting tool calls or `maxTurns` is reached, and returns the updated session state plus only the new messages from this turn.
+Main entry points:
 
-Key behaviors:
-
-- Builds the tool schema list from the registry for each provider call
-- Injects the system prompt with the workspace root
-- Handles permission checks (allow / ask / deny) for each tool call
-- Creates checkpoints before `edit_file` operations
-- Accumulates tool results and feeds them back to the model
-- Emits `TurnEvent`s via `options.onEvent` for real-time UI feedback
-
-### runSession
-
-`runSession(provider, registry, initialMessages, options) → SessionResult`
-
-Backward-compatible wrapper. Extracts the last user message from `initialMessages`, uses preceding messages as history, delegates to `runTurn`, and returns the full transcript.
+- `runTurn(...)`
+- `runSession(...)`
 
 ## Session state
 
 ```ts
 type SessionState = {
   id: string;
-  cwd: string; // canonical workspace root, not process.cwd()
+  cwd: string;
   messages: Message[];
 };
 ```
 
-The provider and registry are not part of session state — they are passed in by the caller. This keeps the session serializable for persistence.
+The session stores transcript state only. Providers and tool registries are injected by the caller.
 
-## Multi-turn flow
+## Turn events
 
-In chat mode, the CLI creates a `SessionState` and calls `runTurn` for each user input. The returned session replaces the previous state, and `newMessages` is persisted to the global transcript store. Each turn's messages are appended independently, supporting crash recovery.
+The loop emits `TurnEvent` for real-time observers:
 
-## TurnEvent
+- `assistant_text_delta`
+- `tool_call`
+- `assistant_message`
+- `tool_approval_required`
+- `tool_approval_decision`
+- `tool_started`
+- `tool_result`
+- `turn_truncated`
+- `turn_finished`
 
-`TurnEvent` is the real-time observer interface. It decouples the session loop's execution from the CLI's presentation, allowing streaming text, approval prompts, and tool results to appear as they happen — not buffered until the turn ends.
+`turn_truncated` is emitted when the provider ends a turn with `stop.reason = "length"` and no tool call follows.
 
-```ts
-type TurnEvent =
-  | { type: "assistant_text_delta"; text: string }
-  | { type: "tool_call"; id: string; name: string; input: unknown }
-  | { type: "assistant_message"; message: Message }
-  | {
-      type: "tool_approval_required";
-      id: string;
-      name: string;
-      input: unknown;
-      reason: string;
-      metadata?: Record<string, unknown>;
-    }
-  | {
-      type: "tool_approval_decision";
-      id: string;
-      name: string;
-      decision: "allow" | "deny";
-    }
-  | { type: "tool_started"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; message: Message }
-  | { type: "turn_finished" };
+## Permission outcomes
+
+The loop now distinguishes four permission-layer outcomes:
+
+- `allow`
+- `ask`
+- `deny`
+- `invalid`
+
+### `allow`
+Tool executes immediately.
+
+### `ask`
+The loop checks:
+
+1. session approval memory
+2. workspace approval memory
+3. approval handler
+
+If approved, execution proceeds with `resolvedInput`.
+
+### `deny`
+The loop records a blocked tool result:
+
+```text
+Tool call denied and was not executed: ...
 ```
 
-### Emission order
+### `invalid`
+The loop does **not** enter approval. Instead it records a validation-style tool result:
 
-Within a single model → tool → model cycle:
+```text
+Patch validation failed before execution: ...
+```
 
-1. `assistant_text_delta` — each text chunk from the provider stream
-2. `tool_call` — each tool call received during streaming
-3. `assistant_message` — the complete assistant message (text + tool calls)
-4. For each tool call:
-   - `tool_approval_required` — if permission is "ask" and an approvalHandler exists
-   - `tool_approval_decision` — after the handler resolves
-   - `tool_started` — immediately before tool execution (only if approved)
-   - `tool_result` — the tool result or blocked message
-5. `turn_finished` — after all turns complete
+This is currently used by `apply_patch` preflight so patch validation failure is no longer confused with permission denial.
 
-### Message vs TurnEvent
+## Apply-patch preflight
 
-- **`Message`** is the persistence structure. It's what gets stored in the transcript and survives across sessions.
-- **`TurnEvent`** is the real-time observation structure. It's ephemeral — for the CLI/UI to react during execution.
-- **`ToolPermissionDecision.resolvedInput`** is the secure handoff object between the permission layer and tool execution. It carries pre-resolved paths so tools don't re-interpret user input.
-- **`ToolContext.permissionResolved`** marks that internal handoff as trusted. Direct tool callers cannot make `resolvedPath` trusted by merely passing it in input.
+`apply_patch` uses an internal prepare/validation stage before approval or execution:
 
-The `onEvent` callback is optional. When not provided, the loop runs identically but without streaming output. This keeps tests and non-interactive usage simple.
+- parse patch
+- resolve patch paths
+- dry-run hunk application
+- build diff metadata
 
-### Approval
+The prepare result is one of:
 
-Approval is a runtime decision point. When `checkToolPermission()` returns "ask":
+- invalid
+- needs approval
+- ready
 
-1. If no `approvalHandler` is provided: the tool is not executed, a `tool_result` with a blocked message is emitted and persisted.
-2. If an `approvalHandler` is provided: `tool_approval_required` is emitted with the tool name, reason, input, and `metadata` (path info, workspace status, sensitivity). The handler decides allow/deny. `tool_approval_decision` is emitted with the verdict.
+The session loop only asks for approval on valid patches.
 
-When approved, the tool executes with `decision.resolvedInput` (not the original input) and `ToolContext.permissionResolved: true`. This ensures the tool uses the permission-resolved path without exposing that internal field as a normal model-controlled parameter.
+## Checkpoints
 
-The CLI's approval handler prints the tool info and metadata from the event, then prompts `Approve? [Enter/y once, a always, n abort]`. Empty input or `y` grants `allow_once`. `a` triggers a secondary prompt: `Always allow? [s session, w workspace, n cancel]`. `s` grants `allow_for_session`, `w` grants `allow_for_workspace`, and `n` returns to the primary prompt.
+Before mutation tools execute, the loop creates a checkpoint using:
 
-For sensitive requests (`metadata.sensitive === true`), the prompt is `Approve sensitive request? [Enter/y once, n abort]`. Session/workspace reuse is disabled. Even if a custom approval handler returns `allow_for_session` or `allow_for_workspace`, the loop treats the request as one-shot for persistence purposes and does not save any approval rule.
+- `isMutationTool()`
+- `getCheckpointPaths()`
 
-## Persistence
+Covered mutation tools:
 
-The session loop itself is unaware of SQLite. The CLI (or test harness) is responsible for calling `store.appendMessages()` after each turn. The store is a single global database at `~/.myagent/myagent.sqlite`.
+- `edit_file`
+- `write_file`
+- `apply_patch`
 
-The `TurnEvent` system does not affect persistence — the final `Message[]` is identical whether or not events were observed.
+Checkpoint ids are only appended to successful tool results.
 
 ## Approval memory
 
-When `checkToolPermission()` returns "ask", the session loop checks approval memory before prompting the user:
+The loop supports:
 
-1. **Session rules** — `sessionApprovalRules: ApprovalRule[]` passed via `TurnOptions`. In-memory, process-scoped.
-2. **Workspace rules** — `permission_rules` table in `~/.myagent/myagent.sqlite`, queried via `store.findMatchingRule()`.
+- one-shot approval
+- session approval rules
+- workspace approval rules
 
-If a matching rule is found, the tool auto-executes without triggering the approval handler. No `tool_approval_required` or `tool_approval_decision` events are emitted for auto-approved calls.
+Sensitive requests are never persisted as reusable rules.
 
-If no matching rule exists and an approval handler is provided, the handler returns an `ApprovalResponse`:
+External-directory approvals are handled specially:
 
-- `allow_once` — execute, no rule saved.
-- `allow_for_session` — push to `sessionApprovalRules`, execute.
-- `allow_for_workspace` — insert into `permission_rules` via store, execute.
-- `abort` — block tool, terminate turn.
+- read-class tools use the external-directory rule directly
+- read-only bash requires both:
+  - external-directory path approval
+  - bash command-family approval
 
-The `sessionApprovalRules` array is passed by reference from the chat loop. Rules added by `allow_for_session` accumulate across turns within the same CLI session.
+## Persistence boundary
 
-Sensitive requests are excluded from approval memory. They can execute after an explicit approval, but no session rule or workspace rule is created, and existing broad rules cannot auto-allow them.
+The session loop itself does not write SQLite. The CLI or harness persists `newMessages` after each turn.
 
-## Abort
+The global transcript store remains:
 
-When the user chooses abort:
-
-1. A blocked `tool_result` message is added to the transcript.
-2. `turn_finished` is emitted.
-3. `runAgentLoop` returns `{ aborted: true }`.
-4. `runTurn` returns `{ session, newMessages, aborted: true }`.
-5. In chat mode: the loop prints "Turn aborted. Tell myagent what to do differently." and returns to the `>` prompt.
-6. In single-shot mode: the process exits with code 1.
-
-The model does not get a second chance to respond within an aborted turn. The blocked tool_result is persisted as part of the transcript.
-
-Approval memory (session or workspace rules) cannot convert a "deny" decision into "allow". It only applies to "ask" decisions.
-
-## Same-turn auto-resolution
-
-When the model returns multiple tool calls in a single assistant message, they are processed sequentially. After the user approves one with `allow_for_session` or `allow_for_workspace`, the new rule is immediately visible to subsequent iterations because `sessionApprovalRules` is a shared mutable array. This means:
-
-- 4 `read_file` calls to an external project: only the first triggers the approval handler; the rest are auto-allowed by the `external_directory` rule saved after the first approval.
-- A `bash` read-only command followed by `read_file` in the same external project: after the bash approval saves both `external_directory` and `bash` approvalPattern rules, the `read_file` is auto-allowed by the `external_directory` rule.
-- Sensitive files (`.env`, etc.) are still excluded from `external_directory` matching and will always require separate approval.
-
-## Bash two-layer approval
-
-For bash commands with external directory metadata, the session loop requires two independent approvals:
-
-1. **Path layer** — an `external_directory` rule covering the effective cwd or project root
-2. **Command layer** — a `bash` rule with `approvalPattern` matching the command family (e.g., `git diff *`)
-
-Both must be present for auto-allow. On approval, both rules are saved simultaneously. This means `git diff` and `git status` in the same external project each need their own command-pattern approval, but share the path approval.
-
-For all other tools (read_file, list_dir, search), only the `external_directory` layer applies — a single rule covers all reads under the approved directory.
-
-## Output budget
-
-Bash tool output is truncated at 20KB characters or 500 lines. Truncated output includes a message suggesting narrower commands (`--stat`, `head/tail`, focused paths). This prevents large outputs (e.g., 71KB `git diff`) from filling the transcript. Truncation happens in `src/tools/bash.ts` via `truncateOutput()` and applies to both stdout and stderr.
+```text
+~/.myagent/myagent.sqlite
+```

@@ -36,9 +36,9 @@ Do not create separate permission systems for these tools. They all represent fi
 
 Each tool has a distinct role and safety gate. Do not blur these boundaries:
 
-- **`edit_file`**: Small surgical edits. Relies on `old_string` matching existing content for safety. Does **not** require `read_file` before editing — the `old_string` match itself is the safety gate. Rejects empty `old_string` (directs to `write_file` instead).
-- **`write_file`**: Whole-file creation or replacement. For existing files, requires a prior `read_file` in the session and an mtime guard. This is the only tool that uses `ReadStateTracker` for read-before-write enforcement.
-- **`apply_patch`**: Multi-file atomic operations. Relies on hunk context matching and preflight validation (dry-run hunk apply in the permission check). Does not require prior `read_file`.
+- **`edit_file`**: Small surgical edits. Relies on `old_string` matching existing content for safety. Does **not** require `Read` before editing — the `old_string` match itself is the safety gate. Rejects empty `old_string` (directs to `write_file` instead).
+- **`write_file`**: Whole-file creation or replacement. For existing files, requires a prior `Read` in the session and an mtime guard. This is the only tool that uses `ReadStateTracker` for read-before-write enforcement.
+- **`apply_patch`**: Multi-file atomic operations. Relies on hunk context matching and preflight validation (dry-run hunk apply in the permission check). Does not require prior `Read`.
 
 ## Shared policy layer
 
@@ -124,7 +124,7 @@ Rules:
 - Path must resolve inside the workspace.
 - Parent directories may be created.
 - New files are allowed after normal write approval.
-- Existing files require a prior `read_file` in the current session.
+- Existing files require a prior `Read` in the current session.
 - Existing files require an mtime guard: if the file's current mtime is newer than the recorded read time, the write is rejected and the model must read again.
 - Write approval should show a unified diff between previous content and new content.
 - Execution should preserve BOM when replacing an existing file. Line endings should follow the provided content for new files and be explicit in tests.
@@ -145,7 +145,7 @@ type ReadFileState = {
 };
 ```
 
-`read_file` records state after successful reads. A partial read should not authorize a whole-file overwrite unless the implementation can prove the full file was loaded. Directory reads do not authorize file writes.
+`Read` records state after successful reads. A partial read should not authorize a whole-file overwrite unless the implementation can prove the full file was loaded. Directory reads do not authorize file writes.
 
 `write_file` checks state only for existing files. New file creation does not require a previous read. `edit_file` and `apply_patch` do not use read state.
 
@@ -333,11 +333,11 @@ Behavior:
 
 When `apply_patch` returns a validation failure (hunk mismatch, context not found, file changed), the error message includes actionable guidance like "Re-read the file". The expected recovery sequence is:
 
-1. `read_file` on the affected file(s) — this is a recovery step, not task completion.
+1. `Read` the affected file(s) to gather updated context.
 2. Regenerate a new patch based on the current file content.
 3. Retry `apply_patch` with the corrected patch.
 
-The model must not end its turn after a `read_file` triggered by a patch failure without either retrying the mutation or explicitly explaining why the task cannot continue. This constraint is encoded in both the tool description guidance and the system prompt.
+After a `Read` triggered by patch failure, the model is expected to continue the modification or explicitly explain why it cannot continue. This constraint is encoded in both the tool description guidance and the system prompt.
 
 `apply_patch` reuses the shared permission, diff metadata, and checkpoint flow used by `edit_file` and `write_file`.
 

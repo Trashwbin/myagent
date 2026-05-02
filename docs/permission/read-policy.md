@@ -2,124 +2,155 @@
 
 ## Overview
 
-`src/permission/policy.ts` implements `checkToolPermission(toolName, input, mode, cwd)` — the unified permission entry point for all tool access decisions. It returns a `ToolPermissionDecision` with behavior, reason, resolved input, and metadata.
-
-## Architecture
-
-```
-model tool call input
-  → resolvePathInfo()          (path resolution, symlink-aware)
-  → checkToolPermission()      (policy decision + resolvedInput + metadata)
-  → approvalHandler()          (runtime approval, if needed)
-  → tool.execute(resolvedInput) (execution with defensive guard)
-```
-
-### Layer responsibilities
-
-1. **Path resolution** (`src/workspace/path-info.ts`): `resolvePathInfo(cwd, inputPath)` resolves any path to a `WorkspacePathInfo`. Single source of truth for path resolution. Does not enforce boundaries — reports facts.
-
-2. **Permission policy** (`src/permission/policy.ts`): `checkToolPermission()` resolves paths, applies sensitivity analysis, and returns allow/ask/deny with `resolvedInput` (for tool execution) and `metadata` (for approval UI).
-
-3. **Tool execution** (`src/tools/*.ts`): Tools accept `resolvedPath`/`realPath` only when `ToolContext.permissionResolved` is true. They retain defensive guards for direct calls bypassing the session loop.
-
-4. **Backward compat** (`src/permission/rules.ts`): Thin wrapper around `checkToolPermission()` returning only `{ behavior, reason }`.
-
-`approval=never` is enforced in the unified policy layer: any decision that would require approval (`ask`) becomes `deny`. Already-safe `allow` decisions still run.
-
-### Key types
+`src/permission/policy.ts` is the unified permission entry point for built-in tools. It returns a `ToolPermissionDecision`:
 
 ```ts
 type ToolPermissionDecision = {
-  behavior: "allow" | "ask" | "deny";
+  behavior: "allow" | "ask" | "deny" | "invalid";
   reason: string;
-  resolvedInput?: unknown; // pre-resolved input for tool.execute()
-  metadata?: Record<string, unknown>; // for approval UI
+  resolvedInput?: unknown;
+  metadata?: Record<string, unknown>;
 };
 ```
 
-## read_file / list_dir policy
+`invalid` is currently used by `apply_patch` preflight and is not a permission state.
 
-Uses `resolvePathInfo` via `checkReadPolicy`. Returns `resolvedInput`:
+## Read-class tools
 
-```ts
-{ path: string, resolvedPath: string, realPath: string }
-```
+The current read-class tools are:
 
-| Condition                       | Decision | Reason                                |
-| ------------------------------- | -------- | ------------------------------------- |
-| Path cannot be resolved         | deny     | path cannot be resolved               |
-| Sensitive file (anywhere)       | ask      | sensitive file read requires approval |
-| Inside workspace, not sensitive | allow    | workspace read is safe                |
-| Outside workspace               | ask      | file is outside workspace             |
+- `Read`
+- `list_dir`
+- `grep`
+- `glob`
+- `find_up`
 
-For outside-workspace non-sensitive paths, the decision metadata includes `externalDirectoryPattern` (e.g., `/ext/project/*`). See [external-directory.md](external-directory.md).
+All of them use `resolvePathInfo()` and/or `checkReadPolicy()` as the basis for path resolution and boundary checks.
 
-### Tool guard
+## Shared read rules
 
-If `resolvedPath` is not provided (direct tool call), the tool falls back to its own `resolvePathInfo` check and rejects external or sensitive paths.
+For ordinary read targets:
 
-## search policy
+| Condition | Decision | Reason |
+| --- | --- | --- |
+| path cannot be resolved | deny | path cannot be resolved |
+| sensitive path | ask | sensitive file read requires approval |
+| workspace path | allow | workspace read is safe |
+| outside workspace | ask | file/path is outside workspace |
 
-Similar to read_file but with additional semantics:
+Outside-workspace non-sensitive reads also receive `externalDirectoryPattern` metadata for reusable project-scoped approvals.
 
-- Ordinary directory searches set `excludeSensitive: true` in `resolvedInput`
-- If the search target itself is sensitive, approval is required and `excludeSensitive: false` is used so an approved search can actually inspect the requested path
-- rg uses `--glob` exclusion for sensitive files/directories
-- grep uses `--exclude`/`--exclude-dir` for best-effort exclusion
-- Search-specific reason wording
+## `Read`
 
-Excluded patterns (rg `--glob '!'`):
-`.git`, `.ssh`, `.aws`, `.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa`, `id_ed25519`, `*secret*`, `*credential*`, `*token*`
+`Read` is file-content reading with:
 
-## file mutation policy
+- `path`
+- `offset`
+- `limit`
 
-`edit_file`, `write_file`, and `apply_patch` are different tool surfaces over the same write capability. They share one permission family and one checkpoint path. See [../tools/file-mutation.md](../tools/file-mutation.md).
-
-## edit_file policy
-
-Hard workspace restriction — outside-workspace edits are **deny**, not ask.
-
-| Condition         | Decision |
-| ----------------- | -------- |
-| mode === "never"  | deny     |
-| Outside workspace | deny     |
-| Inside workspace  | ask      |
-
-Returns `resolvedInput`:
+Resolved input includes:
 
 ```ts
-{ path: string, resolvedPath: string, old_string: string, new_string: string }
+{ path, offset, limit, resolvedPath, realPath }
 ```
 
-`write_file` adds one more safety rule for existing files: the file must have been read in the current session, and its current mtime must not be newer than the recorded read time. This prevents blind or stale whole-file overwrites.
+The tool itself still contains a defensive fallback: without `permissionResolved`, it refuses external or sensitive direct calls.
 
-`apply_patch` is workspace-only and asks for approval like the other mutation tools. It includes affected paths and non-sensitive diff metadata in approval events. If any affected path is sensitive, approval metadata is marked sensitive and does not include file-content diffs.
+## `grep`
 
-## bash policy
+`grep` is file-content search, not file discovery.
 
-Delegates to `analyzeCommand()` from command-policy. See [command-policy.md](command-policy.md).
+Permission behavior:
 
-## Sensitive file detection
+- target path resolved with `checkReadPolicy`
+- sensitive target search becomes `ask`
+- non-sensitive external search becomes `ask` with external-directory metadata
 
-`isSensitiveReadPath(realPath)` in `src/permission/sensitive-paths.ts` matches path segments against patterns. The same module also owns the rg/grep exclusion patterns used by `search`.
+Resolved input also carries:
 
-**Filenames:** `.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa`, `id_ed25519`, `.npmrc`, `.pypirc`, `.netrc`, `*secret*`, `*credential*`, `*token*`
+- `include`
+- `exclude`
+- `before_context`
+- `after_context`
+- `max_results`
+- `excludeSensitive`
 
-`.env.example`, `.env.sample`, `.env.template`, and compound example names such as `.env.local.example` are treated as non-sensitive template files.
+Sensitive best-effort exclusion is implemented with:
 
-**Directories:** `.ssh`, `.aws`, `.git`
+- `rg --glob !...` exclusions
+- `grep --exclude / --exclude-dir` exclusions
 
-Normal dotfiles like `.gitignore`, `.prettierrc` are not sensitive.
+## `glob`
 
-## resolveWorkspacePath
+`glob` is file discovery by name pattern.
 
-`resolveWorkspacePath(cwd, inputPath)` is preserved as a thin wrapper over `resolvePathInfo`. Returns `pathInfo.absolutePath` for workspace-internal paths, `undefined` otherwise. Used by `edit_file` and `createCheckpoint` for hard workspace guard.
+Permission behavior:
+
+- path resolved with `checkReadPolicy`
+- execution requires the resolved path to be a directory
+- external non-sensitive directory globbing becomes `ask`
+- sensitive paths still require approval
+
+Implementation notes:
+
+- uses `rg --files --hidden --glob <pattern>`
+- returns matching file paths, not contents
+
+## `find_up`
+
+`find_up` performs ancestor-chain lookup:
+
+- `name`
+- `start_path`
+- optional `stop`
+
+Important policy details:
+
+- `start_path` goes through `checkReadPolicy`
+- `stop` goes through the same read-policy path
+- an invalid or denied `stop` does not silently disappear
+- a sensitive or external `stop` upgrades the whole call to `ask`
+- approval metadata is keyed off the path that actually triggered approval (including external `stop`)
+
+Execution starts from the parent directory when `start_path` points to a file.
+
+## File mutation policy boundary
+
+Mutation tools are documented separately in [../tools/file-mutation.md](../tools/file-mutation.md).
+
+Current split:
+
+- `edit_file`, `write_file`, `apply_patch` → mutation family
+- read-class tools → read family
+
+Mutation tools are workspace-only; read-class tools can read outside the workspace with approval.
+
+## Sensitive path detection
+
+`src/permission/sensitive-paths.ts` defines the path patterns used across:
+
+- `Read`
+- `grep`
+- `glob`
+- `find_up`
+- mutation metadata redaction
+- bash read-path sensitivity checks
+
+Sensitive examples:
+
+- `.env`, `.env.*`
+- `*.pem`, `*.key`
+- `id_rsa`, `id_ed25519`
+- `.npmrc`, `.pypirc`, `.netrc`
+- paths containing `secret`, `credential`, or `token`
+- directories like `.ssh`, `.aws`, `.git`
+
+Template files such as `.env.example` remain non-sensitive.
 
 ## Workspace boundary
 
-- **Workspace is the default trust boundary, not the only readable boundary.**
-- `read_file` and `search` can access outside-workspace paths with user approval.
-- `edit_file` and `checkpoint` are hard-restricted to workspace.
-- `resolvedInput` is the secure handoff object between permission and tool layers.
-- Tool schemas exposed to the model do not include internal handoff fields such as `resolvedPath`, `realPath`, or `excludeSensitive`.
-- Direct tool calls cannot activate `resolvedPath`, `realPath`, or `excludeSensitive: false` unless `ToolContext.permissionResolved` is set by the session loop after policy evaluation.
+- workspace is the default trust boundary, not the only readable boundary
+- read-class tools may cross that boundary with approval
+- mutation tools may not
+- internal resolved-path fields are not part of the model-facing tool schema
+- only the session loop can mark `ToolContext.permissionResolved`
