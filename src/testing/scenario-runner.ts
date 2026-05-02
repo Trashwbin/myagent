@@ -15,6 +15,8 @@ import { writeFileTool } from "../tools/write.js";
 import { bashTool } from "../tools/bash.js";
 import { listDirTool } from "../tools/list-dir.js";
 import { applyPatchTool } from "../tools/apply-patch.js";
+import { globTool } from "../tools/glob.js";
+import { findUpTool } from "../tools/find-up.js";
 import { ReadStateTracker } from "../tools/file-mutation.js";
 import { runSession } from "../session/loop.js";
 import type { ApprovalResponse } from "../permission/approval.js";
@@ -35,6 +37,8 @@ function buildRegistry(): ToolRegistry {
   registry.register(bashTool);
   registry.register(listDirTool);
   registry.register(applyPatchTool);
+  registry.register(globTool);
+  registry.register(findUpTool);
   return registry;
 }
 
@@ -75,13 +79,14 @@ function makeAutoApprovalHandler(
 async function setupWorkspace(
   setup: ScenarioDefinition["setup"],
   baseDir: string,
-): Promise<string> {
-  const ws = join(baseDir, `ws-${randomUUID().slice(0, 8)}`);
-  await mkdir(ws, { recursive: true });
+): Promise<{ workspace: string; external?: string }> {
+  const root = join(baseDir, `scenario-${randomUUID().slice(0, 8)}`);
+  const workspace = join(root, "workspace");
+  await mkdir(workspace, { recursive: true });
 
   if (setup?.files) {
     for (const [path, content] of Object.entries(setup.files)) {
-      const filePath = join(ws, path);
+      const filePath = join(workspace, path);
       const dir = join(filePath, "..");
       if (!existsSync(dir)) {
         await mkdir(dir, { recursive: true });
@@ -90,7 +95,21 @@ async function setupWorkspace(
     }
   }
 
-  return ws;
+  let external: string | undefined;
+  if (setup?.externalFiles && Object.keys(setup.externalFiles).length > 0) {
+    external = join(root, "external");
+    await mkdir(external, { recursive: true });
+    for (const [path, content] of Object.entries(setup.externalFiles)) {
+      const filePath = join(external, path);
+      const dir = join(filePath, "..");
+      if (!existsSync(dir)) {
+        await mkdir(dir, { recursive: true });
+      }
+      await writeFile(filePath, content, "utf-8");
+    }
+  }
+
+  return { workspace, external };
 }
 
 export async function runScenario(
@@ -106,17 +125,25 @@ export async function runScenario(
   let ws: string;
 
   if (scenario.setup) {
-    ws = await setupWorkspace(scenario.setup, baseTmp);
+    const setupPaths = await setupWorkspace(scenario.setup, baseTmp);
+    ws = setupPaths.workspace;
   } else {
     ws = config.cwd;
   }
 
-  const provider = createProviderFromConfig(config);
+  const effectiveConfig: LiveScenarioConfig = {
+    ...config,
+    maxTurns: scenario.run?.maxTurns ?? config.maxTurns,
+    maxOutputTokens: scenario.run?.maxOutputTokens ?? config.maxOutputTokens,
+    autoApprove: scenario.run?.autoApprove ?? config.autoApprove,
+  };
+
+  const provider = createProviderFromConfig(effectiveConfig);
   const registry = buildRegistry();
   const capture = new TranscriptCapture(config.provider, config.model, scenario.name);
   const readState = new ReadStateTracker();
 
-  const approvalHandler = config.autoApprove
+  const approvalHandler = effectiveConfig.autoApprove
     ? makeAutoApprovalHandler(false)
     : makeAutoApprovalHandler(true);
 
@@ -130,7 +157,7 @@ export async function runScenario(
       {
         cwd: ws,
         approval: "auto",
-        maxTurns: config.maxTurns ?? scenario.expect.maxTurns ?? 10,
+        maxTurns: effectiveConfig.maxTurns ?? scenario.expect.maxTurns ?? 10,
         approvalHandler,
         onEvent: capture.handler,
         sessionApprovalRules: [],

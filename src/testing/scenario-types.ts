@@ -3,7 +3,8 @@ import type { Message } from "../model/types.js";
 // --- Scenario definition ---
 
 export type ScenarioWorkspaceSetup = {
-  files: Record<string, string>;
+  files?: Record<string, string>;
+  externalFiles?: Record<string, string>;
 };
 
 export type ScenarioDefinition = {
@@ -12,6 +13,11 @@ export type ScenarioDefinition = {
   prompt: string;
   setup?: ScenarioWorkspaceSetup;
   expect: ScenarioExpectation;
+  run?: {
+    maxTurns?: number;
+    maxOutputTokens?: number;
+    autoApprove?: boolean;
+  };
 };
 
 // --- Expectation model ---
@@ -46,6 +52,9 @@ export type ScenarioExpectation = {
 
   /** Files that must be mutated (written/edited/patched) during the scenario */
   mustMutateFiles?: string[];
+
+  /** Tool names that must trigger at least one approval request */
+  requiredApprovalTools?: string[];
 };
 
 // --- Transcript ---

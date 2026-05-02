@@ -1,6 +1,7 @@
 #!/usr/bin/env npx tsx
 import "dotenv/config";
 import { parseArgs } from "node:util";
+import { fileURLToPath } from "node:url";
 import { loadSettings, resolveSetting } from "../src/config/settings.js";
 
 import { listScenarios, getScenario } from "../src/testing/scenarios/index.js";
@@ -31,30 +32,31 @@ Environment variables:
   process.exit(0);
 }
 
-const { values } = parseArgs({
-  options: {
-    scenario: { type: "string" },
-    provider: { type: "string" },
-    model: { type: "string" },
-    "base-url": { type: "string" },
-    "output-dir": { type: "string" },
-    "max-turns": { type: "string" },
-    list: { type: "boolean" },
-    all: { type: "boolean" },
-  },
-  strict: true,
-});
+const cliOptions = {
+  scenario: { type: "string" },
+  provider: { type: "string" },
+  model: { type: "string" },
+  "base-url": { type: "string" },
+  "output-dir": { type: "string" },
+  "max-turns": { type: "string" },
+  list: { type: "boolean" },
+  all: { type: "boolean" },
+} as const;
 
-if (values.list) {
-  console.log("Available scenarios:");
-  for (const name of listScenarios()) {
-    const s = getScenario(name)!;
-    console.log(`  ${name}: ${s.description}`);
-  }
-  process.exit(0);
+export function normalizeCliArgv(argv: string[]): string[] {
+  if (argv[0] === "--") return argv.slice(1);
+  return argv;
 }
 
-function resolveConfig(): LiveScenarioConfig {
+export function parseCliValues(argv: string[]) {
+  return parseArgs({
+    args: normalizeCliArgv(argv),
+    options: cliOptions,
+    strict: true,
+  }).values;
+}
+
+function resolveConfig(values: ReturnType<typeof parseCliValues>): LiveScenarioConfig {
   const settings = loadSettings({ workspaceRoot: process.cwd() });
 
   const provider = resolveSetting(
@@ -120,7 +122,18 @@ function resolveConfig(): LiveScenarioConfig {
 }
 
 async function main(): Promise<void> {
-  const config = resolveConfig();
+  const values = parseCliValues(process.argv.slice(2));
+
+  if (values.list) {
+    console.log("Available scenarios:");
+    for (const name of listScenarios()) {
+      const s = getScenario(name)!;
+      console.log(`  ${name}: ${s.description}`);
+    }
+    process.exit(0);
+  }
+
+  const config = resolveConfig(values);
 
   const scenarioNames = values.all
     ? listScenarios()
@@ -167,7 +180,9 @@ async function main(): Promise<void> {
   process.exit(allPassed ? 0 : 1);
 }
 
-main().catch((err) => {
-  console.error("Fatal:", err);
-  process.exit(1);
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((err) => {
+    console.error("Fatal:", err);
+    process.exit(1);
+  });
+}

@@ -35,6 +35,7 @@ const PATCH_RECOVER: ScenarioDefinition = {
   expect: {
     success: true,
     requiredTools: ["Read", "apply_patch"],
+    mustContainToolErrors: ["Patch validation failed before execution"],
     mustMutateFiles: ["config.ts"],
     maxTurns: 6,
   },
@@ -59,10 +60,66 @@ const SENSITIVE_PATH: ScenarioDefinition = {
   },
 };
 
+const MULTI_FILE_PATCH_HAPPY: ScenarioDefinition = {
+  name: "multi-file-patch-happy",
+  description:
+    "Perform a realistic multi-file patch workflow using glob/Read/apply_patch without falling back to bash.",
+  prompt:
+    "Use glob to find the project files you need, Read the relevant ones, then use a single apply_patch call to make all requested changes. Update README.md by adding a bullet under ## Notes that says `- The workspace should support multi-file patch updates.`. Move patch-create-test.txt to notes/patch-create-archived.txt and change its first line to `This file was archived by apply_patch.`. Create reports/summary.txt with exactly three lines: `workspace test summary`, `multi-file patch exercised`, `created by agent`. Delete apply-patch-created.txt. Verify the result when done. Do not use bash.",
+  setup: {
+    files: {
+      "README.md": `# myagent test workspace\n\n## Notes\n\n- The agent should be able to read this file.\n- The agent should be able to search for \`workspace\`.\n`,
+      "patch-create-test.txt": `This file was created by apply_patch.\nTest line 1\nTest line 2\n`,
+      "apply-patch-created.txt": `Created by apply_patch in test6.\nThis tests multi-file atomic operations.\n`,
+    },
+  },
+  expect: {
+    success: true,
+    requiredTools: ["glob", "Read", "apply_patch"],
+    forbiddenTools: ["bash"],
+    mustReadFiles: ["README.md", "patch-create-test.txt"],
+    mustMutateFiles: [
+      "README.md",
+      "patch-create-test.txt",
+      "notes/patch-create-archived.txt",
+      "reports/summary.txt",
+      "apply-patch-created.txt",
+    ],
+    maxTurns: 6,
+  },
+};
+
+const EXTERNAL_DIRECTORY_APPROVAL: ScenarioDefinition = {
+  name: "external-directory-approval",
+  description:
+    "Read a file from a sibling external project and verify approval flow plus boundary discovery.",
+  prompt:
+    "Starting from ../external/src/session/loop.ts, use find_up to locate the nearest package.json. Then Read that package.json and tell me the package name. Do not use bash.",
+  setup: {
+    files: {
+      "README.md": `workspace root\n`,
+    },
+    externalFiles: {
+      "package.json": `{\n  "name": "external-lib",\n  "version": "1.0.0"\n}\n`,
+      "src/session/loop.ts": `export const loop = true;\n`,
+    },
+  },
+  expect: {
+    success: true,
+    requiredTools: ["find_up", "Read"],
+    forbiddenTools: ["bash"],
+    requiredApprovalTools: ["find_up"],
+    mustReadFiles: ["package.json"],
+    maxTurns: 4,
+  },
+};
+
 export const ALL_SCENARIOS: Record<string, ScenarioDefinition> = {
   "file-mutation-happy": FILE_MUTATION_HAPPY,
   "patch-recover": PATCH_RECOVER,
   "sensitive-path": SENSITIVE_PATH,
+  "multi-file-patch-happy": MULTI_FILE_PATCH_HAPPY,
+  "external-directory-approval": EXTERNAL_DIRECTORY_APPROVAL,
 };
 
 export function listScenarios(): string[] {

@@ -475,6 +475,39 @@ describe("evaluateScenario", () => {
 
     expect(failures).toEqual([]);
   });
+
+  it("requires approval tools when configured", () => {
+    const entries = makeEntries([
+      {
+        type: "approval",
+        approval: {
+          id: "1",
+          name: "find_up",
+          input: { name: "package.json", start_path: "../external/src/session/loop.ts" },
+          reason: "file is outside workspace",
+          decision: "allow",
+        },
+      },
+    ]);
+
+    const failures = evaluateScenario(entries, [], {
+      success: false,
+      requiredApprovalTools: ["find_up"],
+    });
+
+    expect(failures).toEqual([]);
+  });
+
+  it("fails when required approval tool is missing", () => {
+    const failures = evaluateScenario([], [], {
+      success: false,
+      requiredApprovalTools: ["find_up"],
+    });
+
+    expect(failures).toHaveLength(1);
+    expect(failures[0].rule).toBe("requiredApprovalTools");
+  });
+
 });
 
 // --- Scenario listing ---
@@ -485,7 +518,7 @@ describe("scenario definitions", () => {
       "../src/testing/scenarios/index.js"
     );
     const names = listScenarios();
-    expect(names.length).toBeGreaterThanOrEqual(3);
+    expect(names.length).toBeGreaterThanOrEqual(5);
 
     for (const name of names) {
       const s = getScenario(name);

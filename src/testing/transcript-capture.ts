@@ -261,12 +261,14 @@ export function evaluateScenario(
   // --- success ---
   if (expect.success) {
     const lastMsg = messages[messages.length - 1];
-    const endedCleanly =
-      lastMsg?.role === "assistant" && !lastMsg.toolCalls?.length;
-    if (!endedCleanly) {
+    const hasBlockingToolError = toolResults.some((e) => !e.event.ok);
+    const hasOpenToolCall = lastMsg?.role === "assistant" && !!lastMsg.toolCalls?.length;
+    if (hasBlockingToolError || hasOpenToolCall) {
       failures.push({
         rule: "success",
-        detail: "Scenario did not complete with a final assistant message",
+        detail: hasBlockingToolError
+          ? "Scenario ended with at least one blocking tool error"
+          : "Scenario ended with an unfinished assistant tool call",
       });
     }
   }
@@ -354,6 +356,21 @@ export function evaluateScenario(
         failures.push({
           rule: "mustMutateFiles",
           detail: `File "${file}" was never mutated`,
+        });
+      }
+    }
+  }
+
+  // --- requiredApprovalTools ---
+  if (expect.requiredApprovalTools) {
+    const approvedTools = new Set(
+      approvals.map((e) => e.event.approval.name),
+    );
+    for (const tool of expect.requiredApprovalTools) {
+      if (!approvedTools.has(tool)) {
+        failures.push({
+          rule: "requiredApprovalTools",
+          detail: `Required approval for tool "${tool}" was never requested`,
         });
       }
     }
