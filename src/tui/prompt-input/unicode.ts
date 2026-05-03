@@ -1,6 +1,7 @@
 const GRAPHEME_BREAK_REGEX =
   /\p{Regional_Indicator}{2}|\p{Extended_Pictographic}(?:‍\p{Extended_Pictographic})*|\P{M}\p{M}*|\p{M}+/gu;
 const ANSI_ESCAPE_REGEX = /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+const SGR_MOUSE_FRAGMENT_REGEX = /\x1b?\[<\d+;\d+;\d+[mM]/g;
 
 type GraphemeSegment = {
   segment: string;
@@ -50,7 +51,7 @@ function getWordSegmenter(): {
 }
 
 export function stripTerminalSequences(input: string): string {
-  return input.replace(ANSI_ESCAPE_REGEX, "");
+  return input.replace(SGR_MOUSE_FRAGMENT_REGEX, "").replace(ANSI_ESCAPE_REGEX, "");
 }
 
 export function normalizeTerminalInput(input: string): string {

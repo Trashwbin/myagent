@@ -16,6 +16,7 @@ import {
 } from "../src/tui/prompt-input/editor.js";
 import { PromptCursor } from "../src/tui/prompt-input/cursor.js";
 import { applyTerminalInputChunk } from "../src/tui/prompt-input/input-chunk.js";
+import { normalizePromptInput } from "../src/tui/prompt-input/usePromptInput.js";
 import { wrapLinesWithOffsets } from "../src/tui/prompt-input/width.js";
 
 type S = { value: string; cursor: number };
@@ -346,6 +347,69 @@ describe("applyTerminalInputChunk", () => {
   it("does not split CJK characters around inline erase", () => {
     const cursor = PromptCursor.from("", 80, 0);
     expect(applyTerminalInputChunk(cursor, "你好\x7f啊").toState()).toEqual(s("你啊", 2));
+  });
+});
+
+describe("normalizePromptInput", () => {
+  const key = (overrides: Record<string, unknown> = {}) => overrides as any;
+
+  it("treats raw DEL as backspace before Ink key metadata", () => {
+    expect(normalizePromptInput("", key({ delete: true }), "\x7f")).toEqual({
+      type: "backspace",
+    });
+  });
+
+  it("treats Delete escape sequence as forward delete", () => {
+    expect(normalizePromptInput("", key({ delete: true }), "\x1b[3~")).toEqual({
+      type: "delete-forward",
+    });
+  });
+
+  it("does not guess delete direction when raw input is unavailable", () => {
+    expect(normalizePromptInput("", key({ delete: true }))).toEqual({
+      type: "noop",
+      reason: "ambiguous-delete-without-raw-input",
+    });
+  });
+
+  it("keeps mixed text and erase as an ordered input chunk", () => {
+    expect(normalizePromptInput("ab\x7fc", key(), "ab\x7fc")).toEqual({
+      type: "apply-chunk",
+      input: "ab\x7fc",
+    });
+  });
+
+  it("does not replay a multi-byte raw chunk for a normal text key event", () => {
+    expect(normalizePromptInput("a", key(), "abc")).toEqual({
+      type: "insert",
+      text: "a",
+    });
+  });
+
+  it("treats Ghostty IME trailing delete sequence as forward-delete, not backspace", () => {
+    expect(normalizePromptInput("", key({ delete: true }), "\x1b[3~")).toEqual({
+      type: "delete-forward",
+    });
+  });
+
+  it("maps return to submit and shifted return to newline", () => {
+    expect(normalizePromptInput("", key({ return: true }))).toEqual({
+      type: "submit",
+    });
+    expect(normalizePromptInput("", key({ return: true, shift: true }))).toEqual({
+      type: "newline",
+    });
+  });
+
+  it("ignores SGR mouse sequences so they do not enter prompt text", () => {
+    expect(normalizePromptInput("\x1b[<64;10;5M", key())).toEqual({
+      type: "noop",
+      reason: "mouse",
+    });
+    expect(normalizePromptInput("[<64;10;5M", key())).toEqual({
+      type: "noop",
+      reason: "mouse",
+    });
   });
 });
 

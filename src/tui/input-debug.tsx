@@ -5,6 +5,10 @@ import { CursorDeclarationContext } from "./cursor-declaration.js";
 import { createCursorParkingStdout } from "./cursor-parking.js";
 import { enterAlternateScreen } from "./terminal-screen.js";
 import { PromptInput, type PromptInputDebugEvent } from "./prompt-input/PromptInput.js";
+import {
+  createRawInputTrackingStdin,
+  RawInputContext,
+} from "./prompt-input/raw-input.js";
 import type { PastePart } from "./types.js";
 
 type DebugEntry = {
@@ -24,7 +28,7 @@ export async function launchInputDebug(): Promise<void> {
     const screen = enterAlternateScreen(process.stdout);
     const bus = createDebugBus();
     const cursorParking = createCursorParkingStdout(process.stdout);
-    const debugStdin = createDebugStdin(process.stdin, (chunk) => {
+    const rawInput = createRawInputTrackingStdin(process.stdin, (chunk) => {
       bus.emit(`raw   ${describeChunk(chunk)}`);
     });
 
@@ -37,10 +41,12 @@ export async function launchInputDebug(): Promise<void> {
 
     const instance = render(
       <CursorDeclarationContext.Provider value={cursorParking.declareCursor}>
-        <InputDebugApp bus={bus} onExit={onExit} />
+        <RawInputContext.Provider value={rawInput.rawInput}>
+          <InputDebugApp bus={bus} onExit={onExit} />
+        </RawInputContext.Provider>
       </CursorDeclarationContext.Provider>,
       {
-        stdin: debugStdin,
+        stdin: rawInput.stdin,
         stdout: cursorParking.stdout,
         exitOnCtrlC: false,
       },
@@ -135,31 +141,12 @@ function createDebugBus(): DebugBus {
   };
 }
 
-function createDebugStdin(
-  rawStdin: NodeJS.ReadStream,
-  onRawChunk: (chunk: string | Buffer) => void,
-): NodeJS.ReadStream {
-  return new Proxy(rawStdin, {
-    get(target, property, receiver) {
-      if (property === "read") {
-        return (...args: unknown[]) => {
-          const chunk = Reflect.apply(target.read, target, args);
-          if (chunk !== null) onRawChunk(chunk as string | Buffer);
-          return chunk;
-        };
-      }
-      const value = Reflect.get(target, property, receiver);
-      if (typeof value === "function") return value.bind(target);
-      return value;
-    },
-  }) as NodeJS.ReadStream;
-}
-
 function formatPromptDebugEvent(event: PromptInputDebugEvent): string {
   if (event.type === "ink_input") {
     return [
       "ink  ",
       `input=${describeString(event.input)}`,
+      `raw=${describeString(event.rawInput)}`,
       `key=${describeKey(event.key)}`,
       `before=${describeState(event.before)}`,
     ].join(" ");
