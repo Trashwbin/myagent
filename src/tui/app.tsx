@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useStdout } from "ink";
 import type { ApprovalResponse } from "../permission/approval.js";
 import type { ApprovalMode } from "../permission/policy.js";
 import type { Provider } from "../model/provider.js";
@@ -27,6 +27,8 @@ type AppProps = {
 };
 
 export function TuiApp(props: AppProps): React.ReactElement {
+  const { stdout } = useStdout();
+  const columns = Math.max(20, stdout.columns ?? 80);
   const [rows, setRows] = useState<TranscriptRow[]>([]);
   const [phase, setPhase] = useState<TuiPhase>("idle");
   const [streamingText, setStreamingText] = useState("");
@@ -51,12 +53,6 @@ export function TuiApp(props: AppProps): React.ReactElement {
     if (event.type === "assistant_text_delta") {
       setStreamingText((prev) => prev + event.text);
     } else if (event.type === "assistant_message") {
-      setRows((prev) => {
-        const text =
-          typeof event.message.content === "string" ? event.message.content : "";
-        if (!text) return prev;
-        return [...prev, { type: "assistant", text }];
-      });
       setStreamingText("");
     }
     if (event.type === "tool_approval_required") {
@@ -190,7 +186,7 @@ export function TuiApp(props: AppProps): React.ReactElement {
         pasteParts={pasteParts}
         onPastePartsChange={setPasteParts}
         focus={phase === "idle" && !approval}
-        columns={80}
+        columns={columns}
         placeholder="Type a message..."
         disabled={phase !== "idle"}
       />
@@ -207,13 +203,15 @@ function HeaderBar(props: {
   sessionId: string;
 }): React.ReactElement {
   return (
-    <Box flexDirection="row" gap={1} paddingLeft={1}>
-      <Text color="cyan">
-        {props.providerName}/{props.modelName}
+    <Box paddingLeft={1} width="100%">
+      <Text wrap="truncate-end">
+        <Text color="cyan">
+          {props.providerName}/{props.modelName}
+        </Text>
+        <Text color="gray"> | approval:{props.approval}</Text>
+        <Text color="gray"> | {props.cwd}</Text>
+        <Text color="gray"> | session:{props.sessionId.slice(0, 8)}</Text>
       </Text>
-      <Text color="gray">| approval:{props.approval}</Text>
-      <Text color="gray">| {props.cwd}</Text>
-      <Text color="gray">| session:{props.sessionId.slice(0, 8)}</Text>
     </Box>
   );
 }

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Box, Text, useInput, render } from "ink";
+import { Box, Text, useInput, render, useStdout } from "ink";
 import type { Key } from "ink";
 import { CursorDeclarationContext } from "./cursor-declaration.js";
 import { createCursorParkingStdout } from "./cursor-parking.js";
+import { enterAlternateScreen } from "./terminal-screen.js";
 import { PromptInput, type PromptInputDebugEvent } from "./prompt-input/PromptInput.js";
 import type { PastePart } from "./types.js";
 
@@ -20,6 +21,7 @@ const MAX_LOGS = 80;
 
 export async function launchInputDebug(): Promise<void> {
   return new Promise((resolve) => {
+    const screen = enterAlternateScreen(process.stdout);
     const bus = createDebugBus();
     const cursorParking = createCursorParkingStdout(process.stdout);
     const debugStdin = createDebugStdin(process.stdin, (chunk) => {
@@ -29,6 +31,7 @@ export async function launchInputDebug(): Promise<void> {
     const onExit = () => {
       cursorParking.clear();
       instance.unmount();
+      screen.exit();
       resolve();
     };
 
@@ -46,6 +49,8 @@ export async function launchInputDebug(): Promise<void> {
 }
 
 function InputDebugApp(props: { bus: DebugBus; onExit: () => void }): React.ReactElement {
+  const { stdout } = useStdout();
+  const columns = Math.max(20, stdout.columns ?? 80);
   const [inputState, setInputState] = useState({ value: "", cursor: 0 });
   const [pasteParts, setPasteParts] = useState<PastePart[]>([]);
   const [logs, setLogs] = useState<DebugEntry[]>([]);
@@ -100,7 +105,7 @@ function InputDebugApp(props: { bus: DebugBus; onExit: () => void }): React.Reac
           pasteParts={pasteParts}
           onPastePartsChange={setPasteParts}
           focus
-          columns={80}
+          columns={columns}
           placeholder="debug input..."
           onInputDebug={handleDebug}
         />
