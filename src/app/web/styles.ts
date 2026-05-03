@@ -458,6 +458,140 @@ button:disabled {
   max-width: 76ch;
 }
 
+.message.assistant .content {
+  white-space: normal;
+}
+
+.markdown-body {
+  color: var(--body);
+  font-size: 15px;
+  line-height: 1.62;
+  overflow-wrap: anywhere;
+}
+
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body blockquote,
+.markdown-body pre,
+.markdown-body table {
+  margin: 0.72em 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  color: var(--ink);
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.25;
+  margin: 1.2em 0 0.5em;
+}
+
+.markdown-body h1 {
+  font-size: 22px;
+}
+
+.markdown-body h2 {
+  font-size: 19px;
+}
+
+.markdown-body h3 {
+  font-size: 16px;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.35em;
+}
+
+.markdown-body li {
+  margin: 0.22em 0;
+}
+
+.markdown-body li > p {
+  margin: 0.22em 0;
+}
+
+.markdown-body blockquote {
+  border-left: 3px solid var(--hairline);
+  color: var(--muted);
+  padding-left: 12px;
+}
+
+.markdown-body a {
+  color: var(--brand-teal);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  font-size: 13px;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--hairline);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-body th {
+  color: var(--ink);
+  background: var(--surface-card);
+  font-weight: 600;
+}
+
+.md-inline-code {
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--surface-card);
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88em;
+  padding: 0.08em 0.34em;
+}
+
+.md-code,
+.md-code .shiki,
+.md-code-fallback {
+  border-radius: 12px;
+  background: #11110f !important;
+  color: #f7f2e5;
+  overflow: auto;
+}
+
+.md-code {
+  margin: 0.85em 0;
+}
+
+.md-code .shiki,
+.md-code-fallback {
+  margin: 0;
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.md-code .shiki span {
+  background: transparent !important;
+}
+
 .tool-stack {
   max-width: 760px;
   display: flex;

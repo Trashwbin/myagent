@@ -1,4 +1,3 @@
-import { APP_CLIENT_SCRIPT } from "./web/client.js";
 import { APP_STYLES } from "./web/styles.js";
 
 export const EMBEDDED_HTML = `<!DOCTYPE html>
@@ -65,6 +64,6 @@ export const EMBEDDED_HTML = `<!DOCTYPE html>
   </div>
 </section>
 
-<script>${APP_CLIENT_SCRIPT}</script>
+<script type="module" src="/assets/client.js"></script>
 </body>
 </html>`;

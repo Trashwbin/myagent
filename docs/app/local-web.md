@@ -8,17 +8,23 @@ myagent app --cwd /path/to/workspace
 
 This starts a local HTTP + WebSocket server on `127.0.0.1` (default port 43110).
 
-Open the printed URL in a browser to use the minimal web UI.
+Open the printed URL in a browser to use the local web UI.
 
 The browser remembers the active session per workspace in `localStorage`. Opening
 the page again restores the last selected session when it still exists; it does
 not create a fresh session on every refresh. Use the `New` button to explicitly
 start another session.
 
-The embedded page follows the design guide in [DESIGN.md](DESIGN.md). The first
-pass intentionally stays framework-free: HTML, CSS, and browser client logic are
-split into small TypeScript modules under `src/app/web/`, but served as a single
-local page.
+The embedded page follows the design guide in [DESIGN.md](DESIGN.md). The shell
+is still served by the Node app server, but the browser client is bundled from
+`src/app/web/entry.ts` with esbuild and served as `/assets/client.js`.
+
+Assistant answers render through a small React markdown island:
+
+- `react-markdown` parses markdown into React components.
+- `remark-gfm` enables tables, task lists, strikethrough, and autolinks.
+- `shiki` is loaded lazily for fenced code block highlighting.
+- Raw HTML is not enabled; user and tool text still use text nodes.
 
 ## Architecture
 
@@ -28,6 +34,9 @@ local page.
 - **Session shell** is browser-side: the sidebar lists persisted sessions, the
   header shows the full session id, and the active session can be selected
   without restarting the server.
+- **Markdown rendering** is browser-side: the app server exposes the bundled
+  client at `/assets/client.js`; the runtime loop still only exchanges plain
+  text and structured tool events over WebSocket.
 
 ## HTTP API
 
@@ -35,6 +44,7 @@ local page.
 |--------|------|-------------|
 | GET | `/api/health` | Returns `{ ok: true }` |
 | GET | `/api/config` | Returns cwd, provider, model, approval mode (no secrets) |
+| GET | `/assets/client.js` | Bundled browser client |
 | GET | `/api/sessions` | List all sessions |
 | POST | `/api/sessions` | Create new session (body: `{ cwd?: string }`) |
 | GET | `/api/sessions/:id/messages` | Get session message history |

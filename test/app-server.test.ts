@@ -185,9 +185,47 @@ describe("HTTP API", () => {
     const html = await res.text();
     expect(html).toContain("myAgent");
     expect(html).toContain("#fffaf0");
-    expect(html).toContain("localStorage");
-    expect(html).toContain("activeSession");
+    expect(html).toContain("/assets/client.js");
     expect(html).toContain("Copy ID");
+  });
+
+  it("GET /assets/client.js returns bundled app client", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const { port } = await startTestServer(store);
+    const res = await fetch(`http://127.0.0.1:${port}/assets/client.js`);
+    expect(res.headers.get("content-type")).toContain("text/javascript");
+    const js = await res.text();
+    expect(js).toContain("localStorage");
+    expect(js).toContain("activeSession");
+    expect(js).toContain("__myAgentMarkdown");
+    expect(js).not.toContain("react-markdown");
+    expect(js.length).toBeLessThan(100_000);
+  });
+
+  it("serves split client chunks for markdown rendering", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const { port } = await startTestServer(store);
+    const client = await fetch(`http://127.0.0.1:${port}/assets/client.js`).then((r) => r.text());
+    const chunks = Array.from(client.matchAll(/["']\.\/(chunks\/[^"']+\.js)["']/g)).map(
+      (match) => `/assets/${match[1]}`,
+    );
+    expect(chunks.length).toBeGreaterThan(0);
+
+    let markdownChunk = "";
+    for (const chunk of chunks) {
+      const res = await fetch(`http://127.0.0.1:${port}${chunk}`);
+      expect(res.headers.get("content-type")).toContain("text/javascript");
+      const js = await res.text();
+      if (js.includes("markdown-body") && js.includes("remarkGfm")) {
+        markdownChunk = js;
+        break;
+      }
+    }
+
+    expect(markdownChunk).toContain("renderAssistantMarkdown");
+    expect(markdownChunk).toContain("remarkGfm");
   });
 });
 

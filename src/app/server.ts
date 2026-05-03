@@ -8,6 +8,7 @@ import type { ServerMessage } from "./protocol.js";
 import { parseClientMessage } from "./protocol.js";
 import { SessionManager } from "./session-api.js";
 import { EMBEDDED_HTML } from "./html.js";
+import { getAppClientAsset } from "./web/bundle.js";
 
 type AppServerDeps = {
   provider: Provider;
@@ -65,6 +66,21 @@ export function createAppServer(deps: AppServerDeps): Server {
       if (path === "/" && req.method === "GET") {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         res.end(EMBEDDED_HTML);
+        return;
+      }
+
+      if (path.startsWith("/assets/") && req.method === "GET") {
+        const asset = await getAppClientAsset(path);
+        if (!asset) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Asset not found" }));
+          return;
+        }
+        res.writeHead(200, {
+          "Content-Type": asset.contentType,
+          "Cache-Control": "no-store",
+        });
+        res.end(asset.content);
         return;
       }
 

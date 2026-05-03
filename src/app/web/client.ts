@@ -120,6 +120,7 @@ function appendWorkspaceRow(group) {
 }
 
 function clearTimeline() {
+  unmountMarkdownIn(els.timeline);
   state.streamEl = null;
   state.activeTurnEl = null;
   state.activeAssistantBody = null;
@@ -169,7 +170,11 @@ function messageBlock(kind, label, content, turn) {
   head.textContent = label;
   const body = document.createElement("div");
   body.className = "content";
-  body.textContent = content || "";
+  if (kind === "assistant") {
+    setAssistantContent(body, content || "");
+  } else {
+    body.textContent = content || "";
+  }
   block.appendChild(head);
   block.appendChild(body);
   target.appendChild(block);
@@ -190,8 +195,35 @@ function ensureAssistantBody() {
 
 function assistantBlock(content) {
   const body = ensureAssistantBody();
-  if (content) body.textContent = content;
+  if (content) setAssistantContent(body, content);
   return body;
+}
+
+function markdownApi() {
+  return globalThis.__myAgentMarkdown;
+}
+
+function setAssistantContent(body, content) {
+  const text = content || "";
+  body.dataset.markdownSource = text;
+  const api = markdownApi();
+  if (api && typeof api.renderAssistantMarkdown === "function") {
+    api.renderAssistantMarkdown(body, text);
+  } else {
+    body.textContent = text;
+  }
+}
+
+function getAssistantContent(body) {
+  return body.dataset.markdownSource || body.textContent || "";
+}
+
+function unmountMarkdownIn(root) {
+  const api = markdownApi();
+  if (!api || typeof api.unmountAssistantMarkdown !== "function") return;
+  for (const el of root.querySelectorAll(".message.assistant .content")) {
+    api.unmountAssistantMarkdown(el);
+  }
 }
 
 function truncate(value, max = 180) {
@@ -574,7 +606,7 @@ function handleTurnEvent(ev) {
   switch (ev.type) {
     case "assistant_text_delta":
       if (!state.streamEl) state.streamEl = assistantBlock("");
-      state.streamEl.textContent += ev.text;
+      setAssistantContent(state.streamEl, getAssistantContent(state.streamEl) + ev.text);
       scrollToBottom();
       break;
     case "tool_call":
@@ -585,7 +617,7 @@ function handleTurnEvent(ev) {
       break;
     case "assistant_message":
       if (state.streamEl) {
-        state.streamEl.textContent = ev.message.content || state.streamEl.textContent;
+        setAssistantContent(state.streamEl, ev.message.content || getAssistantContent(state.streamEl));
         state.streamEl = null;
       } else if (ev.message.content) {
         assistantBlock(ev.message.content);
