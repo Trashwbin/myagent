@@ -447,6 +447,30 @@ async function handleInputDebug(): Promise<void> {
   await launchInputDebug();
 }
 
+async function handleApp(options: { cwd: string }): Promise<void> {
+  const cwd = canonicalWorkspaceRoot(options.cwd);
+  const config = loadConfig({ workspaceRoot: cwd });
+  const resolved = resolveSessionProvider(config);
+  const provider = createProvider(config);
+  const registry = buildRegistry();
+  const store = openStore();
+  const { createAppServer, findAvailablePort } = await import("./app/server.js");
+  const port = await findAvailablePort(43110);
+  const server = createAppServer({
+    provider,
+    providerName: resolved.provider,
+    modelName: resolved.model,
+    registry,
+    approval: resolveApprovalMode(config),
+    store,
+    maxTurns: config.maxTurns,
+    cwd,
+  });
+  server.listen(port, "127.0.0.1", () => {
+    console.log(`myAgent app listening on http://127.0.0.1:${port}`);
+  });
+}
+
 // --- Commander setup ---
 
 const program = new Command();
@@ -492,6 +516,15 @@ const inputDebugCmd = program
 
 inputDebugCmd.action(async () => {
   await handleInputDebug();
+});
+
+// Subcommand: app
+const appCmd = program
+  .command("app")
+  .description("Launch local web app server");
+
+appCmd.action(async () => {
+  await handleApp(program.opts<{ cwd: string }>());
 });
 
 // --- Entry point ---
