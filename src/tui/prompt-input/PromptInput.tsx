@@ -2,24 +2,27 @@ import React from "react";
 import { Box, Text, useInput } from "ink";
 import type { Key } from "ink";
 import type { PastePart } from "../types.js";
-import type { EditorState } from "./editor.js";
-import {
-  insertText,
-  backspace,
-  deleteForward,
-  moveLeft,
-  moveRight,
-  moveHome,
-  moveEnd,
-  deleteToHome,
-  deleteToEnd,
-  deleteWordBack,
-  insertNewline,
-  graphemeSegments,
-  normalizeTerminalInput,
-} from "./editor.js";
-import { wrapLinesWithOffsets } from "./width.js";
+import { PromptCursor } from "./cursor.js";
+import { normalizeTerminalInput } from "./editor.js";
+import { applyTerminalInputChunk, hasInlineErase } from "./input-chunk.js";
 import { normalizePaste, summarizePaste, nextPastePartId } from "./paste.js";
+import { stringWidth } from "./width.js";
+import { usePromptCursorDeclaration } from "../cursor-declaration.js";
+
+export type PromptInputDebugEvent =
+  | {
+      type: "ink_input";
+      input: string;
+      key: Key;
+      before: { value: string; cursor: number };
+    }
+  | {
+      type: "commit";
+      reason: string;
+      after: { value: string; cursor: number };
+    }
+  | { type: "ignored"; reason: string }
+  | { type: "submit"; value: string };
 
 type PromptInputProps = {
   value: string;
@@ -33,6 +36,7 @@ type PromptInputProps = {
   maxLines?: number;
   placeholder?: string;
   disabled?: boolean;
+  onInputDebug?: (event: PromptInputDebugEvent) => void;
 };
 
 const MAX_VISIBLE_LINES = 6;
@@ -49,93 +53,142 @@ export function PromptInput({
   maxLines = MAX_VISIBLE_LINES,
   placeholder,
   disabled,
+  onInputDebug,
 }: PromptInputProps): React.ReactElement {
   const valueRef = React.useRef(value);
   const cursorRef = React.useRef(cursor);
   const pastePartsRef = React.useRef(pasteParts);
+  const columnsRef = React.useRef(columns);
   const onChangeRef = React.useRef(onChange);
   const onSubmitRef = React.useRef(onSubmit);
   const onPastePartsChangeRef = React.useRef(onPastePartsChange);
+  const onInputDebugRef = React.useRef(onInputDebug);
 
   React.useLayoutEffect(() => {
     valueRef.current = value;
     cursorRef.current = cursor;
     pastePartsRef.current = pasteParts;
+    columnsRef.current = columns;
     onChangeRef.current = onChange;
     onSubmitRef.current = onSubmit;
     onPastePartsChangeRef.current = onPastePartsChange;
+    onInputDebugRef.current = onInputDebug;
   });
 
   const handleInput = React.useCallback((input: string, key: Key) => {
     const currentValue = valueRef.current;
     const currentCursor = cursorRef.current;
     const currentPasteParts = pastePartsRef.current;
+    onInputDebugRef.current?.({
+      type: "ink_input",
+      input,
+      key,
+      before: { value: currentValue, cursor: currentCursor },
+    });
+    const currentEditor = PromptCursor.from(
+      currentValue,
+      Math.max(columnsRef.current - 2, 10),
+      currentCursor,
+    );
+
+    const commit = (editor: PromptCursor, reason: string) => {
+      const state = editor.toState();
+      valueRef.current = state.value;
+      cursorRef.current = state.cursor;
+      onChangeRef.current(state.value, state.cursor);
+      onInputDebugRef.current?.({ type: "commit", reason, after: state });
+    };
 
     if (
       key.backspace ||
-      key.delete ||
-      input.includes("\x7f") ||
-      input.includes("\b") ||
+      hasInlineErase(input) ||
       (key.ctrl && input === "h")
     ) {
-      const deleteCount =
-        [...input].filter((ch) => ch === "\x7f" || ch === "\b").length || 1;
-      let state: EditorState = { value: currentValue, cursor: currentCursor };
-      for (let i = 0; i < deleteCount; i++) {
-        state = backspace(state);
-      }
-      onChangeRef.current(state.value, state.cursor);
+      commit(
+        hasInlineErase(input)
+          ? applyTerminalInputChunk(currentEditor, input)
+          : currentEditor.backspace(),
+        "erase",
+      );
+      return;
+    }
+
+    if (key.delete) {
+      commit(currentEditor.deleteForward(), "delete-forward");
       return;
     }
 
     if (key.ctrl) {
       if (input === "a") {
-        const s = moveHome({ value: currentValue, cursor: currentCursor });
-        onChangeRef.current(s.value, s.cursor);
+        commit(currentEditor.startOfLine(), "ctrl-a");
+        return;
+      }
+      if (input === "b") {
+        commit(currentEditor.left(), "ctrl-b");
         return;
       }
       if (input === "e") {
-        const s = moveEnd({ value: currentValue, cursor: currentCursor });
-        onChangeRef.current(s.value, s.cursor);
+        commit(currentEditor.endOfLine(), "ctrl-e");
+        return;
+      }
+      if (input === "f") {
+        commit(currentEditor.right(), "ctrl-f");
         return;
       }
       if (input === "d") {
-        const s = deleteForward({ value: currentValue, cursor: currentCursor });
-        onChangeRef.current(s.value, s.cursor);
+        commit(currentEditor.deleteForward(), "ctrl-d");
         return;
       }
       if (input === "u") {
-        const s = deleteToHome({ value: currentValue, cursor: currentCursor });
-        onChangeRef.current(s.value, s.cursor);
+        commit(currentEditor.deleteToLineStart(), "ctrl-u");
         return;
       }
       if (input === "k") {
-        const s = deleteToEnd({ value: currentValue, cursor: currentCursor });
-        onChangeRef.current(s.value, s.cursor);
+        commit(currentEditor.deleteToLineEnd(), "ctrl-k");
         return;
       }
       if (input === "w") {
-        const s = deleteWordBack({ value: currentValue, cursor: currentCursor });
-        onChangeRef.current(s.value, s.cursor);
+        commit(currentEditor.deleteWordBefore(), "ctrl-w");
         return;
       }
+      onInputDebugRef.current?.({ type: "ignored", reason: "unhandled-ctrl" });
       return;
     }
 
+    if (key.meta) {
+      if (input === "b") {
+        commit(currentEditor.previousWord(), "meta-b");
+        return;
+      }
+      if (input === "f") {
+        commit(currentEditor.nextWord(), "meta-f");
+        return;
+      }
+      if (input === "d") {
+        commit(currentEditor.deleteWordAfter(), "meta-d");
+        return;
+      }
+    }
+
     if (key.leftArrow) {
-      const s = moveLeft({ value: currentValue, cursor: currentCursor });
-      onChangeRef.current(s.value, s.cursor);
+      commit(currentEditor.left(), "left");
       return;
     }
     if (key.rightArrow) {
-      const s = moveRight({ value: currentValue, cursor: currentCursor });
-      onChangeRef.current(s.value, s.cursor);
+      commit(currentEditor.right(), "right");
+      return;
+    }
+    if (key.upArrow) {
+      commit(currentEditor.up(), "up");
+      return;
+    }
+    if (key.downArrow) {
+      commit(currentEditor.down(), "down");
       return;
     }
     if (key.return) {
       if (key.meta || key.shift) {
-        const s = insertNewline({ value: currentValue, cursor: currentCursor });
-        onChangeRef.current(s.value, s.cursor);
+        commit(currentEditor.insert("\n"), "newline");
         return;
       }
       const endsWithBackslash =
@@ -143,44 +196,69 @@ export function PromptInput({
       if (endsWithBackslash) {
         const before = currentValue.slice(0, currentCursor - 1);
         const after = currentValue.slice(currentCursor);
-        const newState: EditorState = {
-          value: before + "\n" + after,
-          cursor: currentCursor,
-        };
-        onChangeRef.current(newState.value, newState.cursor);
+        commit(
+          PromptCursor.from(before + "\n" + after, columnsRef.current, currentCursor),
+          "backslash-newline",
+        );
         return;
       }
       if (currentValue.includes("\n")) {
+        onInputDebugRef.current?.({ type: "submit", value: currentValue });
         onSubmitRef.current(currentValue);
         return;
       }
+      onInputDebugRef.current?.({ type: "submit", value: currentValue });
       onSubmitRef.current(currentValue);
       return;
     }
 
     if (input && !key.ctrl) {
+      if (hasInlineErase(input)) {
+        commit(applyTerminalInputChunk(currentEditor, input), "inline-erase");
+        return;
+      }
+
       const terminalText = normalizeTerminalInput(input);
-      if (!terminalText) return;
+      if (!terminalText) {
+        onInputDebugRef.current?.({ type: "ignored", reason: "empty-normalized" });
+        return;
+      }
 
       const normalized = normalizePaste(terminalText);
       const summary = summarizePaste(normalized, nextPastePartId(currentPasteParts));
       const inserted = summary ? `${summary.display} ` : normalized;
-      const s = insertText({ value: currentValue, cursor: currentCursor }, inserted);
-      onChangeRef.current(s.value, s.cursor);
+      commit(currentEditor.insert(inserted), summary ? "paste-summary" : "insert");
       if (summary) {
         onPastePartsChangeRef.current([...currentPasteParts, summary.part]);
       }
+      return;
     }
+
+    onInputDebugRef.current?.({ type: "ignored", reason: "unhandled-input" });
   }, []);
 
   useInput(handleInput, { isActive: focus && !disabled });
 
   const renderWidth = Math.max(columns - 2, 10);
-  const lines = wrapLinesWithOffsets(value || "", renderWidth);
-  const visibleLines = lines.slice(-maxLines);
-  const scrollOffset = Math.max(0, lines.length - maxLines);
-  const cursorLineIndex = findCursorLineIndex(lines, cursor);
-  const adjustedCursorLine = cursorLineIndex - scrollOffset;
+  const editor = PromptCursor.from(value || "", renderWidth, cursor);
+  const viewport = editor.getViewport(maxLines);
+  const visibleLines = viewport.lines;
+  const adjustedCursorLine = viewport.cursorLine - viewport.startLine;
+  let cursorColumn = 0;
+
+  if (visibleLines.length > 0 && adjustedCursorLine >= 0) {
+    const line = visibleLines[Math.min(adjustedCursorLine, visibleLines.length - 1)]!;
+    cursorColumn = stringWidth(editor.splitLineAtCursor(line).before);
+  }
+
+  usePromptCursorDeclaration(
+    focus && !disabled
+      ? {
+          linesBelowCursor: Math.max(0, visibleLines.length - adjustedCursorLine + 1),
+          cursorColumn,
+        }
+      : null,
+  );
 
   if (!focus || disabled) {
     return (
@@ -197,15 +275,12 @@ export function PromptInput({
   for (let i = 0; i < visibleLines.length; i++) {
     const line = visibleLines[i]!;
     if (i === adjustedCursorLine) {
-      const { beforePart, cursorChar, afterPart } = splitLineAtCursor(
-        line.text,
-        Math.max(0, cursor - line.start),
-      );
+      const { before, at, after } = editor.splitLineAtCursor(line);
       elements.push(
         <Text key={`l${i}`}>
-          {beforePart}
-          <Text inverse>{cursorChar}</Text>
-          {afterPart}
+          {before}
+          <Text inverse>{at}</Text>
+          {after}
         </Text>,
       );
     } else {
@@ -225,45 +300,4 @@ export function PromptInput({
       )}
     </Box>
   );
-}
-
-function findCursorLineIndex(
-  lines: Array<{ start: number; end: number }>,
-  cursor: number,
-): number {
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (cursor >= line.start && cursor <= line.end) return i;
-  }
-  return Math.max(0, lines.length - 1);
-}
-
-function splitLineAtCursor(
-  line: string,
-  cursor: number,
-): { beforePart: string; cursorChar: string; afterPart: string } {
-  let offset = 0;
-  let beforePart = "";
-  const segments = graphemeSegments(line);
-
-  for (let i = 0; i < segments.length; i++) {
-    const segment = segments[i]!;
-    const nextOffset = offset + segment.length;
-    if (nextOffset <= cursor) {
-      beforePart += segment;
-      offset = nextOffset;
-      continue;
-    }
-    return {
-      beforePart,
-      cursorChar: segment,
-      afterPart: segments.slice(i + 1).join(""),
-    };
-  }
-
-  return {
-    beforePart,
-    cursorChar: " ",
-    afterPart: "",
-  };
 }

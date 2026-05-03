@@ -1,107 +1,57 @@
+import { PromptCursor } from "./cursor.js";
+import { graphemeSegments, normalizeTerminalInput } from "./unicode.js";
+
+export { graphemeSegments, normalizeTerminalInput } from "./unicode.js";
+
 export type EditorState = {
   value: string;
   cursor: number;
 };
 
-const GRAPHEME_BREAK_REGEX =
-  /\p{Regional_Indicator}{2}|\p{Extended_Pictographic}(?:‍\p{Extended_Pictographic})*|\P{M}\p{M}*|\p{M}+/gu;
-const ANSI_ESCAPE_REGEX = /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+const DEFAULT_COLUMNS = 80;
 
-export function graphemeSegments(text: string): string[] {
-  if (!text) return [];
-  return text.match(GRAPHEME_BREAK_REGEX) ?? [...text];
+function cursorFromState(state: EditorState): PromptCursor {
+  return PromptCursor.from(state.value, DEFAULT_COLUMNS, state.cursor);
 }
 
 export function insertText(state: EditorState, text: string): EditorState {
-  return {
-    value: state.value.slice(0, state.cursor) + text + state.value.slice(state.cursor),
-    cursor: state.cursor + text.length,
-  };
-}
-
-export function normalizeTerminalInput(input: string): string {
-  return input
-    .replace(ANSI_ESCAPE_REGEX, "")
-    .replace(/(?<=[^\\\r\n])\r$/u, "")
-    .replace(/\r/g, "\n");
+  return cursorFromState(state).insert(text).toState();
 }
 
 export function backspace(state: EditorState): EditorState {
-  if (state.cursor === 0) return state;
-  const before = state.value.slice(0, state.cursor);
-  const segments = graphemeSegments(before);
-  const deleteCount = segments.length > 0 ? segments[segments.length - 1]!.length : 1;
-  return {
-    value:
-      state.value.slice(0, state.cursor - deleteCount) + state.value.slice(state.cursor),
-    cursor: state.cursor - deleteCount,
-  };
+  return cursorFromState(state).backspace().toState();
 }
 
 export function deleteForward(state: EditorState): EditorState {
-  if (state.cursor >= state.value.length) return state;
-  const after = state.value.slice(state.cursor);
-  const segments = graphemeSegments(after);
-  const deleteCount = segments.length > 0 ? segments[0]!.length : 1;
-  return {
-    value:
-      state.value.slice(0, state.cursor) + state.value.slice(state.cursor + deleteCount),
-    cursor: state.cursor,
-  };
+  return cursorFromState(state).deleteForward().toState();
 }
 
 export function moveLeft(state: EditorState): EditorState {
-  if (state.cursor === 0) return state;
-  const before = state.value.slice(0, state.cursor);
-  const segments = graphemeSegments(before);
-  const step = segments.length > 0 ? segments[segments.length - 1]!.length : 1;
-  return { ...state, cursor: state.cursor - step };
+  return cursorFromState(state).left().toState();
 }
 
 export function moveRight(state: EditorState): EditorState {
-  if (state.cursor >= state.value.length) return state;
-  const after = state.value.slice(state.cursor);
-  const segments = graphemeSegments(after);
-  const step = segments.length > 0 ? segments[0]!.length : 1;
-  return { ...state, cursor: state.cursor + step };
+  return cursorFromState(state).right().toState();
 }
 
 export function moveHome(state: EditorState): EditorState {
-  const lineStart = state.value.lastIndexOf("\n", state.cursor - 1) + 1;
-  return { ...state, cursor: lineStart };
+  return cursorFromState(state).startOfLine().toState();
 }
 
 export function moveEnd(state: EditorState): EditorState {
-  const nextNewline = state.value.indexOf("\n", state.cursor);
-  return { ...state, cursor: nextNewline === -1 ? state.value.length : nextNewline };
+  return cursorFromState(state).endOfLine().toState();
 }
 
 export function deleteToHome(state: EditorState): EditorState {
-  const lineStart = state.value.lastIndexOf("\n", state.cursor - 1) + 1;
-  return {
-    value: state.value.slice(0, lineStart) + state.value.slice(state.cursor),
-    cursor: lineStart,
-  };
+  return cursorFromState(state).deleteToLineStart().toState();
 }
 
 export function deleteToEnd(state: EditorState): EditorState {
-  const nextNewline = state.value.indexOf("\n", state.cursor);
-  const end = nextNewline === -1 ? state.value.length : nextNewline;
-  return {
-    value: state.value.slice(0, state.cursor) + state.value.slice(end),
-    cursor: state.cursor,
-  };
+  return cursorFromState(state).deleteToLineEnd().toState();
 }
 
 export function deleteWordBack(state: EditorState): EditorState {
-  if (state.cursor === 0) return state;
-  let pos = state.cursor;
-  while (pos > 0 && state.value[pos - 1] === " ") pos--;
-  while (pos > 0 && state.value[pos - 1] !== " " && state.value[pos - 1] !== "\n") pos--;
-  return {
-    value: state.value.slice(0, pos) + state.value.slice(state.cursor),
-    cursor: pos,
-  };
+  return cursorFromState(state).deleteWordBefore().toState();
 }
 
 export function insertNewline(state: EditorState): EditorState {

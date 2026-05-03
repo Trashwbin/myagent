@@ -1,23 +1,6 @@
-import { graphemeSegments } from "./editor.js";
+import { graphemeSegments, stringWidth } from "./unicode.js";
 
-export function stringWidth(str: string): number {
-  let width = 0;
-  for (const char of str) {
-    const code = char.codePointAt(0)!;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) continue;
-    if (
-      (code >= 0x3000 && code <= 0x9fff) ||
-      (code >= 0xf900 && code <= 0xfaff) ||
-      (code >= 0xff00 && code <= 0xffef) ||
-      (code >= 0x20000 && code <= 0x2ffff)
-    ) {
-      width += 2;
-    } else {
-      width += 1;
-    }
-  }
-  return width;
-}
+export { stringWidth } from "./unicode.js";
 
 export function wrapLines(text: string, maxWidth: number): string[] {
   const rawLines = text.split("\n");

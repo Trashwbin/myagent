@@ -14,6 +14,8 @@ import {
   graphemeSegments,
   normalizeTerminalInput,
 } from "../src/tui/prompt-input/editor.js";
+import { PromptCursor } from "../src/tui/prompt-input/cursor.js";
+import { applyTerminalInputChunk } from "../src/tui/prompt-input/input-chunk.js";
 import { wrapLinesWithOffsets } from "../src/tui/prompt-input/width.js";
 
 type S = { value: string; cursor: number };
@@ -272,7 +274,8 @@ describe("wrapLinesWithOffsets", () => {
   it("preserves emoji offsets when wrapping", () => {
     const input = `a${EMOJI}b`;
     expect(wrapLinesWithOffsets(input, 2)).toEqual([
-      { text: `a${EMOJI}`, start: 0, end: 3 },
+      { text: "a", start: 0, end: 1 },
+      { text: EMOJI, start: 1, end: 3 },
       { text: "b", start: 3, end: 4 },
     ]);
   });
@@ -291,5 +294,64 @@ describe("wrapLinesWithOffsets", () => {
       { text: "ab", start: 0, end: 2 },
       { text: "cd", start: 3, end: 5 },
     ]);
+  });
+});
+
+describe("PromptCursor", () => {
+  it("maps cursor offsets through NFC normalization", () => {
+    const decomposed = "a" + "é" + "b";
+    const cursor = PromptCursor.from(decomposed, 80, 3);
+    expect(cursor.backspace().toState()).toEqual(s("ab", 1));
+  });
+
+  it("moves up and down by wrapped visual lines", () => {
+    const cursor = PromptCursor.from("abcdef", 3, 5);
+    expect(cursor.up().toState()).toEqual(s("abcdef", 2));
+    expect(cursor.up().down().toState()).toEqual(s("abcdef", 5));
+  });
+
+  it("splits CJK cursor position by grapheme offset", () => {
+    const cursor = PromptCursor.from("你好", 80, 1);
+    expect(cursor.splitLineAtCursor({ text: "你好", start: 0, end: 2 })).toEqual({
+      before: "你",
+      at: "好",
+      after: "",
+    });
+  });
+
+  it("splits emoji cursor position without cutting surrogate pairs", () => {
+    const input = `a${EMOJI}b`;
+    const cursor = PromptCursor.from(input, 80, 1);
+    expect(cursor.splitLineAtCursor({ text: input, start: 0, end: 4 })).toEqual({
+      before: "a",
+      at: EMOJI,
+      after: "b",
+    });
+  });
+});
+
+describe("applyTerminalInputChunk", () => {
+  it("applies coalesced erase and insert bytes in order", () => {
+    const cursor = PromptCursor.from("abc你好def", 80, 8);
+    expect(applyTerminalInputChunk(cursor, "\x7f\x7fX").toState()).toEqual(
+      s("abc你好dX", 7),
+    );
+  });
+
+  it("handles text before and after an inline erase", () => {
+    const cursor = PromptCursor.from("", 80, 0);
+    expect(applyTerminalInputChunk(cursor, "ab\x7fc").toState()).toEqual(s("ac", 2));
+  });
+
+  it("does not split CJK characters around inline erase", () => {
+    const cursor = PromptCursor.from("", 80, 0);
+    expect(applyTerminalInputChunk(cursor, "你好\x7f啊").toState()).toEqual(s("你啊", 2));
+  });
+});
+
+describe("PromptCursor deleteForward", () => {
+  it("does not delete the character before the cursor at the end of input", () => {
+    const cursor = PromptCursor.from(" 中文 d", 80, 5);
+    expect(cursor.deleteForward().toState()).toEqual(s(" 中文 d", 5));
   });
 });

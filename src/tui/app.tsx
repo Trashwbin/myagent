@@ -32,12 +32,13 @@ export function TuiApp(props: AppProps): React.ReactElement {
   const [streamingText, setStreamingText] = useState("");
   const [approval, setApproval] = useState<ApprovalState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [inputValue, setInputValue] = useState("");
-  const [inputCursor, setInputCursor] = useState(0);
+  const [inputState, setInputState] = useState({ value: "", cursor: 0 });
   const [pasteParts, setPasteParts] = useState<PastePart[]>([]);
 
   const sensitiveSetRef = useRef(new Set<string>());
-  const sessionApprovalRulesRef = useRef<import("../permission/approval.js").ApprovalRule[]>([]);
+  const sessionApprovalRulesRef = useRef<
+    import("../permission/approval.js").ApprovalRule[]
+  >([]);
   const readStateRef = useRef(new ReadStateTracker());
 
   const handleEvent = useCallback((event: TurnEvent) => {
@@ -76,8 +77,7 @@ export function TuiApp(props: AppProps): React.ReactElement {
       setPhase("running");
       setStreamingText("");
       setError(null);
-      setInputValue("");
-      setInputCursor(0);
+      setInputState({ value: "", cursor: 0 });
       setPasteParts([]);
 
       const approvalHandler = async (
@@ -102,21 +102,19 @@ export function TuiApp(props: AppProps): React.ReactElement {
 
       const runAsync = async () => {
         try {
-          const { session: updated, newMessages, aborted } = await runTurn(
-            props.provider,
-            props.registry,
-            props.session,
-            expanded,
-            {
-              approval: props.approval,
-              maxTurns: props.maxTurns,
-              approvalHandler,
-              onEvent: handleEvent,
-              sessionApprovalRules: sessionApprovalRulesRef.current,
-              store: props.store,
-              readState: readStateRef.current,
-            },
-          );
+          const {
+            session: updated,
+            newMessages,
+            aborted,
+          } = await runTurn(props.provider, props.registry, props.session, expanded, {
+            approval: props.approval,
+            maxTurns: props.maxTurns,
+            approvalHandler,
+            onEvent: handleEvent,
+            sessionApprovalRules: sessionApprovalRulesRef.current,
+            store: props.store,
+            readState: readStateRef.current,
+          });
           Object.assign(props.session, updated);
           props.store.appendMessages(props.session.id, newMessages);
           if (aborted) {
@@ -128,10 +126,7 @@ export function TuiApp(props: AppProps): React.ReactElement {
         } catch (err) {
           if (err instanceof ProviderRuntimeError) {
             const msg = formatProviderError(err);
-            setRows((prev) => [
-              ...prev,
-              { type: "status", kind: "error", text: msg },
-            ]);
+            setRows((prev) => [...prev, { type: "status", kind: "error", text: msg }]);
             setError(msg);
             setPhase("idle");
           } else {
@@ -186,19 +181,11 @@ export function TuiApp(props: AppProps): React.ReactElement {
         sessionId={props.session.id}
       />
       <TranscriptPane rows={rows} streamingText={streamingText} />
-      {approval && (
-        <ApprovalModal
-          state={approval}
-          onResolve={resolveApproval}
-        />
-      )}
+      {approval && <ApprovalModal state={approval} onResolve={resolveApproval} />}
       <PromptInput
-        value={inputValue}
-        cursor={inputCursor}
-        onChange={(v, c) => {
-          setInputValue(v);
-          setInputCursor(c);
-        }}
+        value={inputState.value}
+        cursor={inputState.cursor}
+        onChange={(value, cursor) => setInputState({ value, cursor })}
         onSubmit={handleSubmit}
         pasteParts={pasteParts}
         onPastePartsChange={setPasteParts}
@@ -245,9 +232,7 @@ function TranscriptPane(props: {
   );
 }
 
-function TranscriptRowView(props: {
-  row: TranscriptRow;
-}): React.ReactElement {
+function TranscriptRowView(props: { row: TranscriptRow }): React.ReactElement {
   const { row } = props;
   switch (row.type) {
     case "user":
@@ -292,9 +277,7 @@ function TranscriptRowView(props: {
         </Text>
       );
     case "status":
-      return (
-        <Text color={row.kind === "error" ? "red" : "yellow"}>{row.text}</Text>
-      );
+      return <Text color={row.kind === "error" ? "red" : "yellow"}>{row.text}</Text>;
   }
 }
 
@@ -303,12 +286,7 @@ function ApprovalModal(props: {
   onResolve: (response: ApprovalResponse) => void;
 }): React.ReactElement {
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="bold"
-      borderColor="yellow"
-      paddingLeft={1}
-    >
+    <Box flexDirection="column" borderStyle="bold" borderColor="yellow" paddingLeft={1}>
       <Text color="yellow">Approval required: {props.state.toolName}</Text>
       <Text>{props.state.reason}</Text>
       {props.state.details.map((d, i) => (
@@ -325,10 +303,7 @@ function ApprovalModal(props: {
   );
 }
 
-function StatusBar(props: {
-  phase: TuiPhase;
-  error: string | null;
-}): React.ReactElement {
+function StatusBar(props: { phase: TuiPhase; error: string | null }): React.ReactElement {
   return (
     <Box paddingLeft={1} height={1}>
       {props.phase === "running" && <Text color="green">● running</Text>}

@@ -110,9 +110,10 @@ function makeEventRenderer(): (event: TurnEvent) => void {
         const meta = event.metadata;
         if (meta?.sensitive) sensitiveToolCalls.add(event.id);
         const inputSummary = formatToolInputSummary(event.input);
-        const intentLabel = event.name === "bash" && meta?.intentKind
-          ? `bash (${meta.intentKind as string})`
-          : event.name;
+        const intentLabel =
+          event.name === "bash" && meta?.intentKind
+            ? `bash (${meta.intentKind as string})`
+            : event.name;
         if (event.name === "bash" && meta?.externalDirectoryPattern) {
           console.log(`\n[approval] ${intentLabel}: ${event.reason}`);
           if (meta.externalDirectoryRoot)
@@ -159,10 +160,11 @@ function makeEventRenderer(): (event: TurnEvent) => void {
       case "tool_started": {
         const sensitive = sensitiveToolCalls.has(event.id);
         const summary = formatToolInputSummary(event.input, { sensitive });
-        const intentKind = (event.input as Record<string, unknown>)?.intentKind as string | undefined;
-        const label = event.name === "bash" && intentKind
-          ? `bash (${intentKind})`
-          : event.name;
+        const intentKind = (event.input as Record<string, unknown>)?.intentKind as
+          | string
+          | undefined;
+        const label =
+          event.name === "bash" && intentKind ? `bash (${intentKind})` : event.name;
         if (summary) {
           console.log(`[tool:${label}] ${summary}`);
         } else {
@@ -346,10 +348,7 @@ function handleSessions(): void {
   }
 }
 
-async function handleResume(
-  sessionId: string,
-  options: { cwd: string },
-): Promise<void> {
+async function handleResume(sessionId: string, options: { cwd: string }): Promise<void> {
   let cwd = canonicalWorkspaceRoot(options.cwd);
   let config = loadConfig({ workspaceRoot: cwd });
 
@@ -443,6 +442,11 @@ async function handleTui(options: { cwd: string }): Promise<void> {
   }
 }
 
+async function handleInputDebug(): Promise<void> {
+  const { launchInputDebug } = await import("./tui/input-debug.js");
+  await launchInputDebug();
+}
+
 // --- Commander setup ---
 
 const program = new Command();
@@ -475,12 +479,19 @@ resumeCmd.action(async (sessionId: string) => {
 });
 
 // Subcommand: tui
-const tuiCmd = program
-  .command("tui")
-  .description("Launch interactive TUI chat mode");
+const tuiCmd = program.command("tui").description("Launch interactive TUI chat mode");
 
 tuiCmd.action(async () => {
   await handleTui(program.opts<{ cwd: string }>());
+});
+
+// Subcommand: input-debug
+const inputDebugCmd = program
+  .command("input-debug", { hidden: true })
+  .description("Launch standalone TUI input diagnostics");
+
+inputDebugCmd.action(async () => {
+  await handleInputDebug();
 });
 
 // --- Entry point ---
