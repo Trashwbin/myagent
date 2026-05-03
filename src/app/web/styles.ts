@@ -366,62 +366,58 @@ button:disabled {
 .timeline {
   min-height: 0;
   overflow-y: auto;
-  padding: 28px;
+  padding: 34px 28px 40px;
+  background: var(--canvas);
 }
 
 .empty {
-  max-width: 720px;
-  margin: 16vh auto 0;
+  max-width: 560px;
+  margin: 20vh auto 0;
   color: var(--muted);
-  text-align: center;
-  background: var(--surface-card);
-  border: 1px solid var(--hairline);
-  border-radius: 24px;
-  padding: 48px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
 }
 
 .empty h1 {
-  font-size: 40px;
+  font-size: 26px;
   font-weight: 500;
-  letter-spacing: -0.05em;
+  letter-spacing: -0.025em;
   color: var(--ink);
-  line-height: 1.1;
-  margin: 0 0 12px;
+  line-height: 1.18;
+  margin: 0 0 8px;
 }
 
 .turn {
-  max-width: 980px;
-  margin: 0 auto 16px;
+  max-width: 900px;
+  margin: 0 auto 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  content-visibility: auto;
 }
 
 .message {
-  border: 1px solid var(--hairline);
-  background: var(--surface-card);
-  border-radius: 16px;
-  padding: 16px 18px;
-  box-shadow: 0 12px 28px var(--shadow);
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
 }
 
 .message.user {
-  background: var(--brand-peach);
-  border-color: #f0a06f;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .message.assistant {
-  background: #fffdf7;
-}
-
-.message.tool {
-  box-shadow: none;
-  background: var(--brand-lavender);
-  border-color: #a894dc;
-  padding: 12px 14px;
-  margin-top: 8px;
+  max-width: 760px;
 }
 
 .message.error {
-  border-color: var(--brand-coral);
-  background: #ffe4df;
   color: var(--ink);
 }
 
@@ -436,43 +432,138 @@ button:disabled {
 }
 
 .message.user .label,
-.message.tool .label {
-  color: rgba(10, 10, 10, 0.65);
+.message.assistant .label {
+  display: none;
 }
 
 .content {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  line-height: 1.55;
+  line-height: 1.62;
   color: var(--body);
+  font-size: 15px;
 }
 
-.message.user .content,
-.message.tool .content {
+.message.user .content {
+  width: fit-content;
+  max-width: min(76%, 64ch);
+  margin-left: auto;
+  background: var(--surface-card);
   color: var(--ink);
+  border-radius: 16px;
+  padding: 9px 12px;
+}
+
+.message.assistant .content {
+  max-width: 76ch;
+}
+
+.tool-stack {
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.tool-line {
+  min-width: 0;
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tool-header {
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.tool-title {
+  min-width: 0;
+  max-width: 58ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-weight: 600;
 }
 
 .tool-summary {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  color: rgba(10, 10, 10, 0.72);
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.tool-line.running .tool-summary,
+.tool-line.approval .tool-summary {
+  color: #8a5a00;
 }
 
 details.tool-details {
-  margin-top: 8px;
+  display: block;
+  margin: 0;
   color: var(--body);
+}
+
+details.tool-details summary {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  cursor: pointer;
+  color: var(--muted);
+  list-style: none;
+}
+
+details.tool-details summary::-webkit-details-marker {
+  display: none;
+}
+
+details.tool-details summary::before {
+  content: none;
+}
+
+.tool-caret {
+  flex: 0 0 auto;
+  color: var(--muted-soft);
+  font-size: 11px;
+  line-height: 1;
 }
 
 details.tool-details pre {
   margin: 8px 0 0;
   padding: 12px;
-  background: rgba(255, 250, 240, 0.7);
-  border: 1px solid rgba(10, 10, 10, 0.12);
+  background: #11110f;
+  color: #f7f2e5;
+  border: 0;
   border-radius: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  max-height: 260px;
+  max-height: 300px;
   overflow: auto;
+}
+
+.status-line {
+  max-width: 760px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.status-line.warning {
+  color: #8a5a00;
+}
+
+.status-line.error {
+  color: var(--error);
 }
 
 .composer {
