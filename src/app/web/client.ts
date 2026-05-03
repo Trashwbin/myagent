@@ -71,10 +71,14 @@ function workspaceName(path) {
   return parts[parts.length - 1] || path;
 }
 
+function workspacePath(session) {
+  return session.workspaceRoot || state.config?.cwd || "Workspace";
+}
+
 function groupSessionsByWorkspace(sessions) {
   const groups = new Map();
   for (const session of sessions) {
-    const path = session.workspaceRoot || state.config?.cwd || "Workspace";
+    const path = workspacePath(session);
     let group = groups.get(path);
     if (!group) {
       group = { path, name: workspaceName(path), sessions: [] };
@@ -92,18 +96,18 @@ function appendSectionHeading(text) {
   els.sessionList.appendChild(heading);
 }
 
-function appendProjectRow(group) {
+function appendWorkspaceRow(group) {
   const row = document.createElement("div");
-  row.className = "project-row";
+  row.className = "workspace-row";
   row.title = group.path;
   const icon = document.createElement("span");
-  icon.className = "project-icon";
+  icon.className = "workspace-icon";
   icon.setAttribute("aria-hidden", "true");
   const name = document.createElement("span");
-  name.className = "project-name";
+  name.className = "workspace-name";
   name.textContent = group.name;
   const count = document.createElement("span");
-  count.className = "project-count";
+  count.className = "workspace-count";
   count.textContent = String(group.sessions.length);
   row.appendChild(icon);
   row.appendChild(name);
@@ -190,25 +194,43 @@ function renderSessions() {
     els.sessionList.appendChild(empty);
     return;
   }
-  appendSectionHeading("Projects");
-  for (const group of groupSessionsByWorkspace(state.sessions)) {
-    appendProjectRow(group);
-    for (const session of group.sessions) {
-      const btn = document.createElement("button");
-      btn.className = "session-item" + (session.id === state.activeSessionId ? " active" : "");
-      btn.title = session.id;
-      const title = document.createElement("div");
-      title.className = "session-title";
-      title.textContent = sessionLabel(session);
-      const meta = document.createElement("div");
-      meta.className = "session-meta";
-      meta.textContent = relativeAge(session.updatedAt) || formatTime(session.updatedAt);
-      btn.appendChild(title);
-      btn.appendChild(meta);
-      btn.addEventListener("click", () => selectSession(session.id));
-      els.sessionList.appendChild(btn);
+  const groups = groupSessionsByWorkspace(state.sessions);
+  const currentPath = state.config?.cwd || groups[0]?.path;
+  const current = groups.find((group) => group.path === currentPath) || groups[0];
+  if (current) {
+    appendSectionHeading("Workspace");
+    appendWorkspaceRow(current);
+    appendSectionHeading("Recent");
+    for (const session of current.sessions) {
+      appendSessionRow(session);
     }
   }
+  const otherGroups = groups.filter((group) => group !== current);
+  if (otherGroups.length) {
+    appendSectionHeading("Other workspaces");
+    for (const group of otherGroups) {
+      appendWorkspaceRow(group);
+      for (const session of group.sessions) {
+        appendSessionRow(session);
+      }
+    }
+  }
+}
+
+function appendSessionRow(session) {
+  const btn = document.createElement("button");
+  btn.className = "session-item" + (session.id === state.activeSessionId ? " active" : "");
+  btn.title = session.id;
+  const title = document.createElement("div");
+  title.className = "session-title";
+  title.textContent = sessionLabel(session);
+  const meta = document.createElement("div");
+  meta.className = "session-meta";
+  meta.textContent = relativeAge(session.updatedAt) || formatTime(session.updatedAt);
+  btn.appendChild(title);
+  btn.appendChild(meta);
+  btn.addEventListener("click", () => selectSession(session.id));
+  els.sessionList.appendChild(btn);
 }
 
 function renderHeader() {

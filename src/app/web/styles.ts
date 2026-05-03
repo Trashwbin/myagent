@@ -98,8 +98,8 @@ button:disabled {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: #dfe7e3;
-  border-right: 1px solid rgba(10, 10, 10, 0.08);
+  background: var(--surface-soft);
+  border-right: 1px solid var(--hairline);
 }
 
 .brand {
@@ -109,7 +109,8 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 10px 8px 14px;
+  padding: 10px 10px 9px 14px;
+  border-bottom: 1px solid rgba(229, 220, 200, 0.72);
 }
 
 .brand-title {
@@ -125,17 +126,17 @@ button:disabled {
 }
 
 .brand .primary {
-  min-height: 30px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: rgba(10, 10, 10, 0.66);
-  padding: 5px 9px;
+  min-height: 32px;
+  border: 1px solid var(--ink);
+  border-radius: 12px;
+  background: var(--ink);
+  color: #ffffff;
+  padding: 7px 12px;
 }
 
 .brand .primary:hover {
-  background: rgba(10, 10, 10, 0.06);
-  color: var(--ink);
+  background: var(--body-strong);
+  color: #ffffff;
 }
 
 .session-list {
@@ -143,7 +144,7 @@ button:disabled {
   flex: 1 1 auto;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 4px 4px 14px;
+  padding: 10px 8px 16px;
 }
 
 .session-list::-webkit-scrollbar,
@@ -156,53 +157,54 @@ button:disabled {
 .session-list::-webkit-scrollbar-thumb,
 .timeline::-webkit-scrollbar-thumb,
 .session-id::-webkit-scrollbar-thumb {
-  background: rgba(10, 10, 10, 0.16);
+  background: #d8ceb7;
   border-radius: 999px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
+  border: 2px solid var(--surface-soft);
 }
 
 .section-heading {
-  color: rgba(10, 10, 10, 0.42);
-  font-size: 14px;
-  font-weight: 500;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
   margin: 16px 0 7px;
-  padding: 0 0 0 0;
+  padding: 0 2px;
 }
 
-.project-row {
-  min-height: 31px;
+.workspace-row {
+  min-height: 38px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  border-radius: 7px;
-  padding: 0 5px;
-  color: rgba(10, 10, 10, 0.66);
+  gap: 9px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 0 10px;
+  background: var(--surface-card);
+  color: var(--body);
 }
 
-.project-icon {
+.workspace-icon {
   width: 14px;
   height: 10px;
-  border: 1.4px solid rgba(10, 10, 10, 0.48);
+  border: 1.4px solid var(--muted);
   border-radius: 2px;
   position: relative;
   flex: 0 0 auto;
 }
 
-.project-icon::before {
+.workspace-icon::before {
   content: "";
   position: absolute;
   left: 1px;
   top: -4px;
   width: 6px;
   height: 4px;
-  border: 1.4px solid rgba(10, 10, 10, 0.48);
+  border: 1.4px solid var(--muted);
   border-bottom: 0;
   border-radius: 2px 2px 0 0;
-  background: #dfe7e3;
+  background: var(--surface-card);
 }
 
-.project-name {
+.workspace-name {
   min-width: 0;
   flex: 1;
   overflow: hidden;
@@ -210,46 +212,59 @@ button:disabled {
   text-overflow: ellipsis;
 }
 
-.project-count {
+.workspace-count {
   flex: 0 0 auto;
-  color: rgba(10, 10, 10, 0.38);
+  color: var(--muted);
   font-size: 12px;
 }
 
 .session-item {
+  position: relative;
   width: 100%;
-  min-height: 32px;
+  min-height: 34px;
   text-align: left;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  border: 0;
+  border: 1px solid transparent;
   background: transparent;
-  border-radius: 7px;
-  padding: 0 7px 0 28px;
+  border-radius: 12px;
+  padding: 0 8px 0 12px;
   margin: 1px 0;
   box-shadow: none;
-  color: rgba(10, 10, 10, 0.68);
+  color: var(--body);
 }
 
 .session-item:hover {
-  background: rgba(10, 10, 10, 0.045);
+  background: rgba(245, 240, 224, 0.68);
 }
 
 .session-item.active {
-  background: rgba(10, 10, 10, 0.075);
+  background: var(--surface-strong);
+  border-color: var(--hairline);
+}
+
+.session-item.active::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--brand-teal);
 }
 
 .session-item.active .session-title {
-  color: rgba(10, 10, 10, 0.86);
+  color: var(--ink);
   font-weight: 500;
 }
 
 .session-title {
   min-width: 0;
   flex: 1;
-  color: rgba(10, 10, 10, 0.68);
+  color: var(--body);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -259,14 +274,14 @@ button:disabled {
 
 .session-meta {
   flex: 0 0 auto;
-  color: rgba(10, 10, 10, 0.42);
+  color: var(--muted);
   font-family: inherit;
   font-size: 13px;
   white-space: nowrap;
 }
 
 .empty-list {
-  color: rgba(10, 10, 10, 0.45);
+  color: var(--muted);
   font-size: 13px;
   padding: 14px 8px;
 }
