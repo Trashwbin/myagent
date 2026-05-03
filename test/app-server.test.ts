@@ -187,6 +187,10 @@ describe("HTTP API", () => {
     expect(html).toContain("#fffaf0");
     expect(html).toContain("/assets/client.js");
     expect(html).toContain("Copy ID");
+    expect(html).toContain("Always this session");
+    expect(html).toContain("Always in workspace");
+    expect(html).toContain(">Deny</button>");
+    expect(html).not.toContain(">Abort</button>");
   });
 
   it("GET /assets/client.js returns bundled app client", async () => {
@@ -199,6 +203,11 @@ describe("HTTP API", () => {
     expect(js).toContain("localStorage");
     expect(js).toContain("activeSession");
     expect(js).toContain("__myAgentMarkdown");
+    expect(js).toContain("Create directory?");
+    expect(js).toContain("activeToolStack");
+    expect(js).toContain("rememberToolCall");
+    expect(js).not.toContain("JSON.stringify(request.input");
+    expect(js).not.toContain('querySelector(".tool-stack")');
     expect(js).not.toContain("react-markdown");
     expect(js.length).toBeLessThan(100_000);
   });

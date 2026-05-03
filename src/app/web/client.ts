@@ -10,6 +10,7 @@ const state = {
   streamEl: null,
   activeTurnEl: null,
   activeAssistantBody: null,
+  activeToolStack: null,
   toolEls: new Map(),
   toolInputs: new Map(),
   subscribed: new Set(),
@@ -29,6 +30,7 @@ const els = {
   newSession: document.getElementById("new-session"),
   copySession: document.getElementById("copy-session"),
   approvalPanel: document.getElementById("approval-panel"),
+  approvalTitle: document.getElementById("approval-title"),
   approvalText: document.getElementById("approval-text"),
 };
 
@@ -124,6 +126,7 @@ function clearTimeline() {
   state.streamEl = null;
   state.activeTurnEl = null;
   state.activeAssistantBody = null;
+  state.activeToolStack = null;
   state.toolEls.clear();
   state.toolInputs.clear();
   els.timeline.innerHTML = "";
@@ -153,6 +156,7 @@ function beginTurn() {
   state.activeTurnEl = turn;
   state.activeAssistantBody = null;
   state.streamEl = null;
+  state.activeToolStack = null;
   state.toolEls.clear();
   return turn;
 }
@@ -178,6 +182,10 @@ function messageBlock(kind, label, content, turn) {
   block.appendChild(head);
   block.appendChild(body);
   target.appendChild(block);
+  if (kind === "assistant") {
+    state.activeAssistantBody = body;
+    state.activeToolStack = null;
+  }
   scrollToBottom();
   return body;
 }
@@ -187,16 +195,8 @@ function userBlock(content) {
   return messageBlock("user", "You", content, turn);
 }
 
-function ensureAssistantBody() {
-  if (state.activeAssistantBody) return state.activeAssistantBody;
-  state.activeAssistantBody = messageBlock("assistant", "myAgent", "", ensureTurn());
-  return state.activeAssistantBody;
-}
-
 function assistantBlock(content) {
-  const body = ensureAssistantBody();
-  if (content) setAssistantContent(body, content);
-  return body;
+  return messageBlock("assistant", "myAgent", content || "", ensureTurn());
 }
 
 function markdownApi() {
@@ -315,6 +315,21 @@ function rememberedToolInput(id, name) {
   return state.toolInputs.get(toolKey(id, name));
 }
 
+function rememberToolCall(id, name, input) {
+  rememberToolInput(id, name, input);
+}
+
+function ensureToolStack() {
+  if (state.activeToolStack && state.activeToolStack.isConnected) {
+    return state.activeToolStack;
+  }
+  const stack = document.createElement("div");
+  stack.className = "tool-stack";
+  ensureTurn().appendChild(stack);
+  state.activeToolStack = stack;
+  return stack;
+}
+
 function buildToolHeader(input) {
   const header = document.createElement("span");
   header.className = "tool-header";
@@ -335,12 +350,7 @@ function upsertToolRow(input) {
   if (!row) {
     row = document.createElement("div");
     row.className = "tool-line";
-    let stack = ensureTurn().querySelector(".tool-stack");
-    if (!stack) {
-      stack = document.createElement("div");
-      stack.className = "tool-stack";
-      ensureTurn().appendChild(stack);
-    }
+    const stack = ensureToolStack();
     stack.appendChild(row);
     state.toolEls.set(key, row);
   }
@@ -405,6 +415,263 @@ function toolResult(message) {
     summary: summarizeToolResult(name, message.content, status),
     detail: message.content,
   });
+}
+
+function clearElement(node) {
+  while (node.firstChild) node.removeChild(node.firstChild);
+}
+
+function countTextMetrics(value) {
+  const text = String(value ?? "").replace(/\r\n?/g, "\n");
+  if (!text.trim()) return "empty";
+  const lines = text.split("\n");
+  return lines.length + " lines · " + text.length + " chars";
+}
+
+function previewText(value, maxLines = 8, maxChars = 900) {
+  const text = String(value ?? "").replace(/\r\n?/g, "\n").trim();
+  if (!text) return "";
+  const lines = text.split("\n");
+  let preview = lines.slice(0, maxLines).join("\n");
+  if (preview.length > maxChars) preview = preview.slice(0, maxChars - 3) + "...";
+  if (lines.length > maxLines) {
+    preview += "\n… +" + (lines.length - maxLines) + " more lines";
+  }
+  return preview;
+}
+
+function shellTokens(command) {
+  const text = String(command || "").trim();
+  const matches = text.match(/"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|[^\s]+/g) || [];
+  return matches.map((part) => {
+    if (
+      (part.startsWith('"') && part.endsWith('"')) ||
+      (part.startsWith("'") && part.endsWith("'"))
+    ) {
+      return part.slice(1, -1);
+    }
+    return part;
+  });
+}
+
+function nonFlagArgs(tokens) {
+  return tokens.filter((token) => token && !token.startsWith("-"));
+}
+
+function friendlyApprovalReason(toolName, reason, metadata) {
+  const text = String(reason || "");
+  if (toolName === "bash") {
+    if (metadata.intentKind === "fs_primitive" || text.includes("write-effect")) {
+      return "This command changes files and needs approval.";
+    }
+    if (metadata.externalDirectoryPattern) {
+      return "This command touches a location outside the workspace.";
+    }
+    if (metadata.sensitive) {
+      return "This command may access sensitive content.";
+    }
+    return "This shell command needs approval before it runs.";
+  }
+  if (toolName === "write_file" || toolName === "edit_file" || toolName === "apply_patch") {
+    return "This action modifies files in the workspace.";
+  }
+  if (metadata.externalDirectoryPattern) {
+    return "This action reads outside the workspace.";
+  }
+  if (metadata.sensitive) {
+    return "This action may access sensitive content.";
+  }
+  return text || "Approval is required before continuing.";
+}
+
+function summarizeBashApproval(input, metadata) {
+  const command = String(input.command || "");
+  const tokens = shellTokens(command);
+  const cmd = tokens[0] || "bash";
+  const args = nonFlagArgs(tokens.slice(1));
+  if (cmd === "mkdir") {
+    return {
+      heading: "Create directory?",
+      intent: "Bash · filesystem",
+      targetLabel: "Directory",
+      target: args.join(", "),
+      command,
+    };
+  }
+  if (cmd === "cp") {
+    return {
+      heading: "Copy file or directory?",
+      intent: "Bash · filesystem",
+      targetLabel: "Path",
+      target: args.slice(-2).join(" → "),
+      command,
+    };
+  }
+  if (cmd === "mv") {
+    return {
+      heading: "Move or rename path?",
+      intent: "Bash · filesystem",
+      targetLabel: "Path",
+      target: args.slice(-2).join(" → "),
+      command,
+    };
+  }
+  const intent = metadata.intentKind === "exec" ? "Bash · command" : "Bash" + (metadata.intentKind ? " · " + metadata.intentKind : "");
+  return {
+    heading: "Run shell command?",
+    intent,
+    targetLabel: "Command",
+    target: truncate(command, 220),
+    command,
+  };
+}
+
+function appendApprovalField(container, label, value) {
+  const field = document.createElement("div");
+  field.className = "approval-field";
+  const fieldLabel = document.createElement("div");
+  fieldLabel.className = "approval-label";
+  fieldLabel.textContent = label;
+  const fieldValue = document.createElement("div");
+  fieldValue.className = "approval-value";
+  fieldValue.textContent = value || "—";
+  field.appendChild(fieldLabel);
+  field.appendChild(fieldValue);
+  container.appendChild(field);
+}
+
+function summarizeApprovalRequest(request) {
+  const toolName = request.toolName || "tool";
+  const input = request.input && typeof request.input === "object" ? request.input : {};
+  const metadata = request.metadata && typeof request.metadata === "object" ? request.metadata : {};
+  const fields = [];
+  let heading = "Approve action?";
+  let intent = toolName;
+  let command = "";
+  let preview = "";
+  let previewLabel = "Input preview";
+
+  const addField = (label, value) => {
+    if (value === undefined || value === null || value === "") return;
+    fields.push({ label, value: String(value) });
+  };
+
+  if (metadata.sensitive) {
+    addField("Scope", "Sensitive content redacted");
+  }
+  if (metadata.externalDirectoryPattern) {
+    addField("External scope", metadata.externalDirectoryPattern);
+  }
+
+  switch (toolName) {
+    case "Read":
+    case "read_file": {
+      heading = "Read file?";
+      intent = "File read";
+      addField("Path", input.path || input.file);
+      break;
+    }
+    case "grep": {
+      heading = "Search files?";
+      intent = "Content search";
+      addField("Query", input.query || input.pattern);
+      addField("Scope", input.path || input.include);
+      break;
+    }
+    case "glob": {
+      heading = "Find files?";
+      intent = "File discovery";
+      addField("Pattern", input.pattern);
+      addField("Scope", input.path);
+      break;
+    }
+    case "find_up": {
+      heading = "Find ancestor file?";
+      intent = "Project discovery";
+      addField("Name", input.name);
+      addField("Start path", input.start_path);
+      addField("Stop path", input.stop);
+      break;
+    }
+    case "list_dir": {
+      heading = "List directory?";
+      intent = "Directory read";
+      addField("Path", input.path || ".");
+      break;
+    }
+    case "bash": {
+      const bash = summarizeBashApproval(input, metadata);
+      heading = bash.heading;
+      intent = bash.intent;
+      command = bash.command;
+      addField(bash.targetLabel, bash.target);
+      break;
+    }
+    case "write_file": {
+      heading = "Write file?";
+      intent = "File mutation";
+      addField("Path", input.path);
+      const content = typeof input.content === "string" ? input.content : "";
+      addField("Content", metadata.sensitive ? "hidden" : countTextMetrics(content));
+      if (!metadata.sensitive) {
+        preview = previewText(content, 10, 1000);
+        previewLabel = "File content preview";
+      }
+      break;
+    }
+    case "edit_file": {
+      heading = "Edit file?";
+      intent = "File mutation";
+      addField("Path", input.path);
+      if (metadata.sensitive) {
+        addField("Change", "hidden");
+      } else {
+        const oldText = typeof input.old_string === "string" ? input.old_string : "";
+        const newText = typeof input.new_string === "string" ? input.new_string : "";
+        addField("Old string", countTextMetrics(oldText));
+        addField("New string", countTextMetrics(newText));
+        preview = [
+          "Old:",
+          previewText(oldText, 4, 420) || "—",
+          "",
+          "New:",
+          previewText(newText, 4, 420) || "—",
+        ].join("\n");
+        previewLabel = "Change preview";
+      }
+      break;
+    }
+    case "apply_patch": {
+      heading = "Apply patch?";
+      intent = "File mutation";
+      const patch = typeof input.patch === "string" ? input.patch : "";
+      addField("Patch", summarizePatch(patch));
+      if (!metadata.sensitive) {
+        preview = previewText(patch, 12, 1200);
+        previewLabel = "Patch preview";
+      }
+      break;
+    }
+    default: {
+      heading = "Approve " + toolName + "?";
+      intent = toolName;
+      const target = toolTarget(toolName, input);
+      if (target) addField("Target", target);
+      const fallback = summarizeInput(input);
+      if (fallback && fallback !== target) addField("Input", fallback);
+      break;
+    }
+  }
+
+  return {
+    heading,
+    intent,
+    reason: friendlyApprovalReason(toolName, request.reason, metadata),
+    fields,
+    command,
+    preview,
+    previewLabel,
+  };
 }
 
 function statusBlock(text, kind = "info") {
@@ -504,6 +771,7 @@ function renderMessages(messages) {
   state.activeTurnEl = null;
   state.activeAssistantBody = null;
   state.streamEl = null;
+  state.activeToolStack = null;
   state.toolEls.clear();
 }
 
@@ -597,6 +865,7 @@ function handleServerMessage(msg) {
     state.streamEl = null;
     state.activeTurnEl = null;
     state.activeAssistantBody = null;
+    state.activeToolStack = null;
     state.toolEls.clear();
     loadSessions().catch(() => {});
   }
@@ -610,7 +879,7 @@ function handleTurnEvent(ev) {
       scrollToBottom();
       break;
     case "tool_call":
-      toolQueued(ev.id, ev.name, ev.input);
+      rememberToolCall(ev.id, ev.name, ev.input);
       break;
     case "tool_approval_required":
       toolApproval(ev.id, ev.name, ev.input, ev.reason);
@@ -646,7 +915,51 @@ function handleTurnEvent(ev) {
 function showApproval(msg) {
   state.pendingApprovalId = msg.approvalId;
   const request = msg.request || {};
-  els.approvalText.textContent = (request.toolName || "tool") + "\n" + (request.reason || "") + "\n\n" + JSON.stringify(request.input ?? {}, null, 2);
+  const summary = summarizeApprovalRequest(request);
+  clearElement(els.approvalText);
+  els.approvalTitle.textContent = summary.heading;
+
+  const head = document.createElement("div");
+  head.className = "approval-head";
+  const intent = document.createElement("div");
+  intent.className = "approval-intent";
+  intent.textContent = summary.intent;
+  const reason = document.createElement("div");
+  reason.className = "approval-reason";
+  reason.textContent = summary.reason;
+  head.appendChild(intent);
+  head.appendChild(reason);
+  els.approvalText.appendChild(head);
+
+  if (summary.fields.length) {
+    const grid = document.createElement("div");
+    grid.className = "approval-fields";
+    for (const field of summary.fields) {
+      appendApprovalField(grid, field.label, field.value);
+    }
+    els.approvalText.appendChild(grid);
+  }
+
+  if (summary.command) {
+    const command = document.createElement("code");
+    command.className = "approval-command";
+    command.textContent = summary.command;
+    els.approvalText.appendChild(command);
+  }
+
+  if (summary.preview) {
+    const details = document.createElement("details");
+    details.className = "approval-details";
+    const summaryEl = document.createElement("summary");
+    summaryEl.textContent = summary.previewLabel;
+    const pre = document.createElement("pre");
+    pre.className = "approval-preview";
+    pre.textContent = summary.preview;
+    details.appendChild(summaryEl);
+    details.appendChild(pre);
+    els.approvalText.appendChild(details);
+  }
+
   els.approvalPanel.classList.add("visible");
 }
 

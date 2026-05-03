@@ -54,13 +54,13 @@ export const EMBEDDED_HTML = `<!DOCTYPE html>
 </div>
 
 <section class="approval" id="approval-panel">
-  <div class="approval-title">Approval required</div>
+  <div class="approval-title" id="approval-title">Approval required</div>
   <div class="approval-body" id="approval-text"></div>
   <div class="approval-actions">
     <button class="primary" data-decision="allow_once">Allow once</button>
-    <button data-decision="allow_for_session">Allow session</button>
-    <button data-decision="allow_for_workspace">Allow workspace</button>
-    <button class="danger" data-decision="abort">Abort</button>
+    <button data-decision="allow_for_session">Always this session</button>
+    <button data-decision="allow_for_workspace">Always in workspace</button>
+    <button class="danger" data-decision="abort">Deny</button>
   </div>
 </section>
 
