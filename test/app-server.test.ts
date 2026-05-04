@@ -213,8 +213,9 @@ describe("HTTP API", () => {
     expect(html).toContain("Deny");
     expect(html).toContain("allow_for_workspace");
     expect(html).toContain("data-index=\"0\"");
+    expect(html).toContain("Submit <span>↵</span>");
+    expect(html).toContain("data-submit-approval");
     expect(html).not.toContain("Skip");
-    expect(html).not.toContain("Submit");
     expect(html).not.toContain(">Abort</button>");
   });
 
@@ -239,6 +240,8 @@ describe("HTTP API", () => {
     expect(js).toContain("isActiveSessionRunning");
     expect(js).toContain("handleApprovalKey");
     expect(js).toContain("setApprovalSelection");
+    expect(js).toContain("selectedApprovalDecision");
+    expect(js).toContain("data-submit-approval");
     expect(js).toContain("ArrowDown");
     expect(js).not.toContain("JSON.stringify(request.input");
     expect(js).not.toContain("Show diff");

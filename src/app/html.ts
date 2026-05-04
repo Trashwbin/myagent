@@ -62,6 +62,9 @@ export const EMBEDDED_HTML = `<!DOCTYPE html>
     <button class="approval-option" data-index="2" data-decision="allow_for_workspace"><span class="option-index">3.</span><span>Allow workspace</span></button>
     <button class="approval-option muted" data-index="3" data-decision="abort"><span class="option-index">4.</span><span>Deny</span></button>
   </div>
+  <div class="approval-submit">
+    <button class="submit-button" id="approval-submit" data-submit-approval>Submit <span>↵</span></button>
+  </div>
 </section>
 
 <script type="module" src="/assets/client.js"></script>

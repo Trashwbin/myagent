@@ -34,6 +34,7 @@ const els = {
   approvalTitle: document.getElementById("approval-title"),
   approvalText: document.getElementById("approval-text"),
   approvalOptions: document.getElementById("approval-options"),
+  approvalSubmit: document.getElementById("approval-submit"),
 };
 
 function activeSessionKey() {
@@ -1256,25 +1257,21 @@ function handleApprovalKey(event) {
   if (event.key === "1") {
     event.preventDefault();
     setApprovalSelection(0);
-    decide("allow_once");
     return;
   }
   if (event.key === "2") {
     event.preventDefault();
     setApprovalSelection(1);
-    decide("allow_for_session");
     return;
   }
   if (event.key === "3") {
     event.preventDefault();
     setApprovalSelection(2);
-    decide("allow_for_workspace");
     return;
   }
   if (event.key === "4") {
     event.preventDefault();
     setApprovalSelection(3);
-    decide("abort");
     return;
   }
   if (event.key === "ArrowDown") {
@@ -1347,11 +1344,15 @@ els.copySession.addEventListener("click", async () => {
 });
 els.approvalPanel.addEventListener("click", (event) => {
   const target = event.target;
+  const submit = target && target.closest ? target.closest("[data-submit-approval]") : null;
+  if (submit) {
+    decide(selectedApprovalDecision());
+    return;
+  }
   const option = target && target.closest ? target.closest("[data-decision]") : null;
   if (!option) return;
   const rawIndex = option.dataset.index;
   if (rawIndex !== undefined) setApprovalSelection(Number(rawIndex));
-  decide(option.dataset.decision);
 });
 window.addEventListener("keydown", handleApprovalKey, true);
 

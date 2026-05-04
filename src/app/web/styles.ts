@@ -1053,6 +1053,27 @@ textarea:focus {
   font-size: 12px;
 }
 
+.approval-submit {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.submit-button {
+  min-height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--on-primary);
+  padding: 0 14px;
+  font-weight: 600;
+}
+
+.submit-button span {
+  opacity: 0.8;
+  margin-left: 4px;
+}
+
 @media (max-width: 760px) {
   .app {
     grid-template-columns: 1fr;
