@@ -9,6 +9,7 @@ export type Message = {
   toolCallId?: string;
   toolName?: string;
   toolCalls?: Array<{ id: string; name: string; input: unknown }>;
+  checkpointId?: string;
 };
 
 export type ToolSchema = {

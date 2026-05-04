@@ -330,6 +330,21 @@ function checkEditFile(
     metadata.sensitive = true;
   }
 
+  if (mode === "auto" && !sensitive) {
+    return {
+      behavior: "allow",
+      reason: "workspace file edit in auto mode",
+      resolvedInput: {
+        path,
+        resolvedPath: pathInfo.absolutePath,
+        old_string,
+        new_string,
+        replace_all,
+      },
+      metadata,
+    };
+  }
+
   return {
     behavior: "ask",
     reason: "file edits require approval",
@@ -380,6 +395,20 @@ function checkWriteFile(
     metadata.sensitive = true;
   }
 
+  if (mode === "auto" && !sensitive) {
+    return {
+      behavior: "allow",
+      reason: "workspace file write in auto mode",
+      resolvedInput: {
+        path,
+        content,
+        resolvedPath: pathInfo.absolutePath,
+        realPath: pathInfo.realPath,
+      },
+      metadata,
+    };
+  }
+
   return {
     behavior: "ask",
     reason: "file writes require approval",
@@ -412,14 +441,29 @@ function checkApplyPatch(
     };
   }
 
+  const prepared = result.prepared;
+  const sensitive = prepared.metadata.sensitive === true;
+
+  if (mode === "auto" && !sensitive) {
+    return {
+      behavior: "allow",
+      reason: "workspace patch in auto mode",
+      resolvedInput: {
+        patch: prepared.patch,
+        resolvedPaths: prepared.resolvedPaths,
+      },
+      metadata: prepared.metadata,
+    };
+  }
+
   return {
     behavior: "ask",
     reason: "patch requires approval",
     resolvedInput: {
-      patch: result.prepared.patch,
-      resolvedPaths: result.prepared.resolvedPaths,
+      patch: prepared.patch,
+      resolvedPaths: prepared.resolvedPaths,
     },
-    metadata: result.prepared.metadata,
+    metadata: prepared.metadata,
   };
 }
 

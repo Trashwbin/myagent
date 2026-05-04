@@ -291,8 +291,14 @@ function resultStatus(content) {
   return "ok";
 }
 
+function stripCheckpointMarker(content) {
+  return String(content || "")
+    .replace(/\n?\[checkpoint: [^\]]+\]\s*$/g, "")
+    .trim();
+}
+
 function summarizeToolResult(name, content, status) {
-  const text = String(content || "").trim();
+  const text = stripCheckpointMarker(content);
   const lines = text ? text.split("\n").filter(Boolean) : [];
   if (name === "Read" || name === "read_file") return lines.length + " lines";
   if (name === "grep") return lines.length + " matches";
@@ -344,6 +350,128 @@ function buildToolHeader(input) {
   return header;
 }
 
+function isMutationToolName(name) {
+  return name === "edit_file" || name === "write_file" || name === "apply_patch";
+}
+
+function parseUnifiedDiffFiles(text) {
+  const raw = String(text || "").replace(/\n$/, "");
+  const lines = raw.split("\n");
+  const files = [];
+  let current = null;
+
+  for (const line of lines) {
+    const oldMatch = line.match(/^--- a\/(.+)$/);
+    if (oldMatch) {
+      if (current) files.push(current);
+      current = { path: cleanDiffPath(oldMatch[1]), lines: [line], additions: 0, deletions: 0 };
+      continue;
+    }
+    if (!current) continue;
+    current.lines.push(line);
+    const newMatch = line.match(/^\+\+\+ b\/(.+)$/);
+    if (newMatch) {
+      const nextPath = cleanDiffPath(newMatch[1]);
+      if (nextPath && nextPath !== "/dev/null") current.path = nextPath;
+      continue;
+    }
+    if (line.startsWith("+") && !line.startsWith("+++")) current.additions++;
+    if (line.startsWith("-") && !line.startsWith("---")) current.deletions++;
+  }
+
+  if (current) files.push(current);
+  return files
+    .filter((file) => file.lines.some((line) => line.startsWith("@@")))
+    .map((file) => ({
+      path: file.path,
+      additions: file.additions,
+      deletions: file.deletions,
+      diff: file.lines.join("\n"),
+    }));
+}
+
+function extractToolDiff(text) {
+  const raw = String(text || "").trim();
+  const index = raw.search(/^(?:--git a\/.* b\/.*\n)?--- a\//m);
+  if (index < 0) return { summary: raw, files: [] };
+  const summary = raw.slice(0, index).trim();
+  const diff = raw.slice(index).trim();
+  return { summary, files: parseUnifiedDiffFiles(diff) };
+}
+
+function cleanDiffPath(path) {
+  return String(path || "")
+    .replace(/^\/+/, "")
+    .replace(/^Users\/[^/]+\/code\/pre\/myAgents\/myAgent\//, "")
+    .replace(/^\/dev\/null$/, "/dev/null");
+}
+
+function appendDiffFileHeader(container, file) {
+  const header = document.createElement("div");
+  header.className = "diff-file-header";
+  const fileName = document.createElement("span");
+  fileName.className = "diff-file-name";
+  fileName.textContent = file.sensitive ? file.path + " (sensitive)" : file.path;
+  const stat = document.createElement("span");
+  stat.className = "diff-file-stat";
+  appendApprovalStat(stat, file);
+  header.appendChild(fileName);
+  header.appendChild(stat);
+  container.appendChild(header);
+}
+
+function appendFileDiffCards(container, files, className, options = {}) {
+  const list = document.createElement("div");
+  list.className = className;
+  const nested = options.nested === true;
+
+  for (const file of files) {
+    if (!nested) {
+      const card = document.createElement("div");
+      card.className = "diff-file";
+      appendDiffFileHeader(card, file);
+      if (file.diff) appendInlineDiff(card, file.diff);
+      list.appendChild(card);
+      continue;
+    }
+
+    const details = document.createElement("details");
+    details.className = "diff-file";
+    const summary = document.createElement("summary");
+    const fileName = document.createElement("span");
+    fileName.className = "diff-file-name";
+    fileName.textContent = file.sensitive ? file.path + " (sensitive)" : file.path;
+    const stat = document.createElement("span");
+    stat.className = "diff-file-stat";
+    appendApprovalStat(stat, file);
+    summary.appendChild(fileName);
+    summary.appendChild(stat);
+    details.appendChild(summary);
+    if (file.diff) appendInlineDiff(details, file.diff);
+    list.appendChild(details);
+  }
+
+  container.appendChild(list);
+}
+
+function summarizeDiffFiles(files) {
+  let additions = 0;
+  let deletions = 0;
+  for (const file of files) {
+    additions += file.additions || 0;
+    deletions += file.deletions || 0;
+  }
+  const fileCount = files.length;
+  const prefix = fileCount > 1 ? fileCount + " files " : "";
+  return prefix + "+" + additions + " -" + deletions;
+}
+
+function titleFromDiffFiles(name, files, fallbackInput) {
+  if (!files.length) return toolTitle(name, fallbackInput);
+  if (files.length === 1) return name + " " + files[0].path;
+  return name + " " + files.length + " files";
+}
+
 function upsertToolRow(input) {
   const key = toolKey(input.id, input.name);
   let row = state.toolEls.get(key);
@@ -359,7 +487,7 @@ function upsertToolRow(input) {
   row.className = "tool-line " + status;
   row.replaceChildren();
 
-  if (input.detail) {
+  if (input.diffFiles && input.diffFiles.length) {
     const details = document.createElement("details");
     details.className = "tool-details";
     const s = document.createElement("summary");
@@ -371,10 +499,8 @@ function upsertToolRow(input) {
     });
     s.appendChild(caret);
     s.appendChild(buildToolHeader(input));
-    const pre = document.createElement("pre");
-    pre.textContent = input.detail;
     details.appendChild(s);
-    details.appendChild(pre);
+    appendFileDiffCards(details, input.diffFiles, "tool-diff-list");
     row.appendChild(details);
   } else {
     row.appendChild(buildToolHeader(input));
@@ -407,37 +533,24 @@ function toolResult(message) {
   const name = message.toolName || "tool";
   const status = resultStatus(message.content);
   const input = rememberedToolInput(message.toolCallId, name);
+  const detail = stripCheckpointMarker(message.content);
+  const parsedDiff = isMutationToolName(name) ? extractToolDiff(detail) : { summary: "", files: [] };
+  const summary = parsedDiff.files.length
+    ? summarizeDiffFiles(parsedDiff.files)
+    : summarizeToolResult(name, message.content, status);
   upsertToolRow({
     id: message.toolCallId,
     name,
     status,
-    title: toolTitle(name, input),
-    summary: summarizeToolResult(name, message.content, status),
-    detail: message.content,
+    title: titleFromDiffFiles(name, parsedDiff.files, input),
+    summary,
+    detail: "",
+    diffFiles: parsedDiff.files,
   });
 }
 
 function clearElement(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
-}
-
-function countTextMetrics(value) {
-  const text = String(value ?? "").replace(/\r\n?/g, "\n");
-  if (!text.trim()) return "empty";
-  const lines = text.split("\n");
-  return lines.length + " lines · " + text.length + " chars";
-}
-
-function previewText(value, maxLines = 8, maxChars = 900) {
-  const text = String(value ?? "").replace(/\r\n?/g, "\n").trim();
-  if (!text) return "";
-  const lines = text.split("\n");
-  let preview = lines.slice(0, maxLines).join("\n");
-  if (preview.length > maxChars) preview = preview.slice(0, maxChars - 3) + "...";
-  if (lines.length > maxLines) {
-    preview += "\n… +" + (lines.length - maxLines) + " more lines";
-  }
-  return preview;
 }
 
 function shellTokens(command) {
@@ -540,7 +653,146 @@ function appendApprovalField(container, label, value) {
   container.appendChild(field);
 }
 
+function appendApprovalStat(container, file) {
+  const add = document.createElement("span");
+  add.className = "stat-add";
+  add.textContent = "+" + (file.additions || 0);
+  const del = document.createElement("span");
+  del.className = "stat-del";
+  del.textContent = "-" + (file.deletions || 0);
+  container.appendChild(add);
+  container.appendChild(del);
+}
+
+function diffLineClass(line) {
+  if (line.startsWith("@@")) return "hunk";
+  if (line.startsWith("+++") || line.startsWith("---")) return "file";
+  if (line.startsWith("+")) return "add";
+  if (line.startsWith("-")) return "del";
+  return "ctx";
+}
+
+function parseHunkHeader(line) {
+  const match = String(line).match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+  if (!match) return null;
+  return {
+    oldLine: Number(match[1]),
+    newLine: Number(match[2]),
+  };
+}
+
+function appendDiffRow(container, kind, number, marker, code) {
+  const row = document.createElement("div");
+  row.className = "diff-row " + kind;
+  const gutter = document.createElement("span");
+  gutter.className = "diff-gutter";
+  gutter.textContent = number ? String(number) : "";
+  const markerEl = document.createElement("span");
+  markerEl.className = "diff-marker";
+  markerEl.textContent = marker || "";
+  const codeEl = document.createElement("span");
+  codeEl.className = "diff-code";
+  codeEl.textContent = code || " ";
+  row.appendChild(gutter);
+  row.appendChild(markerEl);
+  row.appendChild(codeEl);
+  container.appendChild(row);
+}
+
+function appendInlineDiff(container, diff) {
+  const diffEl = document.createElement("div");
+  diffEl.className = "approval-inline-diff";
+  let oldLine = 0;
+  let newLine = 0;
+
+  const lines = String(diff || "").replace(/\n$/, "").split("\n");
+  for (const rawLine of lines) {
+    if (rawLine.startsWith("---") || rawLine.startsWith("+++")) {
+      continue;
+    }
+    const hunk = parseHunkHeader(rawLine);
+    if (hunk) {
+      oldLine = hunk.oldLine;
+      newLine = hunk.newLine;
+      appendDiffRow(diffEl, "hunk", "", "", rawLine);
+      continue;
+    }
+
+    const kind = diffLineClass(rawLine);
+    if (kind === "add") {
+      appendDiffRow(diffEl, kind, newLine, "+", rawLine.slice(1));
+      newLine++;
+      continue;
+    }
+    if (kind === "del") {
+      appendDiffRow(diffEl, kind, oldLine, "-", rawLine.slice(1));
+      oldLine++;
+      continue;
+    }
+
+    const text = rawLine.startsWith(" ") ? rawLine.slice(1) : rawLine;
+    appendDiffRow(diffEl, "ctx", newLine || oldLine, "", text);
+    oldLine++;
+    newLine++;
+  }
+  container.appendChild(diffEl);
+}
+
+function appendApprovalFiles(container, files) {
+  appendFileDiffCards(container, files, "approval-file-list", { nested: true });
+}
+
 function summarizeApprovalRequest(request) {
+  const display = request.display;
+  if (display && typeof display === "object" && display.kind) {
+    return summarizeFromDisplay(display);
+  }
+  return summarizeFromLegacy(request);
+}
+
+function summarizeFromDisplay(display) {
+  if (display.kind === "command") {
+    return {
+      heading: display.prompt,
+      intent: display.intent || "command",
+      reason: "",
+      fields: [],
+      command: display.subject,
+      preview: "",
+      previewLabel: "",
+    };
+  }
+  if (display.kind === "mutation") {
+    return {
+      heading: display.prompt,
+      intent: "mutation",
+      reason: "",
+      fields: [],
+      command: "",
+      preview: "",
+      previewLabel: "",
+      files: display.files,
+    };
+  }
+  if (display.kind === "access") {
+    const fields = [{ label: "Path", value: display.subject }];
+    if (display.scope) {
+      fields.push({ label: "Scope", value: display.scope });
+    }
+    return {
+      heading: display.prompt,
+      intent: "access",
+      reason: "",
+      fields,
+      command: "",
+      preview: "",
+      previewLabel: "",
+    };
+  }
+  return { heading: "Approve action?", intent: "", reason: "", fields: [], command: "", preview: "", previewLabel: "" };
+}
+
+function summarizeFromLegacy(request) {
   const toolName = request.toolName || "tool";
   const input = request.input && typeof request.input === "object" ? request.input : {};
   const metadata = request.metadata && typeof request.metadata === "object" ? request.metadata : {};
@@ -611,34 +863,12 @@ function summarizeApprovalRequest(request) {
       heading = "Write file?";
       intent = "File mutation";
       addField("Path", input.path);
-      const content = typeof input.content === "string" ? input.content : "";
-      addField("Content", metadata.sensitive ? "hidden" : countTextMetrics(content));
-      if (!metadata.sensitive) {
-        preview = previewText(content, 10, 1000);
-        previewLabel = "File content preview";
-      }
       break;
     }
     case "edit_file": {
       heading = "Edit file?";
       intent = "File mutation";
       addField("Path", input.path);
-      if (metadata.sensitive) {
-        addField("Change", "hidden");
-      } else {
-        const oldText = typeof input.old_string === "string" ? input.old_string : "";
-        const newText = typeof input.new_string === "string" ? input.new_string : "";
-        addField("Old string", countTextMetrics(oldText));
-        addField("New string", countTextMetrics(newText));
-        preview = [
-          "Old:",
-          previewText(oldText, 4, 420) || "—",
-          "",
-          "New:",
-          previewText(newText, 4, 420) || "—",
-        ].join("\n");
-        previewLabel = "Change preview";
-      }
       break;
     }
     case "apply_patch": {
@@ -646,10 +876,6 @@ function summarizeApprovalRequest(request) {
       intent = "File mutation";
       const patch = typeof input.patch === "string" ? input.patch : "";
       addField("Patch", summarizePatch(patch));
-      if (!metadata.sensitive) {
-        preview = previewText(patch, 12, 1200);
-        previewLabel = "Patch preview";
-      }
       break;
     }
     default: {
@@ -882,7 +1108,7 @@ function handleTurnEvent(ev) {
       rememberToolCall(ev.id, ev.name, ev.input);
       break;
     case "tool_approval_required":
-      toolApproval(ev.id, ev.name, ev.input, ev.reason);
+      toolApproval(ev.id, ev.name, ev.input, ev.display ? (ev.display.prompt || ev.reason) : ev.reason);
       break;
     case "assistant_message":
       if (state.streamEl) {
@@ -919,17 +1145,12 @@ function showApproval(msg) {
   clearElement(els.approvalText);
   els.approvalTitle.textContent = summary.heading;
 
-  const head = document.createElement("div");
-  head.className = "approval-head";
-  const intent = document.createElement("div");
-  intent.className = "approval-intent";
-  intent.textContent = summary.intent;
-  const reason = document.createElement("div");
-  reason.className = "approval-reason";
-  reason.textContent = summary.reason;
-  head.appendChild(intent);
-  head.appendChild(reason);
-  els.approvalText.appendChild(head);
+  if (summary.intent) {
+    const intentEl = document.createElement("div");
+    intentEl.className = "approval-intent";
+    intentEl.textContent = summary.intent;
+    els.approvalText.appendChild(intentEl);
+  }
 
   if (summary.fields.length) {
     const grid = document.createElement("div");
@@ -941,13 +1162,15 @@ function showApproval(msg) {
   }
 
   if (summary.command) {
-    const command = document.createElement("code");
-    command.className = "approval-command";
-    command.textContent = summary.command;
-    els.approvalText.appendChild(command);
+    const commandEl = document.createElement("code");
+    commandEl.className = "approval-command";
+    commandEl.textContent = summary.command;
+    els.approvalText.appendChild(commandEl);
   }
 
-  if (summary.preview) {
+  if (summary.files && summary.files.length) {
+    appendApprovalFiles(els.approvalText, summary.files);
+  } else if (summary.preview) {
     const details = document.createElement("details");
     details.className = "approval-details";
     const summaryEl = document.createElement("summary");

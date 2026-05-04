@@ -207,7 +207,7 @@ describe("mutation tools metadata shape consistency", () => {
     const decision = checkToolPermission(
       "edit_file",
       { path: "app.ts", old_string: "hello", new_string: "world" },
-      "auto",
+      "on-request",
       tmp,
     );
     expect(decision.behavior).toBe("ask");
@@ -223,7 +223,7 @@ describe("mutation tools metadata shape consistency", () => {
     const decision = checkToolPermission(
       "write_file",
       { path: "new.txt", content: "hello" },
-      "auto",
+      "on-request",
       tmp,
     );
     expect(decision.behavior).toBe("ask");
@@ -258,7 +258,7 @@ describe("mutation tools metadata shape consistency", () => {
 +content
 *** End Patch`;
 
-    const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
+    const decision = checkToolPermission("apply_patch", { patch }, "on-request", tmp);
     expect(decision.behavior).toBe("ask");
     expect(decision.metadata?.operation).toBe("patch");
     expect(decision.metadata?.affectedPaths).toEqual(["new.txt"]);
@@ -325,19 +325,18 @@ describe("mutation tools metadata shape consistency", () => {
     await rm(tmp, { recursive: true });
   });
 
-  it("edit_file does not require read-before-write", async () => {
+  it("edit_file auto-allows in auto mode without read-before-write", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-mp-"));
     await writeFile(join(tmp, "app.ts"), "hello\n");
 
-    // No read_state — edit should still work (not gated by read-before-write)
+    // No read_state — edit should still be allowed in auto mode (not denied)
     const decision = checkToolPermission(
       "edit_file",
       { path: "app.ts", old_string: "hello", new_string: "world" },
       "auto",
       tmp,
     );
-    // edit_file should ask for approval (not deny due to missing read state)
-    expect(decision.behavior).toBe("ask");
+    expect(decision.behavior).toBe("allow");
 
     await rm(tmp, { recursive: true });
   });

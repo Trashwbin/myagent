@@ -204,9 +204,15 @@ describe("HTTP API", () => {
     expect(js).toContain("activeSession");
     expect(js).toContain("__myAgentMarkdown");
     expect(js).toContain("Create directory?");
+    expect(js).toContain("approval-file-list");
+    expect(js).toContain("approval-inline-diff");
+    expect(js).toContain("tool-diff-list");
+    expect(js).toContain("parseUnifiedDiffFiles");
+    expect(js).toContain("Do you want to make these changes?");
     expect(js).toContain("activeToolStack");
     expect(js).toContain("rememberToolCall");
     expect(js).not.toContain("JSON.stringify(request.input");
+    expect(js).not.toContain("Show diff");
     expect(js).not.toContain('querySelector(".tool-stack")');
     expect(js).not.toContain("react-markdown");
     expect(js.length).toBeLessThan(100_000);

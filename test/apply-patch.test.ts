@@ -1095,9 +1095,9 @@ describe("apply_patch tool", () => {
 +new
 *** End Patch`;
 
-    // Verify permission passes
+    // In auto mode, non-sensitive workspace patch is auto-allowed
     const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
-    expect(decision.behavior).toBe("ask");
+    expect(decision.behavior).toBe("allow");
     expect(decision.metadata?.additions).toBe(1);
     expect(decision.metadata?.deletions).toBe(1);
 
@@ -1330,8 +1330,9 @@ describe("apply_patch permission metadata", () => {
 +new
 *** End Patch`;
 
+    // In auto mode, non-sensitive patch is auto-allowed
     const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
-    expect(decision.behavior).toBe("ask");
+    expect(decision.behavior).toBe("allow");
     expect(decision.metadata?.diff).toContain("+new");
     expect(decision.metadata?.additions).toBeGreaterThan(0);
 
@@ -1869,8 +1870,9 @@ describe("apply_patch move permission", () => {
 +updated
 *** End Patch`;
 
+    // In auto mode, non-sensitive workspace move is auto-allowed
     const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
-    expect(decision.behavior).toBe("ask");
+    expect(decision.behavior).toBe("allow");
     expect(decision.metadata?.moves).toEqual([{ from: "src.txt", to: "dest.txt" }]);
     expect(decision.metadata?.affectedPaths).toContain("src.txt");
     expect(decision.metadata?.affectedPaths).toContain("dest.txt");
@@ -1910,8 +1912,9 @@ describe("apply_patch move permission", () => {
 +updated
 *** End Patch`;
 
+    // In auto mode, non-sensitive workspace move is auto-allowed
     const decision = checkToolPermission("apply_patch", { patch }, "auto", tmp);
-    expect(decision.behavior).toBe("ask");
+    expect(decision.behavior).toBe("allow");
     const resolved = decision.resolvedInput as { resolvedPaths: Record<string, string> };
     expect(resolved.resolvedPaths["src.txt"]).toBeDefined();
     expect(resolved.resolvedPaths["dest.txt"]).toBeDefined();

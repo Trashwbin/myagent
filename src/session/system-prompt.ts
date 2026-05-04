@@ -19,7 +19,6 @@ export function buildSystemPrompt(cwd: string): string {
     "",
     "Mutation recovery:",
     "- When a file mutation fails and the error tells you to re-read the file, use the read to gather updated context, then continue the modification or explain why you cannot continue.",
-    "- When a mutation tool succeeds and a checkpoint id is present, mention the checkpoint id.",
     "",
     "Behavior:",
     "- Prefer small, direct tool calls.",

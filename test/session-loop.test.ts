@@ -246,7 +246,7 @@ describe("Session loop (runSession wrapper)", () => {
       provider,
       registry,
       [{ role: "user", content: "edit a.txt" }],
-      { cwd: tmp, approval: "auto" },
+      { cwd: tmp, approval: "on-request" },
     );
 
     expect(transcript[2].content).toContain("requires approval");
@@ -293,7 +293,8 @@ describe("Session loop (runSession wrapper)", () => {
     );
 
     expect(transcript[2].content).toContain("Edited a.txt");
-    expect(transcript[2].content).toContain("[checkpoint:");
+    expect(transcript[2].content).not.toContain("[checkpoint:");
+    expect(transcript[2].checkpointId).toBeTruthy();
 
     const content = await readFile(join(tmp, "a.txt"), "utf-8");
     expect(content).toBe("new");
@@ -330,7 +331,7 @@ describe("Session loop (runSession wrapper)", () => {
       [{ role: "user", content: "edit a.txt" }],
       {
         cwd: tmp,
-        approval: "auto",
+        approval: "on-request",
         approvalHandler: async () => "abort",
       },
     );
@@ -377,13 +378,13 @@ describe("Session loop (runSession wrapper)", () => {
       },
     );
 
-    const match = transcript[2].content.match(/\[checkpoint: ([^\]]+)\]/);
-    expect(match).toBeTruthy();
+    expect(transcript[2].content).not.toContain("[checkpoint:");
+    expect(transcript[2].checkpointId).toBeTruthy();
 
     expect(await readFile(join(tmp, "data.txt"), "utf-8")).toBe("v2");
 
     const { restoreCheckpoint } = await import("../src/workspace/checkpoint.js");
-    await restoreCheckpoint(tmp, match![1]);
+    await restoreCheckpoint(tmp, transcript[2].checkpointId!);
 
     expect(await readFile(join(tmp, "data.txt"), "utf-8")).toBe("v1");
 
@@ -870,7 +871,7 @@ describe("Approval memory and abort", () => {
       return "allow_for_session" as const;
     };
 
-    // First call: triggers approval handler
+    // First call: triggers approval handler (on-request mode)
     const provider1 = new FakeProvider([
       [
         {
@@ -888,7 +889,7 @@ describe("Approval memory and abort", () => {
     ]);
     const session = makeSession(tmp);
     const r1 = await runTurn(provider1, registry, session, "edit", {
-      approval: "auto",
+      approval: "on-request",
       approvalHandler: handler,
       sessionApprovalRules: sessionRules,
     });
@@ -912,7 +913,7 @@ describe("Approval memory and abort", () => {
       ],
     ]);
     const r2 = await runTurn(provider2, registry, r1.session, "edit again", {
-      approval: "auto",
+      approval: "on-request",
       approvalHandler: handler,
       sessionApprovalRules: sessionRules,
     });
@@ -933,7 +934,7 @@ describe("Approval memory and abort", () => {
     const registry = new ToolRegistry();
     registry.register(editFileTool);
 
-    // First session: approve for workspace
+    // First session: approve for workspace (on-request mode)
     const provider1 = new FakeProvider([
       [
         {
@@ -951,7 +952,7 @@ describe("Approval memory and abort", () => {
     ]);
     const session1 = makeSession(tmp);
     await runTurn(provider1, registry, session1, "edit", {
-      approval: "auto",
+      approval: "on-request",
       approvalHandler: async () => "allow_for_workspace",
       sessionApprovalRules: [],
       store,
@@ -982,7 +983,7 @@ describe("Approval memory and abort", () => {
     let handlerCalled = false;
     const session2 = makeSession(tmp);
     const r2 = await runTurn(provider2, registry, session2, "edit again", {
-      approval: "auto",
+      approval: "on-request",
       approvalHandler: async () => {
         handlerCalled = true;
         return "allow_once";
@@ -1010,7 +1011,7 @@ describe("Approval memory and abort", () => {
     const registry = new ToolRegistry();
     registry.register(editFileTool);
 
-    // Approve in workspace 1
+    // Approve in workspace 1 (on-request mode so handler is invoked)
     const provider1 = new FakeProvider([
       [
         {
@@ -1027,13 +1028,13 @@ describe("Approval memory and abort", () => {
       ],
     ]);
     await runTurn(provider1, registry, makeSession(tmp1), "edit", {
-      approval: "auto",
+      approval: "on-request",
       approvalHandler: async () => "allow_for_workspace",
       sessionApprovalRules: [],
       store,
     });
 
-    // Same tool in workspace 2: should NOT auto-allow
+    // Same tool in workspace 2: should NOT auto-allow via workspace rule
     await writeFile(join(tmp2, "f.txt"), "content");
     let handlerCalled = false;
     const provider2 = new FakeProvider([
@@ -1052,7 +1053,7 @@ describe("Approval memory and abort", () => {
       ],
     ]);
     await runTurn(provider2, registry, makeSession(tmp2), "edit", {
-      approval: "auto",
+      approval: "on-request",
       approvalHandler: async () => {
         handlerCalled = true;
         return "allow_once";
@@ -1167,9 +1168,9 @@ describe("Approval memory and abort", () => {
     });
 
     // Checkpoint was created on first edit
-    expect(r1.newMessages.find((m) => m.role === "tool_result")?.content).toContain(
-      "[checkpoint:",
-    );
+    const firstEdit = r1.newMessages.find((m) => m.role === "tool_result");
+    expect(firstEdit?.content).not.toContain("[checkpoint:");
+    expect(firstEdit?.checkpointId).toBeTruthy();
 
     // Second edit: auto-allowed by session rule, still gets checkpoint
     const provider2 = new FakeProvider([
@@ -1194,7 +1195,8 @@ describe("Approval memory and abort", () => {
 
     const result = r2.newMessages.find((m) => m.role === "tool_result");
     expect(result?.content).toContain("Edited data.txt");
-    expect(result?.content).toContain("[checkpoint:");
+    expect(result?.content).not.toContain("[checkpoint:");
+    expect(result?.checkpointId).toBeTruthy();
 
     await rm(tmp, { recursive: true, force: true });
   });
@@ -2400,7 +2402,8 @@ describe("Approval memory and abort", () => {
       (m) => m.role === "tool_result" && m.toolName === "write_file",
     );
     expect(writeResult?.content).toContain("Wrote data.txt");
-    expect(writeResult?.content).toContain("[checkpoint:");
+    expect(writeResult?.content).not.toContain("[checkpoint:");
+    expect(writeResult?.checkpointId).toBeTruthy();
 
     // File was actually written
     const content = await readFile(join(tmp, "data.txt"), "utf-8");
@@ -2446,13 +2449,12 @@ describe("Approval memory and abort", () => {
     const result = newMessages.find(
       (m) => m.role === "tool_result" && m.toolName === "write_file",
     );
-    expect(result?.content).toContain("[checkpoint:");
+    expect(result?.content).not.toContain("[checkpoint:");
+    expect(result?.checkpointId).toBeTruthy();
 
     // Restore checkpoint
-    const match = result!.content.match(/\[checkpoint: ([^\]]+)\]/);
-    expect(match).toBeTruthy();
     const { restoreCheckpoint } = await import("../src/workspace/checkpoint.js");
-    await restoreCheckpoint(tmp, match![1]);
+    await restoreCheckpoint(tmp, result!.checkpointId!);
 
     // New file should be deleted
     const { existsSync } = await import("node:fs");
@@ -2509,12 +2511,12 @@ describe("Approval memory and abort", () => {
     const result = newMessages.find(
       (m) => m.role === "tool_result" && m.toolName === "write_file",
     );
-    expect(result?.content).toContain("[checkpoint:");
+    expect(result?.content).not.toContain("[checkpoint:");
+    expect(result?.checkpointId).toBeTruthy();
 
     // Restore
-    const match = result!.content.match(/\[checkpoint: ([^\]]+)\]/);
     const { restoreCheckpoint } = await import("../src/workspace/checkpoint.js");
-    await restoreCheckpoint(tmp, match![1]);
+    await restoreCheckpoint(tmp, result!.checkpointId!);
 
     // Content should be original
     expect(await readFile(join(tmp, "data.txt"), "utf-8")).toBe("original");
@@ -2591,8 +2593,9 @@ describe("Approval memory and abort", () => {
     const firstWrite = r1.newMessages.find(
       (m) => m.role === "tool_result" && m.toolName === "write_file",
     );
-    expect(firstWrite?.content).toContain("[checkpoint:");
-    expect(sessionRules.length).toBeGreaterThanOrEqual(1);
+    expect(firstWrite?.content).not.toContain("[checkpoint:");
+    expect(firstWrite?.checkpointId).toBeTruthy();
+    // In auto mode, write_file is auto-allowed (no session rule needed)
 
     // Second read/write: write is auto-allowed, still checkpoint
     const provider2 = new FakeProvider([
@@ -2623,7 +2626,8 @@ describe("Approval memory and abort", () => {
     const secondWrite = r2.newMessages.find(
       (m) => m.role === "tool_result" && m.toolName === "write_file",
     );
-    expect(secondWrite?.content).toContain("[checkpoint:");
+    expect(secondWrite?.content).not.toContain("[checkpoint:");
+    expect(secondWrite?.checkpointId).toBeTruthy();
 
     await rm(tmp, { recursive: true, force: true });
   });
@@ -2785,6 +2789,7 @@ describe("Approval memory and abort", () => {
     );
     expect(result?.content).toContain("must be read with read_file");
     expect(result?.content).not.toContain("[checkpoint:");
+    expect(result?.checkpointId).toBeUndefined();
 
     await rm(tmp, { recursive: true, force: true });
   });
@@ -2809,7 +2814,7 @@ describe("Approval memory and abort", () => {
     ]);
 
     await runTurn(provider, registry, makeSession(tmp), "write", {
-      approval: "auto",
+      approval: "on-request",
       approvalHandler: async () => "abort",
       onEvent: (event) => {
         events.push(event);
@@ -2872,7 +2877,8 @@ describe("Approval memory and abort", () => {
       (m) => m.role === "tool_result" && m.toolName === "apply_patch",
     );
     expect(result?.content).toContain("Applied patch");
-    expect(result?.content).toContain("[checkpoint:");
+    expect(result?.content).not.toContain("[checkpoint:");
+    expect(result?.checkpointId).toBeTruthy();
 
     // Verify changes applied
     expect(await readFile(join(tmp, "a.txt"), "utf-8")).toBe("new-a");
@@ -2880,10 +2886,8 @@ describe("Approval memory and abort", () => {
     expect(await readFile(join(tmp, "c.txt"), "utf-8")).toBe("new-c");
 
     // Restore checkpoint
-    const match = result!.content.match(/\[checkpoint: ([^\]]+)\]/);
-    expect(match).toBeTruthy();
     const { restoreCheckpoint } = await import("../src/workspace/checkpoint.js");
-    await restoreCheckpoint(tmp, match![1]);
+    await restoreCheckpoint(tmp, result!.checkpointId!);
 
     // Verify restoration
     expect(await readFile(join(tmp, "a.txt"), "utf-8")).toBe("old-a");
@@ -2961,7 +2965,7 @@ describe("Approval memory and abort", () => {
     ]);
 
     await runTurn(provider, registry, makeSession(tmp), "patch", {
-      approval: "auto",
+      approval: "on-request",
       approvalHandler: async () => "abort",
       onEvent: (event) => {
         events.push(event);
@@ -3072,7 +3076,7 @@ describe("Approval memory and abort", () => {
     ]);
 
     const { newMessages } = await runTurn(provider, registry, makeSession(tmp), "patch", {
-      approval: "auto",
+      approval: "on-request",
     });
 
     const result = newMessages.find(

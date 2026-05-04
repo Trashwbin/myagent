@@ -37,7 +37,7 @@ describe("system prompt", () => {
     expect(prompt).toContain("gather updated context");
     expect(prompt).toContain("continue the modification");
     expect(prompt).toContain("explain why you cannot continue");
-    expect(prompt).toContain("checkpoint id");
+    expect(prompt).not.toContain("checkpoint id");
   });
 
   it("does not contain tool-specific usage details", () => {

@@ -136,6 +136,31 @@ describe("appendMessages + getSession", () => {
     await cleanup();
   });
 
+  it("roundtrips tool_result checkpointId without putting it in content", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/ws" });
+    store.appendMessages(session.id, [
+      {
+        role: "tool_result",
+        content: "Wrote data.txt",
+        toolCallId: "tc2",
+        toolName: "write_file",
+        checkpointId: "abc123",
+      },
+    ]);
+    const restored = store.getSession(session.id)!;
+    expect(restored.messages[0]).toEqual({
+      role: "tool_result",
+      content: "Wrote data.txt",
+      toolCallId: "tc2",
+      toolName: "write_file",
+      checkpointId: "abc123",
+    });
+    expect(restored.messages[0].content).not.toContain("checkpoint");
+    await cleanup();
+  });
+
   it("preserves seq ordering across multiple appends", async () => {
     const base = await tmpBaseDir();
     const store = openTestStore(base);

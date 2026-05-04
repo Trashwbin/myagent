@@ -19,11 +19,21 @@ describe("Permission rules", () => {
     expect(result.behavior).toBe("allow");
   });
 
-  it("asks for edit_file in auto mode", () => {
+  it("allows edit_file in auto mode for non-sensitive workspace file", () => {
     const result = checkPermission(
       "edit_file",
       { path: "a.txt", old_string: "x", new_string: "y" },
       "auto",
+      CWD,
+    );
+    expect(result.behavior).toBe("allow");
+  });
+
+  it("asks for edit_file in on-request mode", () => {
+    const result = checkPermission(
+      "edit_file",
+      { path: "a.txt", old_string: "x", new_string: "y" },
+      "on-request",
       CWD,
     );
     expect(result.behavior).toBe("ask");
@@ -51,16 +61,6 @@ describe("Permission rules", () => {
       expect(result.behavior, `expected deny for ${toolName}`).toBe("deny");
       expect(result.reason).toContain("approval mode is never");
     }
-  });
-
-  it("asks for edit_file in on-request mode", () => {
-    const result = checkPermission(
-      "edit_file",
-      { path: "a.txt", old_string: "x", new_string: "y" },
-      "on-request",
-      CWD,
-    );
-    expect(result.behavior).toBe("ask");
   });
 
   it("allows safe bash commands", () => {

@@ -20,6 +20,8 @@ import { createCheckpoint } from "../workspace/checkpoint.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { ReadStateTracker } from "../tools/file-mutation.js";
 import { isMutationTool, getCheckpointPaths } from "../tools/mutation-policy.js";
+import type { ApprovalDisplay } from "../permission/display.js";
+import { buildApprovalDisplay } from "../permission/display.js";
 
 export type ApprovalRequest = {
   toolName: string;
@@ -27,6 +29,7 @@ export type ApprovalRequest = {
   reason: string;
   suggestedPattern?: string;
   metadata?: Record<string, unknown>;
+  display?: ApprovalDisplay;
 };
 
 export type SessionState = {
@@ -81,6 +84,7 @@ export type TurnEvent =
       input: unknown;
       reason: string;
       metadata?: Record<string, unknown>;
+      display?: ApprovalDisplay;
     }
   | {
       type: "tool_approval_decision";
@@ -259,6 +263,8 @@ async function runAgentLoop(
           if (onEvent) await onEvent({ type: "tool_result", message: msg });
           continue;
         } else {
+          const display = buildApprovalDisplay(tc.name, tc.input, decision);
+
           if (onEvent)
             await onEvent({
               type: "tool_approval_required",
@@ -267,6 +273,7 @@ async function runAgentLoop(
               input: tc.input,
               reason: decision.reason,
               metadata: decision.metadata,
+              display,
             });
 
           const response = await options.approvalHandler({
@@ -275,6 +282,7 @@ async function runAgentLoop(
             reason: decision.reason,
             suggestedPattern: extDirPattern ?? pattern,
             metadata: decision.metadata,
+            display,
           });
 
           const eventDecision = response === "abort" ? "deny" : "allow";
@@ -423,16 +431,14 @@ async function runAgentLoop(
         permissionResolved: decision.resolvedInput !== undefined,
         readState,
       });
-      let content = result.ok ? result.output : `Error: ${result.output}`;
-      if (result.ok && checkpointId) {
-        content += `\n[checkpoint: ${checkpointId}]`;
-      }
+      const content = result.ok ? result.output : `Error: ${result.output}`;
 
       const resultMsg: Message = {
         role: "tool_result",
         toolCallId: tc.id,
         toolName: tc.name,
         content,
+        checkpointId: result.ok ? checkpointId : undefined,
       };
       messages.push(resultMsg);
       newMessages.push(resultMsg);
