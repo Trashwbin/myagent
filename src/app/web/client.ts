@@ -5,8 +5,9 @@ const state = {
   activeSessionId: null,
   ws: null,
   wsOpen: false,
-  running: false,
+  runningSessions: new Set(),
   pendingApprovalId: null,
+  selectedApprovalIndex: 0,
   streamEl: null,
   activeTurnEl: null,
   activeAssistantBody: null,
@@ -32,6 +33,8 @@ const els = {
   approvalPanel: document.getElementById("approval-panel"),
   approvalTitle: document.getElementById("approval-title"),
   approvalText: document.getElementById("approval-text"),
+  approvalOptions: document.getElementById("approval-options"),
+  approvalSubmit: document.getElementById("approval-submit"),
 };
 
 function activeSessionKey() {
@@ -974,6 +977,32 @@ function renderHeader() {
   els.sessionId.title = state.activeSessionId || "";
 }
 
+function isActiveSessionRunning() {
+  return !!(state.activeSessionId && state.runningSessions.has(state.activeSessionId));
+}
+
+function renderRunningState() {
+  const running = isActiveSessionRunning();
+  els.send.disabled = running;
+  els.input.disabled = running;
+  setStatus(
+    running ? "Running" : state.wsOpen ? "Connected" : "Disconnected",
+    running ? "running" : state.wsOpen ? "connected" : "",
+  );
+}
+
+function setSessionRunning(sessionId, value) {
+  if (!sessionId) return;
+  if (value) {
+    state.runningSessions.add(sessionId);
+  } else {
+    state.runningSessions.delete(sessionId);
+  }
+  if (sessionId === state.activeSessionId) {
+    renderRunningState();
+  }
+}
+
 function renderMessages(messages) {
   clearTimeline();
   if (!messages.length) {
@@ -1042,6 +1071,7 @@ async function selectSession(sessionId) {
   renderHeader();
   await loadMessages(sessionId);
   subscribe(sessionId);
+  renderRunningState();
   els.input.focus();
 }
 
@@ -1050,13 +1080,13 @@ function connect() {
   state.ws = new WebSocket(proto + "//" + location.host + "/ws");
   state.ws.onopen = () => {
     state.wsOpen = true;
-    setStatus("Connected", "connected");
+    renderRunningState();
     if (state.activeSessionId) subscribe(state.activeSessionId);
   };
   state.ws.onclose = () => {
     state.wsOpen = false;
     state.subscribed.clear();
-    setStatus("Disconnected", "");
+    renderRunningState();
     setTimeout(connect, 1200);
   };
   state.ws.onerror = () => setStatus("Connection error", "");
@@ -1076,9 +1106,28 @@ function subscribe(sessionId) {
 
 function handleServerMessage(msg) {
   if (msg.type === "ready") return;
+  if (msg.type === "turn_finished" && msg.sessionId) {
+    setSessionRunning(msg.sessionId, false);
+    if (msg.sessionId !== state.activeSessionId) {
+      loadSessions().catch(() => {});
+      return;
+    }
+    state.streamEl = null;
+    state.activeTurnEl = null;
+    state.activeAssistantBody = null;
+    state.activeToolStack = null;
+    state.toolEls.clear();
+    loadSessions().catch(() => {});
+    return;
+  }
   if (msg.type === "error") {
+    if (msg.sessionId) setSessionRunning(msg.sessionId, false);
+    else renderRunningState();
+    if (msg.sessionId && msg.sessionId !== state.activeSessionId) {
+      loadSessions().catch(() => {});
+      return;
+    }
     errorBlock(msg.message);
-    setRunning(false);
     return;
   }
   if (msg.sessionId && msg.sessionId !== state.activeSessionId) return;
@@ -1086,14 +1135,6 @@ function handleServerMessage(msg) {
     handleTurnEvent(msg.event);
   } else if (msg.type === "approval_required") {
     showApproval(msg);
-  } else if (msg.type === "turn_finished") {
-    setRunning(false);
-    state.streamEl = null;
-    state.activeTurnEl = null;
-    state.activeAssistantBody = null;
-    state.activeToolStack = null;
-    state.toolEls.clear();
-    loadSessions().catch(() => {});
   }
 }
 
@@ -1138,8 +1179,28 @@ function handleTurnEvent(ev) {
   }
 }
 
+function approvalOptionButtons() {
+  return Array.from(els.approvalOptions.querySelectorAll("[data-decision]"));
+}
+
+function setApprovalSelection(index) {
+  const options = approvalOptionButtons();
+  if (!options.length) return;
+  const next = (index + options.length) % options.length;
+  state.selectedApprovalIndex = next;
+  options.forEach((option, i) => {
+    option.classList.toggle("selected", i === next);
+  });
+}
+
+function selectedApprovalDecision() {
+  const option = approvalOptionButtons()[state.selectedApprovalIndex];
+  return option ? option.dataset.decision : "allow_once";
+}
+
 function showApproval(msg) {
   state.pendingApprovalId = msg.approvalId;
+  state.selectedApprovalIndex = 0;
   const request = msg.request || {};
   const summary = summarizeApprovalRequest(request);
   clearElement(els.approvalText);
@@ -1184,6 +1245,7 @@ function showApproval(msg) {
   }
 
   els.approvalPanel.classList.add("visible");
+  setApprovalSelection(0);
 }
 
 function decide(decision) {
@@ -1197,25 +1259,60 @@ function decide(decision) {
   els.approvalPanel.classList.remove("visible");
 }
 
-function setRunning(value) {
-  state.running = value;
-  els.send.disabled = value;
-  els.input.disabled = value;
-  setStatus(value ? "Running" : state.wsOpen ? "Connected" : "Disconnected", value ? "running" : state.wsOpen ? "connected" : "");
+function handleApprovalKey(event) {
+  if (!state.pendingApprovalId || !els.approvalPanel.classList.contains("visible")) return;
+  if (event.key === "1") {
+    event.preventDefault();
+    setApprovalSelection(0);
+    decide("allow_once");
+    return;
+  }
+  if (event.key === "2") {
+    event.preventDefault();
+    setApprovalSelection(1);
+    decide("allow_for_session");
+    return;
+  }
+  if (event.key === "3") {
+    event.preventDefault();
+    setApprovalSelection(2);
+    decide("abort");
+    return;
+  }
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    setApprovalSelection(state.selectedApprovalIndex + 1);
+    return;
+  }
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    setApprovalSelection(state.selectedApprovalIndex - 1);
+    return;
+  }
+  if (event.key === "Enter") {
+    event.preventDefault();
+    decide(selectedApprovalDecision());
+    return;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    decide("abort");
+  }
 }
 
 function send() {
   const text = els.input.value.trim();
-  if (!text || !state.activeSessionId || !state.wsOpen) return;
+  if (!text || !state.activeSessionId || !state.wsOpen || isActiveSessionRunning()) return;
+  const sessionId = state.activeSessionId;
   els.timeline.querySelector(".empty")?.remove();
   userBlock(text);
   state.ws.send(JSON.stringify({
     type: "user_message",
-    sessionId: state.activeSessionId,
+    sessionId,
     text,
   }));
   els.input.value = "";
-  setRunning(true);
+  setSessionRunning(sessionId, true);
 }
 
 async function bootstrap() {
@@ -1243,7 +1340,7 @@ els.send.addEventListener("click", send);
 els.input.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
-    if (!state.running) send();
+    if (!isActiveSessionRunning()) send();
   }
 });
 els.copySession.addEventListener("click", async () => {
@@ -1252,8 +1349,13 @@ els.copySession.addEventListener("click", async () => {
 });
 els.approvalPanel.addEventListener("click", (event) => {
   const target = event.target;
-  if (target && target.dataset && target.dataset.decision) decide(target.dataset.decision);
+  const option = target && target.closest ? target.closest("[data-decision]") : null;
+  if (!option) return;
+  const rawIndex = option.dataset.index;
+  if (rawIndex !== undefined) setApprovalSelection(Number(rawIndex));
+  decide(option.dataset.decision);
 });
+window.addEventListener("keydown", handleApprovalKey, true);
 
 bootstrap().catch((err) => {
   setStatus("Error", "");

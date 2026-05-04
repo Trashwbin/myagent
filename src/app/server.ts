@@ -176,7 +176,7 @@ export function createAppServer(deps: AppServerDeps): Server {
         case "user_message": {
           const result = manager.handleUserMessage(msg.sessionId, msg.text);
           if (!result.ok) {
-            ws.send(JSON.stringify({ type: "error", message: result.error, code: "TURN_REJECTED" }));
+            ws.send(JSON.stringify({ type: "error", sessionId: msg.sessionId, message: result.error, code: "TURN_REJECTED" }));
           }
           break;
         }
@@ -190,7 +190,7 @@ export function createAppServer(deps: AppServerDeps): Server {
         }
 
         case "cancel_turn": {
-          ws.send(JSON.stringify({ type: "error", message: "Cancel not supported yet", code: "UNSUPPORTED" }));
+          ws.send(JSON.stringify({ type: "error", sessionId: msg.sessionId, message: "Cancel not supported yet", code: "UNSUPPORTED" }));
           break;
         }
       }

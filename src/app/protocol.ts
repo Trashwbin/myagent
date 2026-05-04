@@ -12,7 +12,7 @@ export type ServerMessage =
   | { type: "turn_event"; sessionId: string; event: TurnEvent }
   | { type: "approval_required"; sessionId: string; approvalId: string; request: ApprovalRequest }
   | { type: "turn_finished"; sessionId: string }
-  | { type: "error"; message: string; code?: string };
+  | { type: "error"; sessionId?: string; message: string; code?: string };
 
 export function parseClientMessage(raw: unknown): ClientMessage | { type: "error"; message: string } {
   if (typeof raw !== "object" || raw === null) {

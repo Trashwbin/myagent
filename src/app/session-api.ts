@@ -8,6 +8,7 @@ import { runTurn } from "../session/loop.js";
 import { ReadStateTracker } from "../tools/file-mutation.js";
 import type { ServerMessage } from "./protocol.js";
 import { randomUUID } from "node:crypto";
+import type { Message } from "../model/types.js";
 
 type PendingApproval = {
   id: string;
@@ -93,6 +94,14 @@ export class SessionManager {
     if (!active) return { ok: false, error: "Session not found" };
     if (active.activeTurn) return { ok: false, error: "Turn already active for this session" };
 
+    const persistedUserMessage: Message = { role: "user", content: text };
+    const sessionForRun: SessionState = {
+      ...active.session,
+      messages: [...active.session.messages],
+    };
+    this.store.appendMessages(sessionId, [persistedUserMessage]);
+    active.session.messages.push(persistedUserMessage);
+
     const approvalHandler = (request: ApprovalRequest): Promise<ApprovalResponse> => {
       return new Promise((resolve) => {
         const id = randomUUID();
@@ -119,7 +128,7 @@ export class SessionManager {
         const { session: updated, newMessages } = await runTurn(
           this.provider,
           this.registry,
-          active.session,
+          sessionForRun,
           text,
           {
             approval: this.approval,
@@ -132,10 +141,14 @@ export class SessionManager {
           },
         );
         Object.assign(active.session, updated);
-        this.store.appendMessages(active.session.id, newMessages);
+        const followupMessages = newMessages.slice(1);
+        if (followupMessages.length > 0) {
+          this.store.appendMessages(active.session.id, followupMessages);
+        }
       } catch {
         this.sendEvent(sessionId, {
           type: "error",
+          sessionId,
           message: "Turn failed",
           code: "TURN_ERROR",
         });

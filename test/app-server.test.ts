@@ -1,6 +1,7 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { parseClientMessage } from "../src/app/protocol.js";
 import { createAppServer, findAvailablePort } from "../src/app/server.js";
+import { SessionManager } from "../src/app/session-api.js";
 import type { Provider } from "../src/model/provider.js";
 import type { TranscriptStore } from "../src/storage/store.js";
 import { openStore } from "../src/storage/store.js";
@@ -46,6 +47,25 @@ function noopProvider(): Provider {
       yield { type: "stop" as const, reason: "end_turn" as const };
     },
   };
+}
+
+function delayedProvider(blocker: Promise<void>): Provider {
+  return {
+    name: "test",
+    async *stream() {
+      await blocker;
+      yield { type: "text_delta" as const, text: "ok" };
+      yield { type: "stop" as const, reason: "end_turn" as const };
+    },
+  };
+}
+
+async function waitForCondition(check: () => boolean, message: string): Promise<void> {
+  for (let i = 0; i < 100; i++) {
+    if (check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(message);
 }
 
 async function startTestServer(store: TranscriptStore) {
@@ -187,9 +207,11 @@ describe("HTTP API", () => {
     expect(html).toContain("#fffaf0");
     expect(html).toContain("/assets/client.js");
     expect(html).toContain("Copy ID");
-    expect(html).toContain("Always this session");
-    expect(html).toContain("Always in workspace");
-    expect(html).toContain(">Deny</button>");
+    expect(html).toContain("Yes, and don't ask again this session");
+    expect(html).toContain("Submit");
+    expect(html).toContain("Skip");
+    expect(html).toContain("Submit <span>↵</span>");
+    expect(html).toContain("data-index=\"0\"");
     expect(html).not.toContain(">Abort</button>");
   });
 
@@ -208,9 +230,13 @@ describe("HTTP API", () => {
     expect(js).toContain("approval-inline-diff");
     expect(js).toContain("tool-diff-list");
     expect(js).toContain("parseUnifiedDiffFiles");
-    expect(js).toContain("Do you want to make these changes?");
     expect(js).toContain("activeToolStack");
     expect(js).toContain("rememberToolCall");
+    expect(js).toContain("runningSessions");
+    expect(js).toContain("isActiveSessionRunning");
+    expect(js).toContain("handleApprovalKey");
+    expect(js).toContain("setApprovalSelection");
+    expect(js).toContain("ArrowDown");
     expect(js).not.toContain("JSON.stringify(request.input");
     expect(js).not.toContain("Show diff");
     expect(js).not.toContain('querySelector(".tool-stack")');
@@ -314,6 +340,85 @@ describe("WebSocket", () => {
       ),
     ).toBe(true);
     expect(store.getSession(session.id)?.messages.some((m) => m.role === "user")).toBe(true);
+  });
+});
+
+describe("SessionManager", () => {
+  it("persists the user message before the provider turn completes", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/test" });
+    let release!: () => void;
+    const blocker = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const manager = new SessionManager({
+      provider: delayedProvider(blocker),
+      registry: new ToolRegistry(),
+      approval: "auto",
+      store,
+      sendEvent: () => {},
+    });
+    manager.registerSession(session);
+
+    const result = manager.handleUserMessage(session.id, "hi");
+
+    expect(result).toEqual({ ok: true });
+    expect(manager.hasActiveTurn(session.id)).toBe(true);
+    expect(store.getSession(session.id)?.messages).toEqual([
+      { role: "user", content: "hi" },
+    ]);
+
+    release();
+    await waitForCondition(
+      () => !manager.hasActiveTurn(session.id),
+      "turn did not finish",
+    );
+
+    expect(store.getSession(session.id)?.messages).toEqual([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "ok" },
+    ]);
+  });
+
+  it("allows different sessions to run turns concurrently", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const first = store.createSession({ workspaceRoot: "/test" });
+    const second = store.createSession({ workspaceRoot: "/test" });
+    let release!: () => void;
+    const blocker = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const manager = new SessionManager({
+      provider: delayedProvider(blocker),
+      registry: new ToolRegistry(),
+      approval: "auto",
+      store,
+      sendEvent: () => {},
+    });
+    manager.registerSession(first);
+    manager.registerSession(second);
+
+    expect(manager.handleUserMessage(first.id, "first")).toEqual({ ok: true });
+    expect(manager.handleUserMessage(second.id, "second")).toEqual({ ok: true });
+    expect(manager.hasActiveTurn(first.id)).toBe(true);
+    expect(manager.hasActiveTurn(second.id)).toBe(true);
+
+    release();
+    await waitForCondition(
+      () => !manager.hasActiveTurn(first.id) && !manager.hasActiveTurn(second.id),
+      "turns did not finish",
+    );
+
+    expect(store.getSession(first.id)?.messages.map((m) => m.content)).toEqual([
+      "first",
+      "ok",
+    ]);
+    expect(store.getSession(second.id)?.messages.map((m) => m.content)).toEqual([
+      "second",
+      "ok",
+    ]);
   });
 });
 

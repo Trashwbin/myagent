@@ -1026,24 +1026,73 @@ textarea:focus {
   overflow: auto;
 }
 
-.approval-actions {
-  display: flex;
+.approval-options {
+  display: grid;
+  gap: 4px;
+  margin-top: 18px;
+}
+
+.approval-option {
+  width: 100%;
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
   gap: 8px;
-  margin-top: 14px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.approval-actions .danger {
-  order: -1;
+  border: 0;
+  border-radius: 10px;
   background: transparent;
-  border-color: transparent;
-  color: var(--muted);
+  color: var(--ink);
+  text-align: left;
+  padding: 7px 10px;
 }
 
-.approval-actions .danger:hover {
-  border-color: var(--hairline);
-  color: var(--ink);
+.approval-option:hover,
+.approval-option.selected {
+  background: rgba(10, 10, 10, 0.055);
+}
+
+.approval-option.muted {
+  color: var(--muted-soft);
+}
+
+.option-index {
+  color: var(--muted-soft);
+}
+
+.option-hint {
+  color: var(--muted-soft);
+  font-size: 12px;
+}
+
+.approval-submit {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.text-button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 4px;
+}
+
+.submit-button {
+  min-height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--on-primary);
+  padding: 0 14px;
+  font-weight: 600;
+}
+
+.submit-button span {
+  opacity: 0.8;
+  margin-left: 4px;
 }
 
 @media (max-width: 760px) {

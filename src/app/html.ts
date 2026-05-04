@@ -56,11 +56,14 @@ export const EMBEDDED_HTML = `<!DOCTYPE html>
 <section class="approval" id="approval-panel">
   <div class="approval-title" id="approval-title">Approval required</div>
   <div class="approval-body" id="approval-text"></div>
-  <div class="approval-actions">
-    <button class="primary" data-decision="allow_once">Allow once</button>
-    <button data-decision="allow_for_session">Always this session</button>
-    <button data-decision="allow_for_workspace">Always in workspace</button>
-    <button class="danger" data-decision="abort">Deny</button>
+  <div class="approval-options" id="approval-options">
+    <button class="approval-option selected" data-index="0" data-decision="allow_once"><span class="option-index">1.</span><span>Yes</span><span class="option-hint">↑ ↓</span></button>
+    <button class="approval-option" data-index="1" data-decision="allow_for_session"><span class="option-index">2.</span><span>Yes, and don't ask again this session</span></button>
+    <button class="approval-option muted" data-index="2" data-decision="abort"><span class="option-index">3.</span><span>No, and tell myAgent what to do differently</span></button>
+  </div>
+  <div class="approval-submit">
+    <button class="text-button" data-decision="abort">Skip</button>
+    <button class="submit-button" id="approval-submit" data-submit-approval>Submit <span>↵</span></button>
   </div>
 </section>
 
