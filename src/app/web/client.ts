@@ -34,7 +34,6 @@ const els = {
   approvalTitle: document.getElementById("approval-title"),
   approvalText: document.getElementById("approval-text"),
   approvalOptions: document.getElementById("approval-options"),
-  approvalSubmit: document.getElementById("approval-submit"),
 };
 
 function activeSessionKey() {
@@ -1206,13 +1205,6 @@ function showApproval(msg) {
   clearElement(els.approvalText);
   els.approvalTitle.textContent = summary.heading;
 
-  if (summary.intent) {
-    const intentEl = document.createElement("div");
-    intentEl.className = "approval-intent";
-    intentEl.textContent = summary.intent;
-    els.approvalText.appendChild(intentEl);
-  }
-
   if (summary.fields.length) {
     const grid = document.createElement("div");
     grid.className = "approval-fields";
@@ -1276,6 +1268,12 @@ function handleApprovalKey(event) {
   if (event.key === "3") {
     event.preventDefault();
     setApprovalSelection(2);
+    decide("allow_for_workspace");
+    return;
+  }
+  if (event.key === "4") {
+    event.preventDefault();
+    setApprovalSelection(3);
     decide("abort");
     return;
   }

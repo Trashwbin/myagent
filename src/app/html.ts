@@ -57,13 +57,10 @@ export const EMBEDDED_HTML = `<!DOCTYPE html>
   <div class="approval-title" id="approval-title">Approval required</div>
   <div class="approval-body" id="approval-text"></div>
   <div class="approval-options" id="approval-options">
-    <button class="approval-option selected" data-index="0" data-decision="allow_once"><span class="option-index">1.</span><span>Yes</span><span class="option-hint">↑ ↓</span></button>
-    <button class="approval-option" data-index="1" data-decision="allow_for_session"><span class="option-index">2.</span><span>Yes, and don't ask again this session</span></button>
-    <button class="approval-option muted" data-index="2" data-decision="abort"><span class="option-index">3.</span><span>No, and tell myAgent what to do differently</span></button>
-  </div>
-  <div class="approval-submit">
-    <button class="text-button" data-decision="abort">Skip</button>
-    <button class="submit-button" id="approval-submit" data-submit-approval>Submit <span>↵</span></button>
+    <button class="approval-option selected" data-index="0" data-decision="allow_once"><span class="option-index">1.</span><span>Allow once</span><span class="option-hint">↑ ↓</span></button>
+    <button class="approval-option" data-index="1" data-decision="allow_for_session"><span class="option-index">2.</span><span>Allow session</span></button>
+    <button class="approval-option" data-index="2" data-decision="allow_for_workspace"><span class="option-index">3.</span><span>Allow workspace</span></button>
+    <button class="approval-option muted" data-index="3" data-decision="abort"><span class="option-index">4.</span><span>Deny</span></button>
   </div>
 </section>
 

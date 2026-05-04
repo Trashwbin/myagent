@@ -778,18 +778,6 @@ textarea:focus {
   gap: 6px;
 }
 
-.approval-intent {
-  width: fit-content;
-  color: var(--body);
-  font-weight: 600;
-  font-size: 12px;
-  line-height: 1;
-  border: 1px solid var(--hairline);
-  border-radius: 999px;
-  background: var(--canvas);
-  padding: 6px 9px;
-}
-
 .approval-reason {
   color: var(--muted);
   font-size: 13px;
@@ -1063,36 +1051,6 @@ textarea:focus {
 .option-hint {
   color: var(--muted-soft);
   font-size: 12px;
-}
-
-.approval-submit {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 12px;
-  margin-top: 10px;
-}
-
-.text-button {
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  padding: 8px 4px;
-}
-
-.submit-button {
-  min-height: 34px;
-  border-radius: 999px;
-  border: 1px solid var(--ink);
-  background: var(--ink);
-  color: var(--on-primary);
-  padding: 0 14px;
-  font-weight: 600;
-}
-
-.submit-button span {
-  opacity: 0.8;
-  margin-left: 4px;
 }
 
 @media (max-width: 760px) {

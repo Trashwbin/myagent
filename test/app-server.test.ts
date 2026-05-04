@@ -207,11 +207,14 @@ describe("HTTP API", () => {
     expect(html).toContain("#fffaf0");
     expect(html).toContain("/assets/client.js");
     expect(html).toContain("Copy ID");
-    expect(html).toContain("Yes, and don't ask again this session");
-    expect(html).toContain("Submit");
-    expect(html).toContain("Skip");
-    expect(html).toContain("Submit <span>↵</span>");
+    expect(html).toContain("Allow once");
+    expect(html).toContain("Allow session");
+    expect(html).toContain("Allow workspace");
+    expect(html).toContain("Deny");
+    expect(html).toContain("allow_for_workspace");
     expect(html).toContain("data-index=\"0\"");
+    expect(html).not.toContain("Skip");
+    expect(html).not.toContain("Submit");
     expect(html).not.toContain(">Abort</button>");
   });
 
