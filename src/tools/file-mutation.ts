@@ -1,5 +1,3 @@
-import { basename } from "node:path";
-
 // --- Read state tracking ---
 
 export type ReadFileState = {
@@ -257,8 +255,8 @@ export function computeDiff(
     if (op.type === "delete") deletions++;
   }
 
-  const name = basename(filePath);
-  const header = `--- a/${name}\n+++ b/${name}`;
+  const normalizedPath = String(filePath || "").replace(/\\/g, "/");
+  const header = `--- a/${normalizedPath}\n+++ b/${normalizedPath}`;
   let diffText = header;
 
   let lineCount = 0;

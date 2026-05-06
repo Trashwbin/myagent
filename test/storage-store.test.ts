@@ -105,7 +105,14 @@ describe("appendMessages + getSession", () => {
     const base = await tmpBaseDir();
     const store = openTestStore(base);
     const session = store.createSession({ workspaceRoot: "/tmp/ws" });
-    const toolCalls = [{ id: "tc1", name: "Read", input: { path: "a.ts" } }];
+    const toolCalls = [
+      {
+        id: "tc1",
+        name: "Read",
+        input: { path: "a.ts" },
+        display: { kind: "context", title: "Read", subtitle: "a.ts" },
+      },
+    ];
     store.appendMessages(session.id, [
       { role: "assistant", content: "let me check", toolCalls },
     ]);
@@ -132,6 +139,50 @@ describe("appendMessages + getSession", () => {
       content: "file contents",
       toolCallId: "tc2",
       toolName: "Read",
+    });
+    await cleanup();
+  });
+
+  it("roundtrips tool_result toolDisplay", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/ws" });
+    store.appendMessages(session.id, [
+      {
+        role: "tool_result",
+        content: "Edited app.ts (1 additions, 1 deletions)",
+        toolCallId: "tc3",
+        toolName: "edit_file",
+        toolDisplay: {
+          kind: "mutation",
+          title: "Edit file",
+          subtitle: "app.ts",
+          summary: "+1 -1",
+          files: [
+            {
+              path: "app.ts",
+              additions: 1,
+              deletions: 1,
+              diff: "--- a/app.ts\n+++ b/app.ts\n@@ -1 +1 @@\n-old\n+new",
+            },
+          ],
+        },
+      },
+    ]);
+    const restored = store.getSession(session.id)!;
+    expect(restored.messages[0]?.toolDisplay).toEqual({
+      kind: "mutation",
+      title: "Edit file",
+      subtitle: "app.ts",
+      summary: "+1 -1",
+      files: [
+        {
+          path: "app.ts",
+          additions: 1,
+          deletions: 1,
+          diff: "--- a/app.ts\n+++ b/app.ts\n@@ -1 +1 @@\n-old\n+new",
+        },
+      ],
     });
     await cleanup();
   });

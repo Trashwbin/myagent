@@ -22,6 +22,11 @@ import { ReadStateTracker } from "../tools/file-mutation.js";
 import { isMutationTool, getCheckpointPaths } from "../tools/mutation-policy.js";
 import type { ApprovalDisplay } from "../permission/display.js";
 import { buildApprovalDisplay } from "../permission/display.js";
+import type { ToolDisplay } from "./tool-display.js";
+import {
+  buildToolInputDisplay,
+  buildToolResultDisplay,
+} from "./tool-display.js";
 
 export type ApprovalRequest = {
   toolName: string;
@@ -75,7 +80,7 @@ export type SessionResult = {
 
 export type TurnEvent =
   | { type: "assistant_text_delta"; text: string }
-  | { type: "tool_call"; id: string; name: string; input: unknown }
+  | { type: "tool_call"; id: string; name: string; input: unknown; display?: ToolDisplay }
   | { type: "assistant_message"; message: Message }
   | {
       type: "tool_approval_required";
@@ -92,8 +97,8 @@ export type TurnEvent =
       name: string;
       decision: "allow" | "deny";
     }
-  | { type: "tool_started"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; message: Message }
+  | { type: "tool_started"; id: string; name: string; input: unknown; display?: ToolDisplay }
+  | { type: "tool_result"; message: Message; display?: ToolDisplay }
   | { type: "turn_truncated" }
   | { type: "turn_finished" };
 
@@ -140,7 +145,7 @@ async function runAgentLoop(
 
   for (let turn = 0; turn < maxTurns; turn++) {
     let assistantText = "";
-    const toolCalls: Array<{ id: string; name: string; input: unknown }> = [];
+    const toolCalls: Array<{ id: string; name: string; input: unknown; display?: ToolDisplay }> = [];
 
     for await (const event of provider.stream([...messages], toolSchemas, {
       systemPrompt,
@@ -151,13 +156,19 @@ async function runAgentLoop(
           if (onEvent) await onEvent({ type: "assistant_text_delta", text: event.text });
           break;
         case "tool_call":
-          toolCalls.push({ id: event.id, name: event.name, input: event.input });
+          toolCalls.push({
+            id: event.id,
+            name: event.name,
+            input: event.input,
+            display: buildToolInputDisplay(event.name, event.input),
+          });
           if (onEvent)
             await onEvent({
               type: "tool_call",
               id: event.id,
               name: event.name,
               input: event.input,
+              display: buildToolInputDisplay(event.name, event.input),
             });
           break;
         case "stop":
@@ -252,15 +263,26 @@ async function runAgentLoop(
         if (autoAllowed) {
           shouldExecute = true;
         } else if (!options.approvalHandler) {
+          const toolDisplay = buildToolResultDisplay(
+            tc.name,
+            tc.input,
+            `Tool call requires approval and was not executed: ${decision.reason}`,
+          );
           const msg: Message = {
             role: "tool_result",
             toolCallId: tc.id,
             toolName: tc.name,
             content: `Tool call requires approval and was not executed: ${decision.reason}`,
+            toolDisplay,
           };
           messages.push(msg);
           newMessages.push(msg);
-          if (onEvent) await onEvent({ type: "tool_result", message: msg });
+          if (onEvent)
+            await onEvent({
+              type: "tool_result",
+              message: msg,
+              display: toolDisplay,
+            });
           continue;
         } else {
           const display = buildApprovalDisplay(tc.name, tc.input, decision);
@@ -295,10 +317,17 @@ async function runAgentLoop(
             });
 
           if (response === "abort") {
+            const toolDisplay = buildToolResultDisplay(tc.name, tc.input, `Tool call denied and was not executed: ${decision.reason}`);
             const msg = blockedMsg(tc, decision.reason);
+            msg.toolDisplay = toolDisplay;
             messages.push(msg);
             newMessages.push(msg);
-            if (onEvent) await onEvent({ type: "tool_result", message: msg });
+            if (onEvent)
+              await onEvent({
+                type: "tool_result",
+                message: msg,
+                display: toolDisplay,
+              });
             if (onEvent) await onEvent({ type: "turn_finished" });
             return { aborted: true };
           }
@@ -361,37 +390,66 @@ async function runAgentLoop(
       }
 
       if (validationResult) {
+        const toolDisplay = buildToolResultDisplay(
+          tc.name,
+          tc.input,
+          `Patch validation failed before execution: ${validationResult}`,
+        );
         const msg: Message = {
           role: "tool_result",
           toolCallId: tc.id,
           toolName: tc.name,
           content: `Patch validation failed before execution: ${validationResult}`,
+          toolDisplay,
         };
         messages.push(msg);
         newMessages.push(msg);
-        if (onEvent) await onEvent({ type: "tool_result", message: msg });
+        if (onEvent)
+          await onEvent({
+            type: "tool_result",
+            message: msg,
+            display: toolDisplay,
+          });
         continue;
       }
 
       if (!shouldExecute) {
+        const toolDisplay = buildToolResultDisplay(tc.name, tc.input, `Tool call denied and was not executed: ${blockReason}`);
         const msg = blockedMsg(tc, blockReason);
+        msg.toolDisplay = toolDisplay;
         messages.push(msg);
         newMessages.push(msg);
-        if (onEvent) await onEvent({ type: "tool_result", message: msg });
+        if (onEvent)
+          await onEvent({
+            type: "tool_result",
+            message: msg,
+            display: toolDisplay,
+          });
         continue;
       }
 
       const tool = registry.get(tc.name);
       if (!tool) {
+        const toolDisplay = buildToolResultDisplay(
+          tc.name,
+          tc.input,
+          `Tool not found: ${tc.name}`,
+        );
         const msg: Message = {
           role: "tool_result",
           toolCallId: tc.id,
           toolName: tc.name,
           content: `Tool not found: ${tc.name}`,
+          toolDisplay,
         };
         messages.push(msg);
         newMessages.push(msg);
-        if (onEvent) await onEvent({ type: "tool_result", message: msg });
+        if (onEvent)
+          await onEvent({
+            type: "tool_result",
+            message: msg,
+            display: toolDisplay,
+          });
         continue;
       }
 
@@ -404,15 +462,23 @@ async function runAgentLoop(
             const cp = await createCheckpoint(cwd, paths);
             checkpointId = cp.id;
           } catch (err: any) {
+            const failure = `Checkpoint failed, mutation not executed: ${err.message}`;
+            const toolDisplay = buildToolResultDisplay(tc.name, toolInput, failure);
             const msg: Message = {
               role: "tool_result",
               toolCallId: tc.id,
               toolName: tc.name,
-              content: `Checkpoint failed, mutation not executed: ${err.message}`,
+              content: failure,
+              toolDisplay,
             };
             messages.push(msg);
             newMessages.push(msg);
-            if (onEvent) await onEvent({ type: "tool_result", message: msg });
+            if (onEvent)
+              await onEvent({
+                type: "tool_result",
+                message: msg,
+                display: toolDisplay,
+              });
             continue;
           }
         }
@@ -424,6 +490,7 @@ async function runAgentLoop(
           id: tc.id,
           name: tc.name,
           input: toolInput,
+          display: buildToolInputDisplay(tc.name, toolInput),
         });
 
       const result = await tool.execute(toolInput, {
@@ -432,17 +499,24 @@ async function runAgentLoop(
         readState,
       });
       const content = result.ok ? result.output : `Error: ${result.output}`;
+      const toolDisplay = buildToolResultDisplay(tc.name, toolInput, content);
 
       const resultMsg: Message = {
         role: "tool_result",
         toolCallId: tc.id,
         toolName: tc.name,
         content,
+        toolDisplay,
         checkpointId: result.ok ? checkpointId : undefined,
       };
       messages.push(resultMsg);
       newMessages.push(resultMsg);
-      if (onEvent) await onEvent({ type: "tool_result", message: resultMsg });
+      if (onEvent)
+        await onEvent({
+          type: "tool_result",
+          message: resultMsg,
+          display: toolDisplay,
+        });
     }
   }
 

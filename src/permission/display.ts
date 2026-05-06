@@ -1,3 +1,5 @@
+import { parseUnifiedDiffFiles } from "../diff/unified.js";
+
 export type MutationFileInfo = {
   path: string;
   additions: number;
@@ -409,26 +411,20 @@ function splitDiffByFile(
   paths: string[],
 ): MutationFileInfo[] {
   if (!diff || paths.length === 0) return [];
-  const files: MutationFileInfo[] = [];
-  for (const p of paths) {
-    const name = p.split("/").pop() ?? p;
-    const re = new RegExp(
-      `--- a/${escapeRe(name)}\\n\\+\\+\\+ b/${escapeRe(name)}\\n([\\s\\S]*?)(?=(?:--- a/|$))`,
-    );
-    const m = diff.match(re);
-    if (m) {
-      let add = 0;
-      let del = 0;
-      for (const line of m[1].split("\n")) {
-        if (line.startsWith("+") && !line.startsWith("+++")) add++;
-        if (line.startsWith("-") && !line.startsWith("---")) del++;
-      }
-      files.push({ path: p, additions: add, deletions: del, diff: m[0].trimEnd() });
-    }
-  }
-  return files.length > 0 ? files : [];
-}
-
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parsed = parseUnifiedDiffFiles(diff);
+  if (parsed.length === 0) return [];
+  const byPath = new Map(parsed.map((file) => [file.path, file] as const));
+  return paths.flatMap((path) => {
+    const file = byPath.get(path);
+    return file
+      ? [
+          {
+            path,
+            additions: file.additions,
+            deletions: file.deletions,
+            diff: file.diff,
+          },
+        ]
+      : [];
+  });
 }

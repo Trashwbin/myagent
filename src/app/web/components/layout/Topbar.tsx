@@ -1,0 +1,57 @@
+import React from "react";
+
+export function Topbar({
+  sessionTitle,
+  sessionId,
+  workspace,
+  modelLabel,
+  status,
+  onCopySession,
+}: {
+  sessionTitle: string;
+  sessionId: string | null;
+  workspace: string;
+  modelLabel: string;
+  status: "connecting" | "connected" | "running";
+  onCopySession: () => void;
+}) {
+  const statusText = status === "running" ? "Running" : status === "connected" ? "Connected" : "Connecting";
+
+  return (
+    <header className="topbar">
+      <div className="topbar-main">
+        <strong className="session-name">{sessionTitle}</strong>
+      </div>
+      <details className="topbar-actions">
+        <summary className="topbar-actions-trigger" aria-label="Session actions">
+          <span
+            aria-hidden="true"
+            className={`dot ${status === "connected" ? "connected" : status === "running" ? "running" : ""}`}
+          />
+          <span aria-hidden="true" className="topbar-actions-icon" />
+        </summary>
+        <div className="topbar-actions-panel">
+          <div className="topbar-action-row">
+            <span className="topbar-action-label">Status</span>
+            <span className="topbar-action-value">{statusText}</span>
+          </div>
+          <div className="topbar-action-row">
+            <span className="topbar-action-label">Model</span>
+            <span className="topbar-action-value">{modelLabel}</span>
+          </div>
+          <div className="topbar-action-row">
+            <span className="topbar-action-label">Session</span>
+            <span className="topbar-action-value mono">{sessionId || "session"}</span>
+          </div>
+          <div className="topbar-action-row">
+            <span className="topbar-action-label">Workspace</span>
+            <span className="topbar-action-value mono">{workspace || "workspace"}</span>
+          </div>
+          <button className="topbar-copy-button" onClick={onCopySession} disabled={!sessionId}>
+            Copy session ID
+          </button>
+        </div>
+      </details>
+    </header>
+  );
+}

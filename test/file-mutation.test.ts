@@ -76,6 +76,12 @@ describe("computeDiff", () => {
     expect(result.diff).toContain("myfile.ts");
   });
 
+  it("preserves nested path in diff headers", () => {
+    const result = computeDiff("a\n", "b\n", "src/components/myfile.ts");
+    expect(result.diff).toContain("--- a/src/components/myfile.ts");
+    expect(result.diff).toContain("+++ b/src/components/myfile.ts");
+  });
+
   it("handles completely different content", () => {
     const result = computeDiff("aaa\nbbb\nccc\n", "xxx\nyyy\nzzz\n", "test.txt");
     expect(result.additions).toBe(3);

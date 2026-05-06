@@ -1,12 +1,15 @@
-import { APP_CLIENT_SCRIPT } from "./client.js";
+import React from "react";
+import { createRoot } from "react-dom/client";
+import { App } from "./App.js";
 
-const markdown = await import("./markdown.js");
+const root = document.getElementById("root");
 
-Object.assign(globalThis, {
-  __myAgentMarkdown: {
-    renderAssistantMarkdown: markdown.renderAssistantMarkdown,
-    unmountAssistantMarkdown: markdown.unmountAssistantMarkdown,
-  },
-});
+if (!(root instanceof HTMLElement)) {
+  throw new Error("app root not found");
+}
 
-new Function(APP_CLIENT_SCRIPT)();
+createRoot(root).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);

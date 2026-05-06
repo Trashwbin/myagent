@@ -204,19 +204,11 @@ describe("HTTP API", () => {
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
     expect(html).toContain("myAgent");
-    expect(html).toContain("#fffaf0");
+    expect(html).toContain("--canvas: #f5f6f2");
     expect(html).toContain("/assets/client.js");
-    expect(html).toContain("Copy ID");
-    expect(html).toContain("Allow once");
-    expect(html).toContain("Allow session");
-    expect(html).toContain("Allow workspace");
-    expect(html).toContain("Deny");
-    expect(html).toContain("allow_for_workspace");
-    expect(html).toContain("data-index=\"0\"");
-    expect(html).toContain("Submit <span>↵</span>");
-    expect(html).toContain("data-submit-approval");
-    expect(html).not.toContain("Skip");
-    expect(html).not.toContain(">Abort</button>");
+    expect(html).toContain('<div id="root"></div>');
+    expect(html).not.toContain('id="session-list"');
+    expect(html).not.toContain("Copy ID");
   });
 
   it("GET /assets/client.js returns bundled app client", async () => {
@@ -228,26 +220,19 @@ describe("HTTP API", () => {
     const js = await res.text();
     expect(js).toContain("localStorage");
     expect(js).toContain("activeSession");
-    expect(js).toContain("__myAgentMarkdown");
-    expect(js).toContain("Create directory?");
+    expect(js).toContain("createRoot");
+    expect(js).toContain("useReducer");
+    expect(js).toContain("Gathered context");
     expect(js).toContain("approval-file-list");
     expect(js).toContain("approval-inline-diff");
-    expect(js).toContain("tool-diff-list");
-    expect(js).toContain("parseUnifiedDiffFiles");
-    expect(js).toContain("activeToolStack");
-    expect(js).toContain("rememberToolCall");
-    expect(js).toContain("runningSessions");
-    expect(js).toContain("isActiveSessionRunning");
-    expect(js).toContain("handleApprovalKey");
-    expect(js).toContain("setApprovalSelection");
-    expect(js).toContain("selectedApprovalDecision");
-    expect(js).toContain("data-submit-approval");
-    expect(js).toContain("ArrowDown");
-    expect(js).not.toContain("JSON.stringify(request.input");
-    expect(js).not.toContain("Show diff");
+    expect(js).toContain("Review changes");
+    expect(js).toContain("review-file");
+    expect(js).toContain("turn-review-toggle");
+    expect(js).toContain("ApprovalDock");
+    expect(js).toContain("Submit");
+    expect(js).not.toContain("__myAgentMarkdown");
     expect(js).not.toContain('querySelector(".tool-stack")');
-    expect(js).not.toContain("react-markdown");
-    expect(js.length).toBeLessThan(100_000);
+    expect(js.length).toBeLessThan(800_000);
   });
 
   it("serves split client chunks for markdown rendering", async () => {
@@ -260,19 +245,19 @@ describe("HTTP API", () => {
     );
     expect(chunks.length).toBeGreaterThan(0);
 
-    let markdownChunk = "";
+    let markdownSource = client.includes("remarkGfm") ? client : "";
     for (const chunk of chunks) {
       const res = await fetch(`http://127.0.0.1:${port}${chunk}`);
       expect(res.headers.get("content-type")).toContain("text/javascript");
       const js = await res.text();
       if (js.includes("markdown-body") && js.includes("remarkGfm")) {
-        markdownChunk = js;
+        markdownSource = js;
         break;
       }
     }
 
-    expect(markdownChunk).toContain("renderAssistantMarkdown");
-    expect(markdownChunk).toContain("remarkGfm");
+    expect(markdownSource).toContain("remarkGfm");
+    expect(markdownSource).toContain("markdown-body");
   });
 });
 

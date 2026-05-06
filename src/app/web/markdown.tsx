@@ -199,6 +199,10 @@ function MarkdownContent({ text }: MarkdownContentProps) {
   );
 }
 
+export function AssistantMarkdown({ text }: { text: string }) {
+  return <MarkdownContent text={text} />;
+}
+
 export function renderAssistantMarkdown(container: HTMLElement, text: string) {
   let root = roots.get(container);
   if (!root) {

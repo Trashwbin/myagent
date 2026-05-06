@@ -1,14 +1,24 @@
+import type { ToolDisplay } from "../session/tool-display.js";
+
 export type ModelEvent =
   | { type: "text_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: unknown }
   | { type: "stop"; reason: "end_turn" | "tool_use" | "length" };
+
+export type MessageToolCall = {
+  id: string;
+  name: string;
+  input: unknown;
+  display?: ToolDisplay;
+};
 
 export type Message = {
   role: "user" | "assistant" | "tool_result";
   content: string;
   toolCallId?: string;
   toolName?: string;
-  toolCalls?: Array<{ id: string; name: string; input: unknown }>;
+  toolCalls?: MessageToolCall[];
+  toolDisplay?: ToolDisplay;
   checkpointId?: string;
 };
 

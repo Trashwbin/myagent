@@ -183,6 +183,47 @@ describe("buildApprovalDisplay", () => {
       expect(display.files.length).toBeGreaterThanOrEqual(1);
     });
 
+    it("apply_patch keeps per-file diffs distinct for same basenames", () => {
+      const display = buildApprovalDisplay(
+        "apply_patch",
+        {},
+        makeDecision({
+          metadata: {
+            affectedPaths: ["src/a/index.ts", "src/b/index.ts"],
+            diff: [
+              "--- a/src/a/index.ts",
+              "+++ b/src/a/index.ts",
+              "@@ -1 +1 @@",
+              "-const value = 'a';",
+              "+const value = 'aa';",
+              "--- a/src/b/index.ts",
+              "+++ b/src/b/index.ts",
+              "@@ -1 +1 @@",
+              "-const value = 'b';",
+              "+const value = 'bb';",
+            ].join("\n"),
+          },
+        }),
+      );
+      expect(display.kind).toBe("mutation");
+      if (display.kind !== "mutation") return;
+      expect(display.files).toHaveLength(2);
+      expect(display.files[0]).toMatchObject({
+        path: "src/a/index.ts",
+        additions: 1,
+        deletions: 1,
+      });
+      expect(display.files[0].diff).toContain("--- a/src/a/index.ts");
+      expect(display.files[0].diff).toContain("+const value = 'aa';");
+      expect(display.files[1]).toMatchObject({
+        path: "src/b/index.ts",
+        additions: 1,
+        deletions: 1,
+      });
+      expect(display.files[1].diff).toContain("--- a/src/b/index.ts");
+      expect(display.files[1].diff).toContain("+const value = 'bb';");
+    });
+
     it("sensitive apply_patch hides all diff content", () => {
       const display = buildApprovalDisplay(
         "apply_patch",

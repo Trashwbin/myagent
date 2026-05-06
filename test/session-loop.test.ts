@@ -662,6 +662,81 @@ describe("TurnEvent ordering", () => {
 
     const resultEvent = events[resultIdx] as Extract<TurnEvent, { type: "tool_result" }>;
     expect(resultEvent.message.content).toBe("1: hi");
+    expect(resultEvent.display).toMatchObject({
+      kind: "context",
+      title: "Read",
+      subtitle: "f.txt",
+      summary: "1 lines",
+    });
+
+    await rm(tmp, { recursive: true });
+  });
+
+  it("emits structured display on tool_call and tool_started", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "write_file",
+          input: { path: "note.txt", content: "hello" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(writeFileTool);
+
+    const { events, onEvent } = captureEvents();
+    const { newMessages } = await runTurn(provider, registry, makeSession(tmp), "write", {
+      approval: "auto",
+      approvalHandler: async () => "allow_once",
+      onEvent,
+    });
+
+    const call = events.find((event) => event.type === "tool_call") as Extract<
+      TurnEvent,
+      { type: "tool_call" }
+    >;
+    const started = events.find((event) => event.type === "tool_started") as Extract<
+      TurnEvent,
+      { type: "tool_started" }
+    >;
+
+    expect(call.display).toMatchObject({
+      kind: "mutation",
+      title: "Write file",
+      subtitle: "note.txt",
+    });
+    expect(started.display).toMatchObject({
+      kind: "mutation",
+      title: "Write file",
+      subtitle: "note.txt",
+    });
+    expect(newMessages[1]?.role).toBe("assistant");
+    expect(newMessages[1]?.toolCalls?.[0]).toMatchObject({
+      name: "write_file",
+      display: {
+        kind: "mutation",
+        title: "Write file",
+        subtitle: "note.txt",
+      },
+    });
+    const resultMessage = newMessages.find(
+      (message) => message.role === "tool_result" && message.toolName === "write_file",
+    );
+    expect(resultMessage?.toolDisplay).toMatchObject({
+      kind: "mutation",
+      title: "Write file",
+      subtitle: "note.txt",
+    });
 
     await rm(tmp, { recursive: true });
   });
