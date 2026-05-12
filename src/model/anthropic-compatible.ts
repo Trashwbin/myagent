@@ -26,6 +26,14 @@ export function convertMessages(messages: Message[]): Anthropic.MessageParam[] {
         i++;
         break;
 
+      case "summary":
+        result.push({
+          role: "user",
+          content: `<conversation_summary>\n${msg.content}\n</conversation_summary>`,
+        });
+        i++;
+        break;
+
       case "assistant": {
         const content: Anthropic.ContentBlockParam[] = [];
         if (msg.content) {

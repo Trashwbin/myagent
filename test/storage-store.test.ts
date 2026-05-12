@@ -212,6 +212,45 @@ describe("appendMessages + getSession", () => {
     await cleanup();
   });
 
+  it("roundtrips summary messages", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/ws" });
+    store.appendMessages(session.id, [
+      { role: "summary", content: "Older context summary." },
+      { role: "user", content: "continue" },
+    ]);
+
+    const restored = store.getSession(session.id)!;
+    expect(restored.messages).toEqual([
+      { role: "summary", content: "Older context summary." },
+      { role: "user", content: "continue" },
+    ]);
+    await cleanup();
+  });
+
+  it("replaces messages while preserving order", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/ws" });
+    store.appendMessages(session.id, [
+      { role: "user", content: "first" },
+      { role: "assistant", content: "first reply" },
+      { role: "user", content: "second" },
+    ]);
+
+    store.replaceMessages(session.id, [
+      { role: "summary", content: "first turn summary" },
+      { role: "user", content: "second" },
+    ]);
+
+    expect(store.getSession(session.id)?.messages).toEqual([
+      { role: "summary", content: "first turn summary" },
+      { role: "user", content: "second" },
+    ]);
+    await cleanup();
+  });
+
   it("preserves seq ordering across multiple appends", async () => {
     const base = await tmpBaseDir();
     const store = openTestStore(base);

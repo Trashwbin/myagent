@@ -20,6 +20,12 @@ export function convertMessages(
       case "user":
         return { role: "user" as const, content: msg.content };
 
+      case "summary":
+        return {
+          role: "system" as const,
+          content: `<conversation_summary>\n${msg.content}\n</conversation_summary>`,
+        };
+
       case "assistant": {
         const result: OpenAI.ChatCompletionAssistantMessageParam = {
           role: "assistant",

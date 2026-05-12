@@ -21,6 +21,19 @@ describe("OpenAI convertMessages", () => {
     expect(result).toEqual([{ role: "user", content: "hello" }]);
   });
 
+  it("converts summary message to system context", () => {
+    const result = convertMessages([
+      { role: "summary", content: "User already edited auth.ts." },
+    ]);
+    expect(result).toEqual([
+      {
+        role: "system",
+        content:
+          "<conversation_summary>\nUser already edited auth.ts.\n</conversation_summary>",
+      },
+    ]);
+  });
+
   it("converts assistant message with text only", () => {
     const result = convertMessages([{ role: "assistant", content: "hi there" }]);
     expect(result).toEqual([{ role: "assistant", content: "hi there" }]);

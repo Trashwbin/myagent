@@ -13,7 +13,7 @@ export type MessageToolCall = {
 };
 
 export type Message = {
-  role: "user" | "assistant" | "tool_result";
+  role: "user" | "assistant" | "tool_result" | "summary";
   content: string;
   toolCallId?: string;
   toolName?: string;

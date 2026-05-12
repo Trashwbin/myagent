@@ -20,6 +20,19 @@ describe("Anthropic convertMessages", () => {
     expect(result).toEqual([{ role: "user", content: "hello" }]);
   });
 
+  it("converts summary message to user context", () => {
+    const result = convertMessages([
+      { role: "summary", content: "User already edited auth.ts." },
+    ]);
+    expect(result).toEqual([
+      {
+        role: "user",
+        content:
+          "<conversation_summary>\nUser already edited auth.ts.\n</conversation_summary>",
+      },
+    ]);
+  });
+
   it("converts assistant text-only message", () => {
     const result = convertMessages([{ role: "assistant", content: "hi" }]);
     expect(result).toEqual([

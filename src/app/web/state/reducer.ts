@@ -205,6 +205,11 @@ export function buildTimelineFromMessages(messages: Message[]): TimelineTurn[] {
         message.content,
         message.toolDisplay,
       );
+      continue;
+    }
+
+    if (message.role === "summary") {
+      timeline = appendStatus(timeline, "info", "Conversation compacted.");
     }
   }
 

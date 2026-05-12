@@ -24,6 +24,7 @@ export type TranscriptStore = {
   }): SessionState;
   getSession(id: string): SessionState | undefined;
   appendMessages(sessionId: string, messages: Message[]): void;
+  replaceMessages(sessionId: string, messages: Message[]): void;
   listSessions(): SessionRow[];
   updateSessionTimestamp(sessionId: string): void;
   addPermissionRule(input: {
@@ -177,6 +178,31 @@ export function openStore(options?: StoreOptions): TranscriptStore {
     }
   }
 
+  function insertMessages(sessionId: string, messages: Message[], startSeq: number) {
+    let seq = startSeq;
+    const stmt = db.prepare(
+      "INSERT INTO messages (id, session_id, seq, role, content, tool_call_id, tool_name, tool_calls_json, tool_display_json, checkpoint_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+
+    for (const msg of messages) {
+      seq++;
+      const r = serializeMessage(msg);
+      stmt.run(
+        r.id,
+        sessionId,
+        seq,
+        r.role,
+        r.content,
+        r.tool_call_id,
+        r.tool_name,
+        r.tool_calls_json,
+        r.tool_display_json,
+        r.checkpoint_id,
+        r.created_at,
+      );
+    }
+  }
+
   return {
     createSession(input) {
       const id = randomUUID();
@@ -208,33 +234,24 @@ export function openStore(options?: StoreOptions): TranscriptStore {
       const maxRow = db
         .prepare("SELECT MAX(seq) AS ms FROM messages WHERE session_id = ?")
         .get(sessionId) as Record<string, unknown>;
-      let seq = (maxRow?.ms as number | null) ?? 0;
-
-      const stmt = db.prepare(
-        "INSERT INTO messages (id, session_id, seq, role, content, tool_call_id, tool_name, tool_calls_json, tool_display_json, checkpoint_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      );
+      const seq = (maxRow?.ms as number | null) ?? 0;
 
       const insertAll = db.transaction(() => {
-        for (const msg of messages) {
-          seq++;
-          const r = serializeMessage(msg);
-          stmt.run(
-            r.id,
-            sessionId,
-            seq,
-            r.role,
-            r.content,
-            r.tool_call_id,
-            r.tool_name,
-            r.tool_calls_json,
-            r.tool_display_json,
-            r.checkpoint_id,
-            r.created_at,
-          );
-        }
+        insertMessages(sessionId, messages, seq);
       });
 
       insertAll();
+      updateTitleFromUserMsg(sessionId, messages);
+      updateSessionTimestamp(sessionId);
+    },
+
+    replaceMessages(sessionId, messages) {
+      const replaceAll = db.transaction(() => {
+        db.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId);
+        insertMessages(sessionId, messages, 0);
+      });
+
+      replaceAll();
       updateTitleFromUserMsg(sessionId, messages);
       updateSessionTimestamp(sessionId);
     },
