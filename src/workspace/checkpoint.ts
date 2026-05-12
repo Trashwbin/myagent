@@ -9,7 +9,12 @@ import {
   type Checkpoint,
   type CheckpointFile,
 } from "./checkpoint-store.js";
-import { createShadowCheckpoint, restoreShadowFile, writeBlob } from "./shadow-git.js";
+import {
+  applyPreparedShadowRestore,
+  createShadowCheckpoint,
+  prepareShadowRestoreFile,
+  writeBlob,
+} from "./shadow-git.js";
 import { resolveWorkspacePath } from "./path.js";
 
 export type { Checkpoint, CheckpointFile } from "./checkpoint-store.js";
@@ -205,12 +210,17 @@ export async function restoreCheckpoint(
       throw new Error(`Checkpoint ${checkpointId} does not belong to this workspace`);
     }
 
+    const prepared = [];
     for (const file of shadow.files) {
       const absPath = resolveWorkspacePath(cwd, file.path);
       if (!absPath) {
         throw new Error(`Cannot restore file outside workspace: ${file.path}`);
       }
-      await restoreShadowFile(cwd, file, absPath);
+      prepared.push(await prepareShadowRestoreFile(cwd, file, absPath));
+    }
+
+    for (const item of prepared) {
+      await applyPreparedShadowRestore(item);
     }
 
     return shadow;

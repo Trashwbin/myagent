@@ -184,22 +184,37 @@ export async function createShadowCheckpoint(
   return stored;
 }
 
-export async function restoreShadowFile(
+export type PreparedShadowRestore = {
+  file: CheckpointFile;
+  absPath: string;
+  content?: Buffer;
+};
+
+export async function prepareShadowRestoreFile(
   cwd: string,
   file: CheckpointFile,
   absPath: string,
-): Promise<void> {
+): Promise<PreparedShadowRestore> {
   if (file.existed && file.blobHash) {
-    const content = await readBlob(cwd, file.blobHash);
-    await mkdir(dirname(absPath), { recursive: true });
-    await writeFile(absPath, content);
-    if (file.mode === "100755") {
-      await chmod(absPath, 0o755);
-    } else {
-      await chmod(absPath, 0o644);
-    }
+    return {
+      file,
+      absPath,
+      content: await readBlob(cwd, file.blobHash),
+    };
+  }
+
+  return { file, absPath };
+}
+
+export async function applyPreparedShadowRestore(
+  prepared: PreparedShadowRestore,
+): Promise<void> {
+  if (prepared.file.existed && prepared.content) {
+    await mkdir(dirname(prepared.absPath), { recursive: true });
+    await writeFile(prepared.absPath, prepared.content);
+    await chmod(prepared.absPath, prepared.file.mode === "100755" ? 0o755 : 0o644);
     return;
   }
 
-  await rm(absPath, { force: true });
+  await rm(prepared.absPath, { force: true });
 }
