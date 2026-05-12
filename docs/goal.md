@@ -189,6 +189,191 @@ compact 不能作为普通用户消息交给模型理解；它是会话控制命
   - `test/cli-dispatch.test.ts`
   - `test/app-server.test.ts`
 
+### 当前 MVP 评估
+
+已完成的第一版是 file-copy checkpoint：
+
+- mutation tool 执行前，把受影响文件复制到 `<workspace>/.myagent/checkpoints/<checkpointId>/`。
+- `metadata.json` 记录文件是否原本存在。
+- `/rewind <checkpointId>` 和 `/revert-last` 只恢复文件状态，并追加一条状态消息。
+
+这个版本满足入口和基础恢复能力，但不对齐 OpenCode/Gemini 的 checkpoint 设计。主要差距：
+
+- checkpoint 数据存放在 workspace 内，容易被误删、误提交或被 agent 修改。
+- 逐文件 copy 没有 shadow git 的对象去重、树快照和恢复能力。
+- 恢复不是事务级；多文件恢复中途失败会留下半恢复状态。
+- rewind/revert 没有裁剪或重写 transcript，文件状态和会话历史可能不一致。
+- 没有 unrevert/redo 基础。
+
+## 4. Shadow git checkpoint 对齐
+
+### 目标
+
+把当前 file-copy checkpoint backend 升级为 OpenCode/Gemini 风格的 shadow git checkpoint：
+
+- checkpoint 数据移出 workspace，放到 agent data 目录。
+- 使用 shadow git object store 保存快照，利用 git tree/blob 去重。
+- 保留现有 `createCheckpoint(cwd, files)` / `restoreCheckpoint(cwd, checkpointId)` 对外 API，CLI/TUI/Web 入口不先大改。
+- 新 checkpoint 默认走 shadow git；旧 file-copy checkpoint 保留只读兼容。
+- 为后续 message-range rewind、unrevert/redo、checkpoint list 打基础。
+
+### 对齐参考
+
+- OpenCode：使用 shadow git snapshot，turn/step 级生成 patch part，revert 时按 message/part 定位并支持 unrevert。
+- Gemini CLI：checkpoint 记录 shadow git snapshot、conversation history、tool call；`/restore` 能恢复文件和历史，并重新提出原 tool call。
+- Codex：thread rollback 只回滚会话历史，不负责文件恢复；本项目目标更接近 OpenCode/Gemini。
+
+### 存储设计
+
+- 新增 `src/workspace/checkpoint-store.ts`
+  - 负责 checkpoint root、workspace hash、metadata 读写。
+  - 默认 root：`$MYAGENT_HOME/checkpoints/<workspaceHash>/`。
+  - fallback：`~/.myagent/checkpoints/<workspaceHash>/`。
+
+- 新增 `src/workspace/shadow-git.ts`
+  - 负责 shadow git repo 初始化和 git 命令封装。
+  - repo path：`<checkpointRoot>/repo.git`。
+  - metadata path：`<checkpointRoot>/checkpoints/<checkpointId>.json`。
+  - 所有 git 命令显式传 `--git-dir=<repo.git>` 和 `--work-tree=<cwd>`，不污染用户项目 `.git`。
+  - 使用独立 `GIT_INDEX_FILE`，避免 checkout/add 操作影响用户仓库 index。
+
+- 扩展 checkpoint metadata：
+  - `version: 2`
+  - `backend: "shadow-git"`
+  - `id`
+  - `createdAt`
+  - `cwd`
+  - `workspaceHash`
+  - `treeHash`
+  - `commitHash`
+  - `parentCommitHash?`
+  - `files: [{ path, existed, mode?, blobHash? }]`
+  - `toolName?`
+  - `toolCallId?`
+  - `sessionId?`
+
+- 保留 legacy metadata：
+  - `backend` 缺失时视为 `copy-v1`。
+  - `restoreCheckpoint()` 先查 shadow metadata，找不到再查 `<workspace>/.myagent/checkpoints/<id>/metadata.json`。
+  - 新写入不再生成 workspace 内 `.myagent/checkpoints`。
+
+### Snapshot 语义
+
+第一阶段 shadow git 仍保持当前对外语义：恢复 mutation 前的受影响文件。
+
+- mutation 执行前创建 checkpoint。
+- `files` 来自 `getCheckpointPaths(toolName, input)`。
+- snapshot 写入 shadow git，但 metadata 只把这些 affected paths 标成可恢复范围。
+- 对于原本存在的文件，记录该 path 在 snapshot tree 中的 blob/mode。
+- 对于原本不存在的文件，记录 `existed: false`，restore 时删除该 path。
+- 二进制文件也由 git blob 保存，不再自己 copy。
+
+第二阶段再升级为 message-range rewind：
+
+- 每个 assistant turn 记录 turn-start snapshot。
+- 每个 mutation tool result 记录 checkpoint id 和 patch summary。
+- `/rewind <messageId | checkpointId>` 可以恢复文件并隐藏或裁剪目标之后的 transcript。
+- `/unrevert` 使用恢复前 snapshot 回到 rewind 前状态。
+
+### Git 操作策略
+
+- 创建 checkpoint：
+  - 初始化 shadow repo。
+  - 从最近 parent commit/tree 构建独立 index。
+  - `git add -A -- <affected paths>` 捕获修改和删除。
+  - 对 mutation 明确涉及但被 `.gitignore` 忽略的路径，使用 `git add -f -- <path>`。
+  - `git write-tree` 生成 tree。
+  - `git commit-tree` 生成 checkpoint commit，parent 指向上一个 checkpoint commit。
+
+- 恢复 checkpoint：
+  - active turn 中拒绝恢复。
+  - 读取 metadata，校验 `checkpointId` basename、workspaceHash、cwd。
+  - 对 `existed: true` 的 path，从 `treeHash` checkout 单文件到 workspace。
+  - 对 `existed: false` 的 path，删除 workspace 中对应文件。
+  - 恢复前可选创建 pre-restore checkpoint，后续给 `/unrevert` 使用；第一阶段先不默认暴露。
+
+- 失败处理：
+  - restore 前先校验所有目标 path 都在 workspace 内。
+  - checkout 到临时目录或临时文件，全部准备成功后再替换，避免半恢复。
+  - 失败时返回清晰错误，不追加成功状态消息。
+
+### API 迁移
+
+- 保持现有函数名：
+  - `createCheckpoint(cwd, files, options?)`
+  - `restoreCheckpoint(cwd, checkpointId, options?)`
+
+- 新增能力：
+  - `listCheckpoints(cwd, options?)`
+  - `getCheckpoint(cwd, checkpointId)`
+  - `createRestorePoint(cwd, reason)`：为 unrevert/redo 预留。
+
+- `tool_result.checkpointId` 保持内部字段，不塞进用户可见 tool result content。
+- compact summary 可以继续保留 checkpoint ids，但要明确它们是恢复控制信息。
+
+### UI/入口策略
+
+- 第一批只替换 backend，不改用户命令：
+  - `/rewind <checkpointId>`
+  - `/revert-last`
+  - `myagent rewind <sessionId> <checkpointId>`
+  - `myagent revert-last <sessionId>`
+
+- 第二批补更接近 OpenCode 的入口：
+  - `/undo`：恢复最近 user turn 前状态，并隐藏后续 turn。
+  - `/redo` 或 `/unrevert`：恢复到 undo 前状态。
+  - Web turn diff/review 区显示“Revert this turn”按钮。
+  - TUI 在 turn 或 checkpoint 列表里选择恢复点。
+
+### 安全边界
+
+- checkpoint root 必须在 agent data 目录，不允许由 session 输入覆盖。
+- checkpoint id 只能是 basename。
+- metadata 的 `workspaceHash` 必须和当前 cwd 重新计算结果一致。
+- restore path 必须通过 `resolveWorkspacePath(cwd, path)`。
+- shadow git 默认不加入 `.git/`、`.myagent/`、checkpoint root、自身 repo。
+- 敏感文件如果被 mutation 明确修改，可以 checkpoint，但不在 UI diff 中泄露内容。
+- git 不可用时：
+  - 默认返回清晰错误，提示需要 git。
+  - 可以通过配置开启 legacy copy backend fallback，但不能静默降级。
+
+### 测试计划
+
+- `test/checkpoint.test.ts`
+  - shadow git 创建和恢复普通文件。
+  - 恢复新建文件时删除目标。
+  - 恢复删除文件时重建目标。
+  - 多文件 checkpoint 全部恢复。
+  - binary 文件恢复。
+  - ignored 文件被 mutation 明确涉及时仍能恢复。
+  - checkpoint id path traversal 被拒绝。
+  - metadata workspaceHash 不匹配被拒绝。
+  - legacy copy-v1 checkpoint 仍可恢复。
+  - 新 checkpoint 不写入 `<workspace>/.myagent/checkpoints`。
+
+- `test/session-loop.test.ts`
+  - `edit_file` / `write_file` / `apply_patch` 继续创建 checkpoint。
+  - checkpoint 创建失败时 mutation 不执行。
+  - tool result 只保存 `checkpointId` 字段，不把 id 塞进 content。
+
+- `test/session-revert.test.ts`
+  - `/rewind` 恢复指定 shadow checkpoint。
+  - `/revert-last` 找最近 mutation checkpoint。
+  - active turn 中拒绝恢复。
+
+- `test/storage-store.test.ts`
+  - checkpoint id 仍能随 tool_result 持久化。
+  - 后续 checkpoint table/list 接入后补 query 测试。
+
+### 验收标准
+
+- 新 mutation checkpoint 不再在 workspace 内创建 `.myagent/checkpoints`。
+- 删除 workspace 里的 legacy `.myagent/checkpoints` 不影响新 shadow checkpoint。
+- 同一个文件多次修改，`/revert-last` 能准确恢复到最近一次 mutation 前。
+- `apply_patch` 涉及新增、删除、修改、rename 时，恢复结果正确。
+- 当前 CLI/TUI/Web rewind/revert 入口行为不退化。
+- 所有现有测试通过，并新增 shadow git backend 覆盖。
+
 ## 建议实施顺序
 
 1. Skills
@@ -203,11 +388,16 @@ compact 不能作为普通用户消息交给模型理解；它是会话控制命
    - 需要动 transcript 形态和 provider prompt 组装，风险比 revert 高。
    - 先手动 `/compact`，不做 auto compact。
 
+4. Shadow git checkpoint
+   - 当前 file-copy checkpoint 只作为 MVP。
+   - 先替换 backend，保持入口/API 不变。
+   - 再做 message-range rewind 和 unrevert/redo。
+
 ## 非目标
 
 - 不做 marketplace skill 下载。
 - 不做后台自动 compact。
-- 不做 OpenCode 完整 unrevert。
+- 不一次性做完整时间线分支 UI。
 - 不做多 agent/plugin 权限矩阵。
 - 不把 skill reference 文件全文自动塞入上下文。
 - 不把 rewind/revert 伪装成普通模型消息。
