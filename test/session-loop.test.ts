@@ -2576,6 +2576,7 @@ describe("Approval memory and abort", () => {
     expect(writeResult?.content).toContain("Wrote data.txt");
     expect(writeResult?.content).not.toContain("[checkpoint:");
     expect(writeResult?.checkpointId).toBeTruthy();
+    expect(existsSync(join(tmp, ".myagent", "checkpoints"))).toBe(false);
 
     // File was actually written
     const content = await readFile(join(tmp, "data.txt"), "utf-8");
@@ -3065,6 +3066,57 @@ describe("Approval memory and abort", () => {
     expect(await readFile(join(tmp, "a.txt"), "utf-8")).toBe("old-a");
     expect(await readFile(join(tmp, "b.txt"), "utf-8")).toBe("old-b");
     expect(existsSync(join(tmp, "c.txt"))).toBe(false);
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("apply_patch checkpoint restores moved files", async () => {
+    const tmp = await tmpDir();
+    await writeFile(join(tmp, "old.ts"), "line1\nold\nline3");
+    const registry = new ToolRegistry();
+    registry.register(applyPatchTool);
+
+    const patch = `*** Begin Patch
+*** Update File: old.ts
+*** Move to: new.ts
+@@
+-old
++new
+*** End Patch`;
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "apply_patch",
+          input: { patch },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const { newMessages } = await runTurn(provider, registry, makeSession(tmp), "move", {
+      approval: "auto",
+      approvalHandler: async () => "allow_once",
+    });
+
+    const result = newMessages.find(
+      (m) => m.role === "tool_result" && m.toolName === "apply_patch",
+    );
+    expect(result?.checkpointId).toBeTruthy();
+    expect(await readFile(join(tmp, "new.ts"), "utf-8")).toBe("line1\nnew\nline3");
+    expect(existsSync(join(tmp, "old.ts"))).toBe(false);
+
+    const { restoreCheckpoint } = await import("../src/workspace/checkpoint.js");
+    await restoreCheckpoint(tmp, result!.checkpointId!);
+
+    expect(await readFile(join(tmp, "old.ts"), "utf-8")).toBe("line1\nold\nline3");
+    expect(existsSync(join(tmp, "new.ts"))).toBe(false);
 
     await rm(tmp, { recursive: true, force: true });
   });
