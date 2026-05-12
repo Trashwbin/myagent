@@ -8,6 +8,7 @@ import type { TranscriptStore } from "../storage/store.js";
 import type { SessionState, ApprovalRequest, TurnEvent } from "../session/loop.js";
 import type { SkillSummary } from "../skill/types.js";
 import { runTurn } from "../session/loop.js";
+import { compactSession } from "../session/compact.js";
 import {
   formatRewindMessage,
   revertLast,
@@ -89,6 +90,41 @@ export function TuiApp(props: AppProps): React.ReactElement {
       if (!text.trim()) return;
       const expanded = expandPromptText({ input: text, parts: pasteParts });
       const command = expanded.trim();
+
+      if (command === "/compact") {
+        setPhase("running");
+        setError(null);
+        setInputState({ value: "", cursor: 0 });
+        setPasteParts([]);
+
+        const runCommand = async () => {
+          try {
+            const result = await compactSession(props.provider, props.session);
+            props.session.messages = result.messages;
+            props.store.replaceMessages(props.session.id, result.messages);
+            setTimeline((prev) => [
+              ...prev,
+              {
+                type: "status",
+                level: "info",
+                text: `Compacted ${result.compactedCount} messages; retained ${result.retainedCount} messages.`,
+              },
+            ]);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "Compact failed";
+            setTimeline((prev) => [
+              ...prev,
+              { type: "status", level: "error", text: message },
+            ]);
+            setError(message);
+          } finally {
+            setPhase("idle");
+          }
+        };
+
+        void runCommand();
+        return;
+      }
 
       if (command.startsWith("/rewind ") || command === "/revert-last") {
         setPhase("running");
