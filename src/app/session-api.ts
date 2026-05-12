@@ -9,6 +9,7 @@ import { ReadStateTracker } from "../tools/file-mutation.js";
 import type { ServerMessage } from "./protocol.js";
 import { randomUUID } from "node:crypto";
 import type { Message } from "../model/types.js";
+import type { SkillSummary } from "../skill/types.js";
 
 type PendingApproval = {
   id: string;
@@ -30,6 +31,7 @@ export class SessionManager {
   private registry: ToolRegistry;
   private approval: ApprovalMode;
   private store: TranscriptStore;
+  private availableSkills: SkillSummary[] | undefined;
   private maxTurns: number | undefined;
   private sendEvent: (sessionId: string, msg: ServerMessage) => void;
 
@@ -38,6 +40,7 @@ export class SessionManager {
     registry: ToolRegistry;
     approval: ApprovalMode;
     store: TranscriptStore;
+    availableSkills?: SkillSummary[];
     maxTurns?: number;
     sendEvent: (sessionId: string, msg: ServerMessage) => void;
   }) {
@@ -45,6 +48,7 @@ export class SessionManager {
     this.registry = deps.registry;
     this.approval = deps.approval;
     this.store = deps.store;
+    this.availableSkills = deps.availableSkills;
     this.maxTurns = deps.maxTurns;
     this.sendEvent = deps.sendEvent;
   }
@@ -138,6 +142,7 @@ export class SessionManager {
             sessionApprovalRules: active.approvalRules,
             store: this.store,
             readState: active.readState,
+            availableSkills: this.availableSkills,
           },
         );
         Object.assign(active.session, updated);

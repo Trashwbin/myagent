@@ -6,6 +6,7 @@ import type { Provider } from "../model/provider.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { TranscriptStore } from "../storage/store.js";
 import type { SessionState, ApprovalRequest, TurnEvent } from "../session/loop.js";
+import type { SkillSummary } from "../skill/types.js";
 import { runTurn } from "../session/loop.js";
 import { ProviderRuntimeError, formatProviderError } from "../model/errors.js";
 import { ReadStateTracker } from "../tools/file-mutation.js";
@@ -33,6 +34,7 @@ type AppProps = {
   registry: ToolRegistry;
   approval: ApprovalMode;
   store: TranscriptStore;
+  availableSkills?: SkillSummary[];
   maxTurns?: number;
   onExit: () => void;
 };
@@ -121,6 +123,7 @@ export function TuiApp(props: AppProps): React.ReactElement {
             sessionApprovalRules: sessionApprovalRulesRef.current,
             store: props.store,
             readState: readStateRef.current,
+            availableSkills: props.availableSkills,
           });
           Object.assign(props.session, updated);
           props.store.appendMessages(props.session.id, newMessages);

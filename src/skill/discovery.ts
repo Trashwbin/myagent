@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import type { SkillInfo, SkillScope, SkillSummary } from "./types.js";
 
 type SkillRoot = {
@@ -66,6 +66,15 @@ export function summarizeSkills(skills: SkillInfo[]): SkillSummary[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+export async function sampleSkillFiles(skill: SkillInfo, limit = 10): Promise<string[]> {
+  const files = await findFiles(skill.baseDir);
+  return files
+    .filter((file) => basename(file) !== "SKILL.md")
+    .sort()
+    .slice(0, limit)
+    .map((file) => relative(skill.baseDir, file));
+}
+
 function skillRoots(options: DiscoverSkillsOptions): SkillRoot[] {
   const cwd = resolve(options.cwd);
   const myagentHome =
@@ -115,6 +124,31 @@ async function findSkillFiles(root: string): Promise<string[]> {
   if (!rootStat?.isDirectory()) return [];
   await walk(root);
   return out.sort();
+}
+
+async function findFiles(root: string): Promise<string[]> {
+  const out: string[] = [];
+
+  async function walk(dir: string): Promise<void> {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+      } else if (entry.isFile()) {
+        out.push(fullPath);
+      }
+    }
+  }
+
+  await walk(root);
+  return out;
 }
 
 async function parseSkillFile(filePath: string): Promise<ParsedSkill | undefined> {

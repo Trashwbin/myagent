@@ -17,5 +17,6 @@ export type ToolDefinition = {
   name: string;
   description: string;
   inputSchema: ZodType;
+  preparePermissionInput?(input: unknown, context: ToolContext): unknown;
   execute(input: unknown, context: ToolContext): Promise<ToolResult>;
 };

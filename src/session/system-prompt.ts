@@ -1,10 +1,35 @@
-export function buildSystemPrompt(cwd: string): string {
-  return [
+import { formatSkillSummary } from "../skill/format.js";
+import type { SkillSummary } from "../skill/types.js";
+
+export type SystemPromptOptions = {
+  availableSkills?: SkillSummary[];
+};
+
+export function buildSystemPrompt(cwd: string, options: SystemPromptOptions = {}): string {
+  const skillSummary = formatSkillSummary(options.availableSkills ?? []);
+  const sections = [
     "You are myagent, a local coding-agent runtime.",
     "",
     "Workspace:",
     `- The workspace root is: ${cwd}`,
     "",
+  ];
+
+  if (skillSummary) {
+    sections.push(
+      "Skills:",
+      "- Skills provide specialized instructions and workflows for specific tasks.",
+      "- Use the skill tool to load a skill when a task matches its description.",
+      "- Do not load a skill unless the current task clearly matches an available skill.",
+      "- Full skill content is available only by calling the skill tool.",
+      "",
+      "Available skills:",
+      skillSummary,
+      "",
+    );
+  }
+
+  sections.push(
     "Tool discipline:",
     "- Prefer dedicated tools over bash for file exploration (glob, grep, Read, find_up).",
     "- Use bash only for git/build/test scripts, simple filesystem primitives (cp, mv, mkdir), or commands dedicated tools cannot express.",
@@ -24,5 +49,7 @@ export function buildSystemPrompt(cwd: string): string {
     "- Prefer small, direct tool calls.",
     "- Explain final results based on actual tool results.",
     "- Do not claim you changed files unless the tool result confirms success.",
-  ].join("\n");
+  );
+
+  return sections.join("\n");
 }

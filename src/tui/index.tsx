@@ -19,6 +19,7 @@ import type { Provider } from "../model/provider.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { TranscriptStore } from "../storage/store.js";
 import type { SessionState } from "../session/loop.js";
+import type { SkillSummary } from "../skill/types.js";
 
 export type LaunchTuiOptions = {
   session: SessionState;
@@ -28,6 +29,7 @@ export type LaunchTuiOptions = {
   registry: ToolRegistry;
   approval: ApprovalMode;
   store: TranscriptStore;
+  availableSkills?: SkillSummary[];
   maxTurns?: number;
 };
 

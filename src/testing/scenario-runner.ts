@@ -17,9 +17,12 @@ import { listDirTool } from "../tools/list-dir.js";
 import { applyPatchTool } from "../tools/apply-patch.js";
 import { globTool } from "../tools/glob.js";
 import { findUpTool } from "../tools/find-up.js";
+import { createSkillTool } from "../tools/skill.js";
 import { ReadStateTracker } from "../tools/file-mutation.js";
 import { runSession } from "../session/loop.js";
 import type { ApprovalResponse } from "../permission/approval.js";
+import { discoverSkills, summarizeSkills } from "../skill/discovery.js";
+import type { SkillSummary } from "../skill/types.js";
 
 import type {
   LiveScenarioConfig,
@@ -28,7 +31,10 @@ import type {
 } from "./scenario-types.js";
 import { TranscriptCapture, evaluateScenario } from "./transcript-capture.js";
 
-function buildRegistry(): ToolRegistry {
+async function buildRegistry(cwd: string): Promise<{
+  registry: ToolRegistry;
+  availableSkills: SkillSummary[];
+}> {
   const registry = new ToolRegistry();
   registry.register(readFileTool);
   registry.register(searchTool);
@@ -39,7 +45,9 @@ function buildRegistry(): ToolRegistry {
   registry.register(applyPatchTool);
   registry.register(globTool);
   registry.register(findUpTool);
-  return registry;
+  const skills = await discoverSkills({ cwd });
+  if (skills.length > 0) registry.register(createSkillTool(skills));
+  return { registry, availableSkills: summarizeSkills(skills) };
 }
 
 function createProviderFromConfig(config: LiveScenarioConfig): Provider {
@@ -139,7 +147,7 @@ export async function runScenario(
   };
 
   const provider = createProviderFromConfig(effectiveConfig);
-  const registry = buildRegistry();
+  const { registry, availableSkills } = await buildRegistry(ws);
   const capture = new TranscriptCapture(config.provider, config.model, scenario.name);
   const readState = new ReadStateTracker();
 
@@ -162,6 +170,7 @@ export async function runScenario(
         onEvent: capture.handler,
         sessionApprovalRules: [],
         readState,
+        availableSkills,
       },
     );
 

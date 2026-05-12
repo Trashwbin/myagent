@@ -18,6 +18,7 @@ import type { Message } from "./message.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { createCheckpoint } from "../workspace/checkpoint.js";
 import { buildSystemPrompt } from "./system-prompt.js";
+import type { SkillSummary } from "../skill/types.js";
 import { ReadStateTracker } from "../tools/file-mutation.js";
 import { isMutationTool, getCheckpointPaths } from "../tools/mutation-policy.js";
 import type { ApprovalDisplay } from "../permission/display.js";
@@ -60,6 +61,7 @@ export type SessionOptions = {
   sessionApprovalRules?: ApprovalRule[];
   store?: PermissionStore;
   readState?: ReadStateTracker;
+  availableSkills?: SkillSummary[];
 };
 
 export type TurnOptions = {
@@ -70,6 +72,7 @@ export type TurnOptions = {
   sessionApprovalRules?: ApprovalRule[];
   store?: PermissionStore;
   readState?: ReadStateTracker;
+  availableSkills?: SkillSummary[];
 };
 
 export type SessionResult = {
@@ -135,7 +138,9 @@ async function runAgentLoop(
 ): Promise<{ aborted: boolean; stopReason?: "end_turn" | "tool_use" | "length" }> {
   const maxTurns = options.maxTurns ?? 10;
   const toolSchemas = buildToolSchemas(registry);
-  const systemPrompt = buildSystemPrompt(cwd);
+  const systemPrompt = buildSystemPrompt(cwd, {
+    availableSkills: options.availableSkills,
+  });
   const onEvent = options.onEvent;
   const sessionRules = options.sessionApprovalRules ?? [];
   const store = options.store;
@@ -194,7 +199,39 @@ async function runAgentLoop(
     }
 
     for (const tc of toolCalls) {
-      const decision = checkToolPermission(tc.name, tc.input, options.approval, cwd);
+      const tool = registry.get(tc.name);
+      if (!tool) {
+        const toolDisplay = buildToolResultDisplay(
+          tc.name,
+          tc.input,
+          `Tool not found: ${tc.name}`,
+        );
+        const msg: Message = {
+          role: "tool_result",
+          toolCallId: tc.id,
+          toolName: tc.name,
+          content: `Tool not found: ${tc.name}`,
+          toolDisplay,
+        };
+        messages.push(msg);
+        newMessages.push(msg);
+        if (onEvent)
+          await onEvent({
+            type: "tool_result",
+            message: msg,
+            display: toolDisplay,
+          });
+        continue;
+      }
+
+      const permissionInput =
+        tool.preparePermissionInput?.(tc.input, { cwd, readState }) ?? tc.input;
+      const decision = checkToolPermission(
+        tc.name,
+        permissionInput,
+        options.approval,
+        cwd,
+      );
       const toolInput = decision.resolvedInput ?? tc.input;
 
       let shouldExecute = false;
@@ -417,31 +454,6 @@ async function runAgentLoop(
         const toolDisplay = buildToolResultDisplay(tc.name, tc.input, `Tool call denied and was not executed: ${blockReason}`);
         const msg = blockedMsg(tc, blockReason);
         msg.toolDisplay = toolDisplay;
-        messages.push(msg);
-        newMessages.push(msg);
-        if (onEvent)
-          await onEvent({
-            type: "tool_result",
-            message: msg,
-            display: toolDisplay,
-          });
-        continue;
-      }
-
-      const tool = registry.get(tc.name);
-      if (!tool) {
-        const toolDisplay = buildToolResultDisplay(
-          tc.name,
-          tc.input,
-          `Tool not found: ${tc.name}`,
-        );
-        const msg: Message = {
-          role: "tool_result",
-          toolCallId: tc.id,
-          toolName: tc.name,
-          content: `Tool not found: ${tc.name}`,
-          toolDisplay,
-        };
         messages.push(msg);
         newMessages.push(msg);
         if (onEvent)

@@ -5,6 +5,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { TranscriptStore } from "../storage/store.js";
 import type { ApprovalMode } from "../permission/policy.js";
 import type { ServerMessage } from "./protocol.js";
+import type { SkillSummary } from "../skill/types.js";
 import { parseClientMessage } from "./protocol.js";
 import { SessionManager } from "./session-api.js";
 import { EMBEDDED_HTML } from "./html.js";
@@ -17,6 +18,7 @@ type AppServerDeps = {
   registry: ToolRegistry;
   approval: ApprovalMode;
   store: TranscriptStore;
+  availableSkills?: SkillSummary[];
   maxTurns?: number;
   cwd: string;
 };
@@ -40,6 +42,7 @@ export function createAppServer(deps: AppServerDeps): Server {
     registry: deps.registry,
     approval: deps.approval,
     store: deps.store,
+    availableSkills: deps.availableSkills,
     maxTurns: deps.maxTurns,
     sendEvent,
   });

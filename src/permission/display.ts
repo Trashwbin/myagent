@@ -55,6 +55,8 @@ export function buildApprovalDisplay(
       return buildListDirDisplay(input, decision);
     case "find_up":
       return buildFindUpDisplay(input, decision);
+    case "skill":
+      return buildSkillDisplay(input, decision);
     default:
       return {
         kind: "access",
@@ -62,6 +64,18 @@ export function buildApprovalDisplay(
         subject: String((input as Record<string, unknown>)?.path ?? toolName),
       };
   }
+}
+
+function buildSkillDisplay(
+  input: unknown,
+  _decision: ToolPermissionDecision,
+): ApprovalDisplay {
+  const name = String((input as Record<string, unknown>)?.name ?? "skill");
+  return {
+    kind: "access",
+    prompt: "Load skill?",
+    subject: name,
+  };
 }
 
 function buildBashDisplay(

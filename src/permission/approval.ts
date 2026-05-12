@@ -67,6 +67,10 @@ export function buildApprovalPattern(
       const paths = meta.affectedPaths as string[] | undefined;
       return paths ? paths.sort().join(",") : "patch";
     }
+    case "skill": {
+      const meta = decision.metadata ?? {};
+      return (meta.approvalPattern as string | undefined) ?? (input as { name?: string }).name;
+    }
     default:
       return undefined;
   }

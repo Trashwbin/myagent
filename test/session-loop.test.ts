@@ -8,6 +8,7 @@ import { bashTool } from "../src/tools/bash.js";
 import { listDirTool } from "../src/tools/list-dir.js";
 import { searchTool } from "../src/tools/search.js";
 import { applyPatchTool } from "../src/tools/apply-patch.js";
+import { createSkillTool } from "../src/tools/skill.js";
 import { ReadStateTracker } from "../src/tools/file-mutation.js";
 import { runSession, runTurn } from "../src/session/loop.js";
 import type { TurnEvent } from "../src/session/loop.js";
@@ -121,6 +122,102 @@ describe("Session loop (runSession wrapper)", () => {
     });
 
     await rm(tmp, { recursive: true });
+  });
+
+  it("loads workspace skill in auto mode", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-skill-loop-"));
+    const registry = new ToolRegistry();
+    registry.register(
+      createSkillTool([
+        {
+          name: "reviewer",
+          description: "Review code changes.",
+          content: "# Review\nUse concise findings.",
+          location: join(tmp, ".agents", "skills", "reviewer", "SKILL.md"),
+          baseDir: join(tmp, ".agents", "skills", "reviewer"),
+          scope: "workspace",
+        },
+      ]),
+    );
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "tc1", name: "skill", input: { name: "reviewer" } },
+        { type: "stop", reason: "tool_use" },
+      ],
+      [{ type: "text_delta", text: "Loaded." }, { type: "stop", reason: "end_turn" }],
+    ]);
+
+    const { transcript } = await runSession(
+      provider,
+      registry,
+      [{ role: "user", content: "review this" }],
+      {
+        cwd: tmp,
+        approval: "auto",
+        availableSkills: [
+          { name: "reviewer", description: "Review code changes.", scope: "workspace" },
+        ],
+      },
+    );
+
+    expect(transcript[2]).toMatchObject({
+      role: "tool_result",
+      toolName: "skill",
+    });
+    expect(transcript[2].content).toContain('<skill_content name="reviewer">');
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("asks before loading global skill in auto mode", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-skill-loop-global-"));
+    const registry = new ToolRegistry();
+    registry.register(
+      createSkillTool([
+        {
+          name: "global-docs",
+          description: "Global docs workflow.",
+          content: "# Docs",
+          location: join(tmp, "SKILL.md"),
+          baseDir: tmp,
+          scope: "global",
+        },
+      ]),
+    );
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tc1",
+          name: "skill",
+          input: { name: "global-docs" },
+        },
+        { type: "stop", reason: "tool_use" },
+      ],
+    ]);
+    const events: TurnEvent[] = [];
+
+    const { newMessages } = await runTurn(
+      provider,
+      registry,
+      { id: "s1", cwd: tmp, messages: [] },
+      "load docs",
+      {
+        approval: "auto",
+        approvalHandler: async () => "abort",
+        onEvent: (event) => events.push(event),
+        availableSkills: [
+          { name: "global-docs", description: "Global docs workflow.", scope: "global" },
+        ],
+      },
+    );
+
+    expect(events.some((event) => event.type === "tool_approval_required")).toBe(true);
+    expect(newMessages.at(-1)).toMatchObject({
+      role: "tool_result",
+      toolName: "skill",
+    });
+    expect(newMessages.at(-1)?.content).toContain("requires approval");
+    await rm(tmp, { recursive: true, force: true });
   });
 
   it("blocks denied tool_call", async () => {

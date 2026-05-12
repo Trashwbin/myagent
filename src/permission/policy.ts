@@ -58,9 +58,59 @@ export function checkToolPermission(
       return finalize(checkBash(input, cwd));
     case "apply_patch":
       return finalize(checkApplyPatch(input, mode, cwd));
+    case "skill":
+      return finalize(checkSkill(input, mode));
     default:
       return { behavior: "deny", reason: `unknown tool: ${toolName}` };
   }
+}
+
+function checkSkill(input: unknown, mode: ApprovalMode): ToolPermissionDecision {
+  const name = String((input as { name?: string })?.name ?? "");
+  const scope = String((input as { scope?: string })?.scope ?? "");
+  if (!name.trim()) {
+    return { behavior: "deny", reason: "skill name is required" };
+  }
+  if (!scope) {
+    return {
+      behavior: "deny",
+      reason: `skill not found: ${name}`,
+      metadata: { skillName: name },
+    };
+  }
+  if (mode === "never") {
+    return {
+      behavior: "deny",
+      reason: "skill loads denied in never-approval mode",
+      metadata: { skillName: name, skillScope: scope },
+    };
+  }
+  if (mode === "on-request") {
+    return {
+      behavior: "ask",
+      reason: "skill load requires approval",
+      metadata: {
+        skillName: name,
+        approvalPattern: name,
+      },
+    };
+  }
+  if (mode === "auto" && scope !== "workspace") {
+    return {
+      behavior: "ask",
+      reason: "external skill load requires approval",
+      metadata: {
+        skillName: name,
+        skillScope: scope,
+        approvalPattern: name,
+      },
+    };
+  }
+  return {
+    behavior: "allow",
+    reason: "skill load is safe",
+    metadata: { skillName: name, skillScope: scope },
+  };
 }
 
 function checkRead(input: unknown, cwd: string): ToolPermissionDecision {

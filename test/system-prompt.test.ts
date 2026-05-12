@@ -49,6 +49,24 @@ describe("system prompt", () => {
     expect(prompt).not.toContain("grep — locate specific content");
     expect(prompt).not.toContain("Read — read targeted sections");
   });
+
+  it("lists available skills without leaking full skill content", () => {
+    const prompt = buildSystemPrompt("/tmp/workspace", {
+      availableSkills: [
+        {
+          name: "reviewer",
+          description: "Review code changes.",
+          scope: "workspace",
+        },
+      ],
+    });
+
+    expect(prompt).toContain("Skills:");
+    expect(prompt).toContain("Use the skill tool to load a skill");
+    expect(prompt).toContain("- reviewer (workspace): Review code changes.");
+    expect(prompt).not.toContain("<skill_content");
+    expect(prompt).not.toContain("# Skill: reviewer");
+  });
 });
 
 describe("tool descriptions", () => {

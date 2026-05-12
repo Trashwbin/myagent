@@ -88,6 +88,8 @@ export function toolDisplayTitle(toolName: string): string {
       return "Write file";
     case "apply_patch":
       return "Apply patch";
+    case "skill":
+      return "Load skill";
     default:
       return toolName;
   }
@@ -114,6 +116,7 @@ export function toolTarget(toolName: string, input: unknown): string {
   if (toolName === "bash") return truncate(String(obj.command || ""), 180);
   if (toolName === "apply_patch") return summarizePatch(String(obj.patch || ""));
   if (toolName === "edit_file" || toolName === "write_file") return String(obj.path || "");
+  if (toolName === "skill") return String(obj.name || "");
   return "";
 }
 
@@ -130,6 +133,7 @@ export function summarizeToolResult(toolName: string, content: string): string {
   if (toolName === "bash") {
     return lines.length <= 1 ? truncate(text || "completed", 140) : `${lines.length} lines`;
   }
+  if (toolName === "skill") return text.startsWith("Error:") ? "failed" : "loaded";
   if (isMutationToolName(toolName)) return "completed";
   return lines.length ? `${lines.length} lines` : "completed";
 }

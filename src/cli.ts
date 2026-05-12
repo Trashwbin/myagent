@@ -15,6 +15,7 @@ import { listDirTool } from "./tools/list-dir.js";
 import { applyPatchTool } from "./tools/apply-patch.js";
 import { globTool } from "./tools/glob.js";
 import { findUpTool } from "./tools/find-up.js";
+import { createSkillTool } from "./tools/skill.js";
 import { ReadStateTracker } from "./tools/file-mutation.js";
 import { runTurn } from "./session/loop.js";
 import type { ApprovalRequest, SessionState, TurnEvent } from "./session/loop.js";
@@ -35,6 +36,8 @@ import {
   resolveProviderName,
 } from "./config/config.js";
 import type { Config, ProviderName } from "./config/config.js";
+import { discoverSkills, summarizeSkills } from "./skill/discovery.js";
+import type { SkillInfo, SkillSummary } from "./skill/types.js";
 
 function canonicalWorkspaceRoot(path: string): string {
   return realpathSync.native(resolve(path));
@@ -256,7 +259,7 @@ function resolveSessionProvider(config: Config): {
   };
 }
 
-function buildRegistry(): ToolRegistry {
+function buildRegistry(skills: SkillInfo[] = []): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register(readFileTool);
   registry.register(searchTool);
@@ -267,6 +270,7 @@ function buildRegistry(): ToolRegistry {
   registry.register(applyPatchTool);
   registry.register(globTool);
   registry.register(findUpTool);
+  if (skills.length > 0) registry.register(createSkillTool(skills));
   return registry;
 }
 
@@ -276,6 +280,7 @@ async function chatMode(
   session: SessionState,
   approval: ApprovalMode,
   store: TranscriptStore,
+  availableSkills: SkillSummary[] = [],
   maxTurns?: number,
 ) {
   const rl = readline.createInterface({
@@ -311,6 +316,7 @@ async function chatMode(
           sessionApprovalRules,
           store,
           readState,
+          availableSkills,
         });
         Object.assign(session, updated);
         store.appendMessages(session.id, newMessages);
@@ -370,13 +376,15 @@ async function handleResume(sessionId: string, options: { cwd: string }): Promis
     cwd = session.cwd;
     config = loadConfig({ workspaceRoot: cwd });
     const provider = createProvider(config);
-    const registry = buildRegistry();
+    const skills = await discoverSkills({ cwd });
+    const registry = buildRegistry(skills);
     await chatMode(
       provider,
       registry,
       session,
       resolveApprovalMode(config),
       store,
+      summarizeSkills(skills),
       config.maxTurns,
     );
   } finally {
@@ -397,13 +405,15 @@ async function handleMainRun(options: { cwd: string }): Promise<void> {
       model: resolved.model,
     });
     const provider = createProvider(config);
-    const registry = buildRegistry();
+    const skills = await discoverSkills({ cwd });
+    const registry = buildRegistry(skills);
     await chatMode(
       provider,
       registry,
       session,
       resolveApprovalMode(config),
       store,
+      summarizeSkills(skills),
       config.maxTurns,
     );
   } finally {
@@ -424,7 +434,8 @@ async function handleTui(options: { cwd: string }): Promise<void> {
       model: resolved.model,
     });
     const provider = createProvider(config);
-    const registry = buildRegistry();
+    const skills = await discoverSkills({ cwd });
+    const registry = buildRegistry(skills);
 
     const { launchTui } = await import("./tui/index.js");
     await launchTui({
@@ -435,6 +446,7 @@ async function handleTui(options: { cwd: string }): Promise<void> {
       registry,
       approval: resolveApprovalMode(config),
       store,
+      availableSkills: summarizeSkills(skills),
       maxTurns: config.maxTurns,
     });
   } finally {
@@ -452,7 +464,8 @@ async function handleApp(options: { cwd: string }): Promise<void> {
   const config = loadConfig({ workspaceRoot: cwd });
   const resolved = resolveSessionProvider(config);
   const provider = createProvider(config);
-  const registry = buildRegistry();
+  const skills = await discoverSkills({ cwd });
+  const registry = buildRegistry(skills);
   const store = openStore();
   const { createAppServer, findAvailablePort } = await import("./app/server.js");
   const port = await findAvailablePort(43110);
@@ -463,6 +476,7 @@ async function handleApp(options: { cwd: string }): Promise<void> {
     registry,
     approval: resolveApprovalMode(config),
     store,
+    availableSkills: summarizeSkills(skills),
     maxTurns: config.maxTurns,
     cwd,
   });
