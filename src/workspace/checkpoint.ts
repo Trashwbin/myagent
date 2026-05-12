@@ -1,9 +1,10 @@
-import { copyFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
 import {
   assertCheckpointId,
   generateCheckpointId,
   getCheckpointStorePaths,
+  listShadowCheckpointMetadata,
   readShadowCheckpointMetadata,
   type Checkpoint,
   type CheckpointFile,
@@ -80,6 +81,23 @@ async function buildLegacyCheckpointFiles(cwd: string, files: string[]): Promise
   }
 
   return fileEntries;
+}
+
+async function collectWorkspaceFiles(cwd: string, dir = cwd): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    if (entry.name === ".git" || entry.name === ".myagent") continue;
+    const abs = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await collectWorkspaceFiles(cwd, abs)));
+    } else if (entry.isFile()) {
+      files.push(relative(cwd, abs));
+    }
+  }
+
+  return files;
 }
 
 async function readLegacyCheckpoint(
@@ -209,4 +227,30 @@ export async function restoreCheckpoint(
 
   await restoreLegacyCheckpoint(cwd, legacy);
   return legacy;
+}
+
+export async function getCheckpoint(
+  cwd: string,
+  checkpointId: string,
+): Promise<Checkpoint | undefined> {
+  assertCheckpointId(checkpointId);
+  const shadow = await readShadowCheckpointMetadata(cwd, checkpointId);
+  if (shadow) return shadow;
+  return readLegacyCheckpoint(cwd, checkpointId);
+}
+
+export async function listCheckpoints(cwd: string): Promise<Checkpoint[]> {
+  const shadow = await listShadowCheckpointMetadata(cwd);
+  return shadow;
+}
+
+export async function createRestorePoint(cwd: string, reason: string): Promise<Checkpoint> {
+  const checkpoint: Checkpoint = {
+    id: generateCheckpointId(),
+    createdAt: new Date().toISOString(),
+    cwd,
+    reason,
+    files: await buildShadowCheckpointFiles(cwd, await collectWorkspaceFiles(cwd)),
+  };
+  return createShadowCheckpoint(cwd, checkpoint);
 }

@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { createCheckpoint, restoreCheckpoint } from "../src/workspace/checkpoint.js";
+import {
+  createCheckpoint,
+  createRestorePoint,
+  getCheckpoint,
+  listCheckpoints,
+  restoreCheckpoint,
+} from "../src/workspace/checkpoint.js";
 import { getCheckpointStorePaths, workspaceHash } from "../src/workspace/checkpoint-store.js";
 import { mkdir, mkdtemp, writeFile, readFile, rm, chmod, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -154,6 +160,40 @@ describe("checkpoint", () => {
 
     expect(first.parentCommitHash).toBeUndefined();
     expect(second.parentCommitHash).toBe(first.commitHash);
+    await rm(tmp, { recursive: true });
+  });
+
+  it("lists and reads shadow checkpoints", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-cp-"));
+    await writeFile(join(tmp, "a.txt"), "one");
+    const first = await createCheckpoint(tmp, ["a.txt"]);
+    await writeFile(join(tmp, "a.txt"), "two");
+    const second = await createCheckpoint(tmp, ["a.txt"]);
+
+    expect((await getCheckpoint(tmp, first.id))?.id).toBe(first.id);
+    expect((await listCheckpoints(tmp)).map((cp) => cp.id)).toEqual([
+      first.id,
+      second.id,
+    ]);
+    await rm(tmp, { recursive: true });
+  });
+
+  it("creates restore points for the current workspace", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-cp-"));
+    await mkdir(join(tmp, ".git"), { recursive: true });
+    await mkdir(join(tmp, ".myagent"), { recursive: true });
+    await writeFile(join(tmp, ".git", "ignored"), "git");
+    await writeFile(join(tmp, ".myagent", "ignored"), "local");
+    await writeFile(join(tmp, "a.txt"), "restore-point");
+
+    const restorePoint = await createRestorePoint(tmp, "before rewind");
+    await writeFile(join(tmp, "a.txt"), "changed");
+
+    await restoreCheckpoint(tmp, restorePoint.id);
+
+    expect(restorePoint.reason).toBe("before rewind");
+    expect(restorePoint.files.map((file) => file.path)).toEqual(["a.txt"]);
+    expect(await readFile(join(tmp, "a.txt"), "utf-8")).toBe("restore-point");
     await rm(tmp, { recursive: true });
   });
 

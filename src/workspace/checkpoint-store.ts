@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -24,6 +24,7 @@ export type Checkpoint = {
   treeHash?: string;
   commitHash?: string;
   parentCommitHash?: string;
+  reason?: string;
 };
 
 export type CheckpointStorePaths = {
@@ -89,4 +90,26 @@ export async function readShadowCheckpointMetadata(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
+}
+
+export async function listShadowCheckpointMetadata(cwd: string): Promise<Checkpoint[]> {
+  const paths = getCheckpointStorePaths(cwd);
+  let entries: string[];
+  try {
+    entries = await readdir(paths.metadataDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+
+  const checkpoints = await Promise.all(
+    entries
+      .filter((entry) => entry.endsWith(".json"))
+      .map(async (entry) => {
+        const raw = await readFile(join(paths.metadataDir, entry), "utf-8");
+        return JSON.parse(raw) as Checkpoint;
+      }),
+  );
+
+  return checkpoints.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
