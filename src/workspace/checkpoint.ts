@@ -76,7 +76,7 @@ export async function createCheckpoint(
 export async function restoreCheckpoint(
   cwd: string,
   checkpointId: string,
-): Promise<void> {
+): Promise<Checkpoint> {
   if (checkpointId !== basename(checkpointId)) {
     throw new Error(`Invalid checkpoint id: ${checkpointId}`);
   }
@@ -103,4 +103,6 @@ export async function restoreCheckpoint(
       }
     }
   }
+
+  return checkpoint;
 }
