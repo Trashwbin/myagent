@@ -9,6 +9,16 @@ export type RewindResult = {
   }>;
 };
 
+export function formatRewindMessage(
+  action: "rewind" | "revert-last",
+  result: RewindResult,
+): string {
+  const files = result.files
+    .map((file) => `${file.existed ? "restored" : "deleted"} ${file.path}`)
+    .join(", ");
+  return `${action} restored checkpoint ${result.checkpointId}${files ? ` (${files})` : ""}`;
+}
+
 export function findLastCheckpoint(messages: Message[]): string | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];

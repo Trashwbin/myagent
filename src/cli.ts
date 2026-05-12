@@ -38,7 +38,11 @@ import {
 import type { Config, ProviderName } from "./config/config.js";
 import { discoverSkills, summarizeSkills } from "./skill/discovery.js";
 import type { SkillInfo, SkillSummary } from "./skill/types.js";
-import { revertLast, rewindSession } from "./session/revert.js";
+import {
+  formatRewindMessage,
+  revertLast,
+  rewindSession,
+} from "./session/revert.js";
 
 function canonicalWorkspaceRoot(path: string): string {
   return realpathSync.native(resolve(path));
@@ -210,16 +214,6 @@ function printSessionList(
     console.log(`  provider: ${s.provider ?? "-"}  model: ${s.model ?? "-"}`);
     console.log(`  updated: ${time}`);
   }
-}
-
-function formatRewindMessage(
-  action: "rewind" | "revert-last",
-  result: { checkpointId: string; files: Array<{ path: string; existed: boolean }> },
-): string {
-  const files = result.files
-    .map((file) => `${file.existed ? "restored" : "deleted"} ${file.path}`)
-    .join(", ");
-  return `${action} restored checkpoint ${result.checkpointId}${files ? ` (${files})` : ""}`;
 }
 
 function printRewindResult(

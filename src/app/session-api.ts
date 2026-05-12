@@ -10,7 +10,11 @@ import type { ServerMessage } from "./protocol.js";
 import { randomUUID } from "node:crypto";
 import type { Message } from "../model/types.js";
 import type { SkillSummary } from "../skill/types.js";
-import { revertLast, rewindSession } from "../session/revert.js";
+import {
+  formatRewindMessage,
+  revertLast,
+  rewindSession,
+} from "../session/revert.js";
 
 type PendingApproval = {
   id: string;
@@ -209,14 +213,4 @@ export class SessionManager {
     });
     return { ok: true };
   }
-}
-
-function formatRewindMessage(
-  action: "rewind" | "revert-last",
-  result: { checkpointId: string; files: Array<{ path: string; existed: boolean }> },
-): string {
-  const files = result.files
-    .map((file) => `${file.existed ? "restored" : "deleted"} ${file.path}`)
-    .join(", ");
-  return `${action} restored checkpoint ${result.checkpointId}${files ? ` (${files})` : ""}`;
 }

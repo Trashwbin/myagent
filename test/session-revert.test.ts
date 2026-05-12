@@ -7,11 +7,24 @@ import type { Message } from "../src/model/types.js";
 import { createCheckpoint } from "../src/workspace/checkpoint.js";
 import {
   findLastCheckpoint,
+  formatRewindMessage,
   revertLast,
   rewindSession,
 } from "../src/session/revert.js";
 
 describe("session revert", () => {
+  it("formats restored and deleted files consistently", () => {
+    expect(
+      formatRewindMessage("rewind", {
+        checkpointId: "cp1",
+        files: [
+          { path: "a.txt", existed: true },
+          { path: "new.txt", existed: false },
+        ],
+      }),
+    ).toBe("rewind restored checkpoint cp1 (restored a.txt, deleted new.txt)");
+  });
+
   it("finds the latest checkpoint from tool results", () => {
     const messages: Message[] = [
       { role: "user", content: "edit" },

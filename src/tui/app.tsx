@@ -8,6 +8,11 @@ import type { TranscriptStore } from "../storage/store.js";
 import type { SessionState, ApprovalRequest, TurnEvent } from "../session/loop.js";
 import type { SkillSummary } from "../skill/types.js";
 import { runTurn } from "../session/loop.js";
+import {
+  formatRewindMessage,
+  revertLast,
+  rewindSession,
+} from "../session/revert.js";
 import { ProviderRuntimeError, formatProviderError } from "../model/errors.js";
 import { ReadStateTracker } from "../tools/file-mutation.js";
 import {
@@ -83,6 +88,61 @@ export function TuiApp(props: AppProps): React.ReactElement {
     (text: string) => {
       if (!text.trim()) return;
       const expanded = expandPromptText({ input: text, parts: pasteParts });
+      const command = expanded.trim();
+
+      if (command.startsWith("/rewind ") || command === "/revert-last") {
+        setPhase("running");
+        setError(null);
+        setInputState({ value: "", cursor: 0 });
+        setPasteParts([]);
+
+        const runCommand = async () => {
+          try {
+            const result = command.startsWith("/rewind ")
+              ? await rewindSession(
+                  props.session,
+                  command.slice("/rewind ".length).trim(),
+                )
+              : await revertLast(props.session);
+            const action = command.startsWith("/rewind ")
+              ? "rewind"
+              : "revert-last";
+            const message = formatRewindMessage(action, result);
+            const assistantMessage = { role: "assistant" as const, content: message };
+            props.session.messages.push(assistantMessage);
+            props.store.appendMessages(props.session.id, [assistantMessage]);
+            setTimeline((prev) => [
+              ...prev,
+              { type: "status", level: "info", text: message },
+            ]);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "Command failed";
+            setTimeline((prev) => [
+              ...prev,
+              { type: "status", level: "error", text: message },
+            ]);
+            setError(message);
+          } finally {
+            setPhase("idle");
+          }
+        };
+
+        void runCommand();
+        return;
+      }
+
+      if (command === "/rewind") {
+        const message = "Usage: /rewind <checkpointId>";
+        setTimeline((prev) => [
+          ...prev,
+          { type: "status", level: "warn", text: message },
+        ]);
+        setError(message);
+        setInputState({ value: "", cursor: 0 });
+        setPasteParts([]);
+        return;
+      }
+
       setTimeline((prev) => appendUserItem(prev, text));
       setPhase("running");
       setError(null);
