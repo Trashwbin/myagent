@@ -38,6 +38,8 @@ import {
 import type { Config, ProviderName } from "./config/config.js";
 import { discoverSkills, summarizeSkills } from "./skill/discovery.js";
 import type { SkillInfo, SkillSummary } from "./skill/types.js";
+import { compactSession } from "./session/compact.js";
+import type { CompactResult } from "./session/compact.js";
 import {
   formatRewindMessage,
   revertLast,
@@ -223,12 +225,31 @@ function printRewindResult(
   console.log(formatRewindMessage(action, result));
 }
 
+function printCompactResult(result: CompactResult): void {
+  console.log(
+    `Compacted ${result.compactedCount} messages; retained ${result.retainedCount} messages.`,
+  );
+}
+
 async function handleSessionCommand(
+  provider: Provider,
   session: SessionState,
   store: TranscriptStore,
   input: string,
 ): Promise<boolean> {
   const trimmed = input.trim();
+  if (trimmed === "/compact") {
+    try {
+      const result = await compactSession(provider, session);
+      session.messages = result.messages;
+      store.replaceMessages(session.id, result.messages);
+      printCompactResult(result);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : "Compact failed");
+    }
+    return true;
+  }
+
   if (trimmed.startsWith("/rewind ")) {
     const checkpointId = trimmed.slice("/rewind ".length).trim();
     if (!checkpointId) {
@@ -346,7 +367,7 @@ async function chatMode(
       if (input === null) break;
       if (input.trim() === "") continue;
       if (input === "/exit" || input === "/quit") break;
-      if (await handleSessionCommand(session, store, input)) continue;
+      if (await handleSessionCommand(provider, session, store, input)) continue;
 
       try {
         const {
@@ -431,6 +452,24 @@ async function handleRevertLast(sessionId: string): Promise<void> {
     const message = formatRewindMessage("revert-last", result);
     store.appendMessages(session.id, [{ role: "assistant", content: message }]);
     printRewindResult("revert-last", result);
+  } finally {
+    store.close();
+  }
+}
+
+async function handleCompact(sessionId: string): Promise<void> {
+  const store = openStore();
+  try {
+    const session = store.getSession(sessionId);
+    if (!session) {
+      console.error(`Session not found: ${sessionId}`);
+      process.exit(1);
+    }
+    const config = loadConfig({ workspaceRoot: session.cwd });
+    const provider = createProvider(config);
+    const result = await compactSession(provider, session);
+    store.replaceMessages(session.id, result.messages);
+    printCompactResult(result);
   } finally {
     store.close();
   }
@@ -612,6 +651,14 @@ const revertLastCmd = program
 
 revertLastCmd.action(async (sessionId: string) => {
   await handleRevertLast(sessionId);
+});
+
+const compactCmd = program
+  .command("compact <sessionId>")
+  .description("Compact older transcript messages into a summary");
+
+compactCmd.action(async (sessionId: string) => {
+  await handleCompact(sessionId);
 });
 
 // Subcommand: tui

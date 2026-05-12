@@ -42,6 +42,7 @@ function makeTestProgram(): {
   tuiCalled: string[];
   rewindCalled: Array<{ sessionId: string; checkpointId: string }>;
   revertLastCalled: string[];
+  compactCalled: string[];
 } {
   const mainCalled: string[] = [];
   const sessionsCalled: string[] = [];
@@ -49,6 +50,7 @@ function makeTestProgram(): {
   const tuiCalled: string[] = [];
   const rewindCalled: Array<{ sessionId: string; checkpointId: string }> = [];
   const revertLastCalled: string[] = [];
+  const compactCalled: string[] = [];
 
   const program = new Command();
   program.exitOverride();
@@ -85,6 +87,12 @@ function makeTestProgram(): {
     });
 
   program
+    .command("compact <sessionId>")
+    .action((sessionId) => {
+      compactCalled.push(sessionId);
+    });
+
+  program
     .command("tui")
     .action(() => {
       tuiCalled.push(program.opts<{ cwd: string }>().cwd);
@@ -98,6 +106,7 @@ function makeTestProgram(): {
     tuiCalled,
     rewindCalled,
     revertLastCalled,
+    compactCalled,
   };
 }
 
@@ -139,6 +148,12 @@ describe("CLI subcommand routing", () => {
     const { program, revertLastCalled } = makeTestProgram();
     await program.parseAsync(["node", "myagent", "revert-last", "s1"]);
     expect(revertLastCalled).toEqual(["s1"]);
+  });
+
+  it("routes 'compact <sessionId>' subcommand", async () => {
+    const { program, compactCalled } = makeTestProgram();
+    await program.parseAsync(["node", "myagent", "compact", "s1"]);
+    expect(compactCalled).toEqual(["s1"]);
   });
 
   it("applies root --cwd after resume subcommand", async () => {
