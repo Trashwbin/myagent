@@ -107,4 +107,29 @@ describe("web timeline reducer", () => {
       text: "rewind restored checkpoint cp1",
     });
   });
+
+  it("appends a status part when a session is compacted", () => {
+    const state = appReducer(initialAppState, {
+      type: "timeline_loaded",
+      sessionId: "s1",
+      messages: [{ role: "user", content: "continue" }],
+    });
+
+    const next = appReducer(state, {
+      type: "server_message",
+      message: {
+        type: "session_compacted",
+        sessionId: "s1",
+        compactedCount: 4,
+        retainedCount: 2,
+        message: "Compacted 4 messages; retained 2 messages.",
+      },
+    });
+
+    expect(next.timelines.s1?.[0]?.assistantParts.at(-1)).toMatchObject({
+      kind: "status",
+      level: "info",
+      text: "Compacted 4 messages; retained 2 messages.",
+    });
+  });
 });

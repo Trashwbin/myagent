@@ -61,6 +61,16 @@ function delayedProvider(blocker: Promise<void>): Provider {
   };
 }
 
+function summaryProvider(summary: string): Provider {
+  return {
+    name: "test",
+    async *stream() {
+      yield { type: "text_delta" as const, text: summary };
+      yield { type: "stop" as const, reason: "end_turn" as const };
+    },
+  };
+}
+
 async function waitForCondition(check: () => boolean, message: string): Promise<void> {
   for (let i = 0; i < 100; i++) {
     if (check()) return;
@@ -109,7 +119,7 @@ describe("parseClientMessage", () => {
     expect(msg).toEqual({ type: "approval_decision", approvalId: "a1", decision: "allow_once" });
   });
 
-  it("parses rewind_session and revert_last", () => {
+  it("parses rewind_session, revert_last, and compact_session", () => {
     expect(
       parseClientMessage({
         type: "rewind_session",
@@ -119,6 +129,10 @@ describe("parseClientMessage", () => {
     ).toEqual({ type: "rewind_session", sessionId: "s1", checkpointId: "cp1" });
     expect(parseClientMessage({ type: "revert_last", sessionId: "s1" })).toEqual({
       type: "revert_last",
+      sessionId: "s1",
+    });
+    expect(parseClientMessage({ type: "compact_session", sessionId: "s1" })).toEqual({
+      type: "compact_session",
       sessionId: "s1",
     });
   });
@@ -408,6 +422,47 @@ describe("WebSocket", () => {
 
     expect(messages.at(-1)?.message).toContain("Turn already active");
     release();
+  });
+
+  it("compacts a session over websocket", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/test" });
+    store.appendMessages(session.id, [
+      { role: "user", content: "first" },
+      { role: "assistant", content: "first reply" },
+      { role: "user", content: "second" },
+    ]);
+    const port = await findAvailablePort(43200);
+    const server = createAppServer({
+      provider: summaryProvider("Summary of first turn"),
+      providerName: "openai",
+      modelName: "test-model",
+      registry: new ToolRegistry(),
+      approval: "auto",
+      store,
+      cwd: "/test",
+    });
+    activeServers.push(server);
+    await new Promise<void>((resolve) => {
+      server.listen(port, "127.0.0.1", () => resolve());
+    });
+
+    const messages = await wsCollect(port, (ws) => {
+      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+      ws.send(JSON.stringify({ type: "compact_session", sessionId: session.id }));
+    }, (msg) => msg.type === "session_compacted");
+
+    const compacted = messages.find((msg) => msg.type === "session_compacted");
+    expect(compacted).toMatchObject({
+      compactedCount: 2,
+      retainedCount: 1,
+      message: "Compacted 2 messages; retained 1 messages.",
+    });
+    expect(store.getSession(session.id)?.messages).toEqual([
+      { role: "summary", content: "Summary of first turn" },
+      { role: "user", content: "second" },
+    ]);
   });
 });
 

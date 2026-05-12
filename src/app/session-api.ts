@@ -10,6 +10,7 @@ import type { ServerMessage } from "./protocol.js";
 import { randomUUID } from "node:crypto";
 import type { Message } from "../model/types.js";
 import type { SkillSummary } from "../skill/types.js";
+import { compactSession } from "../session/compact.js";
 import {
   formatRewindMessage,
   revertLast,
@@ -213,4 +214,30 @@ export class SessionManager {
     });
     return { ok: true };
   }
+
+  async compactSession(sessionId: string): Promise<{ ok: boolean; error?: string }> {
+    const active = this.ensureSession(sessionId);
+    if (!active) return { ok: false, error: "Session not found" };
+    if (active.activeTurn) return { ok: false, error: "Turn already active for this session" };
+
+    const result = await compactSession(this.provider, active.session);
+    active.session.messages = result.messages;
+    this.store.replaceMessages(sessionId, result.messages);
+    const message = formatCompactMessage(result);
+    this.sendEvent(sessionId, {
+      type: "session_compacted",
+      sessionId,
+      compactedCount: result.compactedCount,
+      retainedCount: result.retainedCount,
+      message,
+    });
+    return { ok: true };
+  }
+}
+
+function formatCompactMessage(result: {
+  compactedCount: number;
+  retainedCount: number;
+}): string {
+  return `Compacted ${result.compactedCount} messages; retained ${result.retainedCount} messages.`;
 }

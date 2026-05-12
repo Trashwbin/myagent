@@ -234,6 +234,27 @@ export function createAppServer(deps: AppServerDeps): Server {
           break;
         }
 
+        case "compact_session": {
+          void manager.compactSession(msg.sessionId).then((result) => {
+            if (!result.ok) {
+              ws.send(JSON.stringify({
+                type: "error",
+                sessionId: msg.sessionId,
+                message: result.error,
+                code: "COMPACT_REJECTED",
+              }));
+            }
+          }).catch((err) => {
+            ws.send(JSON.stringify({
+              type: "error",
+              sessionId: msg.sessionId,
+              message: err instanceof Error ? err.message : "Compact failed",
+              code: "COMPACT_ERROR",
+            }));
+          });
+          break;
+        }
+
         case "cancel_turn": {
           ws.send(JSON.stringify({ type: "error", sessionId: msg.sessionId, message: "Cancel not supported yet", code: "UNSUPPORTED" }));
           break;

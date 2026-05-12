@@ -7,6 +7,7 @@ export type ClientMessage =
   | { type: "approval_decision"; approvalId: string; decision: ApprovalResponse }
   | { type: "rewind_session"; sessionId: string; checkpointId: string }
   | { type: "revert_last"; sessionId: string }
+  | { type: "compact_session"; sessionId: string }
   | { type: "cancel_turn"; sessionId: string };
 
 export type ServerMessage =
@@ -18,6 +19,13 @@ export type ServerMessage =
       sessionId: string;
       checkpointId: string;
       files: Array<{ path: string; existed: boolean }>;
+      message: string;
+    }
+  | {
+      type: "session_compacted";
+      sessionId: string;
+      compactedCount: number;
+      retainedCount: number;
       message: string;
     }
   | { type: "turn_finished"; sessionId: string }
@@ -69,6 +77,11 @@ export function parseClientMessage(raw: unknown): ClientMessage | { type: "error
       if (typeof msg.sessionId !== "string")
         return { type: "error", message: "revert_last requires sessionId" };
       return { type: "revert_last", sessionId: msg.sessionId };
+
+    case "compact_session":
+      if (typeof msg.sessionId !== "string")
+        return { type: "error", message: "compact_session requires sessionId" };
+      return { type: "compact_session", sessionId: msg.sessionId };
 
     case "cancel_turn":
       if (typeof msg.sessionId !== "string")

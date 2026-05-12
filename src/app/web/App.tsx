@@ -278,6 +278,17 @@ export function App() {
       return;
     }
 
+    if (text === "/compact") {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "compact_session",
+          sessionId,
+        }),
+      );
+      setInput("");
+      return;
+    }
+
     dispatch({
       type: "user_message_local",
       sessionId,
