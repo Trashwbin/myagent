@@ -50,13 +50,17 @@ export function getMyAgentHome(): string {
   return process.env.MYAGENT_HOME ?? join(homedir(), ".myagent");
 }
 
+export function getCheckpointHome(): string {
+  return process.env.MYAGENT_CHECKPOINT_HOME ?? getMyAgentHome();
+}
+
 export function workspaceHash(cwd: string): string {
   return createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 24);
 }
 
 export function getCheckpointStorePaths(cwd: string): CheckpointStorePaths {
   const hash = workspaceHash(cwd);
-  const root = join(getMyAgentHome(), "checkpoints", hash);
+  const root = join(getCheckpointHome(), "checkpoints", hash);
   return {
     root,
     repo: join(root, "repo.git"),
