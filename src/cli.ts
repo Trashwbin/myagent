@@ -38,6 +38,7 @@ import {
 import type { Config, ProviderName } from "./config/config.js";
 import { discoverSkills, summarizeSkills } from "./skill/discovery.js";
 import type { SkillInfo, SkillSummary } from "./skill/types.js";
+import { revertLast, rewindSession } from "./session/revert.js";
 
 function canonicalWorkspaceRoot(path: string): string {
   return realpathSync.native(resolve(path));
@@ -211,6 +212,55 @@ function printSessionList(
   }
 }
 
+function formatRewindMessage(
+  action: "rewind" | "revert-last",
+  result: { checkpointId: string; files: Array<{ path: string; existed: boolean }> },
+): string {
+  const files = result.files
+    .map((file) => `${file.existed ? "restored" : "deleted"} ${file.path}`)
+    .join(", ");
+  return `${action} restored checkpoint ${result.checkpointId}${files ? ` (${files})` : ""}`;
+}
+
+function printRewindResult(
+  action: "rewind" | "revert-last",
+  result: { checkpointId: string; files: Array<{ path: string; existed: boolean }> },
+): void {
+  console.log(formatRewindMessage(action, result));
+}
+
+async function handleSessionCommand(
+  session: SessionState,
+  store: TranscriptStore,
+  input: string,
+): Promise<boolean> {
+  const trimmed = input.trim();
+  if (trimmed.startsWith("/rewind ")) {
+    const checkpointId = trimmed.slice("/rewind ".length).trim();
+    if (!checkpointId) {
+      console.log("Usage: /rewind <checkpointId>");
+      return true;
+    }
+    const result = await rewindSession(session, checkpointId);
+    const message = formatRewindMessage("rewind", result);
+    store.appendMessages(session.id, [{ role: "assistant", content: message }]);
+    session.messages.push({ role: "assistant", content: message });
+    printRewindResult("rewind", result);
+    return true;
+  }
+
+  if (trimmed === "/revert-last") {
+    const result = await revertLast(session);
+    const message = formatRewindMessage("revert-last", result);
+    store.appendMessages(session.id, [{ role: "assistant", content: message }]);
+    session.messages.push({ role: "assistant", content: message });
+    printRewindResult("revert-last", result);
+    return true;
+  }
+
+  return false;
+}
+
 function createProvider(config: Config): Provider {
   const provider = resolveProviderName(config);
   const providerConfig = resolveProviderConfig(config, provider);
@@ -302,6 +352,7 @@ async function chatMode(
       if (input === null) break;
       if (input.trim() === "") continue;
       if (input === "/exit" || input === "/quit") break;
+      if (await handleSessionCommand(session, store, input)) continue;
 
       try {
         const {
@@ -349,6 +400,43 @@ function handleSessions(): void {
   const store = openStore();
   try {
     printSessionList(store.listSessions());
+  } finally {
+    store.close();
+  }
+}
+
+async function handleRewind(
+  sessionId: string,
+  checkpointId: string,
+): Promise<void> {
+  const store = openStore();
+  try {
+    const session = store.getSession(sessionId);
+    if (!session) {
+      console.error(`Session not found: ${sessionId}`);
+      process.exit(1);
+    }
+    const result = await rewindSession(session, checkpointId);
+    const message = formatRewindMessage("rewind", result);
+    store.appendMessages(session.id, [{ role: "assistant", content: message }]);
+    printRewindResult("rewind", result);
+  } finally {
+    store.close();
+  }
+}
+
+async function handleRevertLast(sessionId: string): Promise<void> {
+  const store = openStore();
+  try {
+    const session = store.getSession(sessionId);
+    if (!session) {
+      console.error(`Session not found: ${sessionId}`);
+      process.exit(1);
+    }
+    const result = await revertLast(session);
+    const message = formatRewindMessage("revert-last", result);
+    store.appendMessages(session.id, [{ role: "assistant", content: message }]);
+    printRewindResult("revert-last", result);
   } finally {
     store.close();
   }
@@ -514,6 +602,22 @@ const resumeCmd = program
 
 resumeCmd.action(async (sessionId: string) => {
   await handleResume(sessionId, program.opts<{ cwd: string }>());
+});
+
+const rewindCmd = program
+  .command("rewind <sessionId> <checkpointId>")
+  .description("Restore files from a checkpoint");
+
+rewindCmd.action(async (sessionId: string, checkpointId: string) => {
+  await handleRewind(sessionId, checkpointId);
+});
+
+const revertLastCmd = program
+  .command("revert-last <sessionId>")
+  .description("Restore the latest checkpoint in a session");
+
+revertLastCmd.action(async (sessionId: string) => {
+  await handleRevertLast(sessionId);
 });
 
 // Subcommand: tui
