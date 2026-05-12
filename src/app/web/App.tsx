@@ -253,6 +253,31 @@ export function App() {
     const sessionId = state.activeSessionId;
     if (!text || !sessionId || !wsRef.current || isActiveRunning(state)) return;
 
+    if (text.startsWith("/rewind ")) {
+      const checkpointId = text.slice("/rewind ".length).trim();
+      if (!checkpointId) return;
+      wsRef.current.send(
+        JSON.stringify({
+          type: "rewind_session",
+          sessionId,
+          checkpointId,
+        }),
+      );
+      setInput("");
+      return;
+    }
+
+    if (text === "/revert-last") {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "revert_last",
+          sessionId,
+        }),
+      );
+      setInput("");
+      return;
+    }
+
     dispatch({
       type: "user_message_local",
       sessionId,

@@ -6,10 +6,11 @@ import type { Provider } from "../src/model/provider.js";
 import type { TranscriptStore } from "../src/storage/store.js";
 import { openStore } from "../src/storage/store.js";
 import { ToolRegistry } from "../src/tools/registry.js";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WebSocket } from "ws";
+import { createCheckpoint } from "../src/workspace/checkpoint.js";
 
 let activeServers: import("node:http").Server[] = [];
 let activeStores: TranscriptStore[] = [];
@@ -106,6 +107,20 @@ describe("parseClientMessage", () => {
   it("parses valid approval_decision", () => {
     const msg = parseClientMessage({ type: "approval_decision", approvalId: "a1", decision: "allow_once" });
     expect(msg).toEqual({ type: "approval_decision", approvalId: "a1", decision: "allow_once" });
+  });
+
+  it("parses rewind_session and revert_last", () => {
+    expect(
+      parseClientMessage({
+        type: "rewind_session",
+        sessionId: "s1",
+        checkpointId: "cp1",
+      }),
+    ).toEqual({ type: "rewind_session", sessionId: "s1", checkpointId: "cp1" });
+    expect(parseClientMessage({ type: "revert_last", sessionId: "s1" })).toEqual({
+      type: "revert_last",
+      sessionId: "s1",
+    });
   });
 
   it("rejects invalid decision", () => {
@@ -331,6 +346,68 @@ describe("WebSocket", () => {
       ),
     ).toBe(true);
     expect(store.getSession(session.id)?.messages.some((m) => m.role === "user")).toBe(true);
+  });
+
+  it("rewinds a session over websocket", async () => {
+    const base = await tmpBaseDir();
+    const workspace = await tmpBaseDir();
+    const store = openTestStore(base);
+    await writeFile(join(workspace, "a.txt"), "before");
+    const checkpoint = await createCheckpoint(workspace, ["a.txt"]);
+    await writeFile(join(workspace, "a.txt"), "after");
+    const session = store.createSession({ workspaceRoot: workspace });
+    const { port } = await startTestServer(store);
+
+    const messages = await wsCollect(port, (ws) => {
+      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+      ws.send(
+        JSON.stringify({
+          type: "rewind_session",
+          sessionId: session.id,
+          checkpointId: checkpoint.id,
+        }),
+      );
+    }, (msg) => msg.type === "session_rewound");
+
+    const rewound = messages.find((msg) => msg.type === "session_rewound");
+    expect(rewound.checkpointId).toBe(checkpoint.id);
+    expect(await readFile(join(workspace, "a.txt"), "utf-8")).toBe("before");
+    expect(store.getSession(session.id)?.messages.at(-1)?.content).toContain(checkpoint.id);
+  });
+
+  it("rejects revert while a turn is active", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/test" });
+    let release!: () => void;
+    const blocker = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const port = await findAvailablePort(43200);
+    const server = createAppServer({
+      provider: delayedProvider(blocker),
+      providerName: "openai",
+      modelName: "test-model",
+      registry: new ToolRegistry(),
+      approval: "auto",
+      store,
+      cwd: "/test",
+    });
+    activeServers.push(server);
+    await new Promise<void>((resolve) => {
+      server.listen(port, "127.0.0.1", () => resolve());
+    });
+
+    const messages = await wsCollect(port, (ws) => {
+      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+      ws.send(JSON.stringify({ type: "user_message", sessionId: session.id, text: "hi" }));
+      setTimeout(() => {
+        ws.send(JSON.stringify({ type: "revert_last", sessionId: session.id }));
+      }, 20);
+    }, (msg) => msg.type === "error" && msg.code === "REVERT_REJECTED");
+
+    expect(messages.at(-1)?.message).toContain("Turn already active");
+    release();
   });
 });
 

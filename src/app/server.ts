@@ -192,6 +192,48 @@ export function createAppServer(deps: AppServerDeps): Server {
           break;
         }
 
+        case "rewind_session": {
+          void manager.rewindSession(msg.sessionId, msg.checkpointId).then((result) => {
+            if (!result.ok) {
+              ws.send(JSON.stringify({
+                type: "error",
+                sessionId: msg.sessionId,
+                message: result.error,
+                code: "REWIND_REJECTED",
+              }));
+            }
+          }).catch((err) => {
+            ws.send(JSON.stringify({
+              type: "error",
+              sessionId: msg.sessionId,
+              message: err instanceof Error ? err.message : "Rewind failed",
+              code: "REWIND_ERROR",
+            }));
+          });
+          break;
+        }
+
+        case "revert_last": {
+          void manager.revertLast(msg.sessionId).then((result) => {
+            if (!result.ok) {
+              ws.send(JSON.stringify({
+                type: "error",
+                sessionId: msg.sessionId,
+                message: result.error,
+                code: "REVERT_REJECTED",
+              }));
+            }
+          }).catch((err) => {
+            ws.send(JSON.stringify({
+              type: "error",
+              sessionId: msg.sessionId,
+              message: err instanceof Error ? err.message : "Revert failed",
+              code: "REVERT_ERROR",
+            }));
+          });
+          break;
+        }
+
         case "cancel_turn": {
           ws.send(JSON.stringify({ type: "error", sessionId: msg.sessionId, message: "Cancel not supported yet", code: "UNSUPPORTED" }));
           break;

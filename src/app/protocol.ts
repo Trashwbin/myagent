@@ -5,12 +5,21 @@ export type ClientMessage =
   | { type: "subscribe_session"; sessionId: string }
   | { type: "user_message"; sessionId: string; text: string }
   | { type: "approval_decision"; approvalId: string; decision: ApprovalResponse }
+  | { type: "rewind_session"; sessionId: string; checkpointId: string }
+  | { type: "revert_last"; sessionId: string }
   | { type: "cancel_turn"; sessionId: string };
 
 export type ServerMessage =
   | { type: "ready"; sessionId?: string }
   | { type: "turn_event"; sessionId: string; event: TurnEvent }
   | { type: "approval_required"; sessionId: string; approvalId: string; request: ApprovalRequest }
+  | {
+      type: "session_rewound";
+      sessionId: string;
+      checkpointId: string;
+      files: Array<{ path: string; existed: boolean }>;
+      message: string;
+    }
   | { type: "turn_finished"; sessionId: string }
   | { type: "error"; sessionId?: string; message: string; code?: string };
 
@@ -46,6 +55,20 @@ export function parseClientMessage(raw: unknown): ClientMessage | { type: "error
         decision: msg.decision as ApprovalResponse,
       };
     }
+
+    case "rewind_session":
+      if (typeof msg.sessionId !== "string" || typeof msg.checkpointId !== "string")
+        return { type: "error", message: "rewind_session requires sessionId and checkpointId" };
+      return {
+        type: "rewind_session",
+        sessionId: msg.sessionId,
+        checkpointId: msg.checkpointId,
+      };
+
+    case "revert_last":
+      if (typeof msg.sessionId !== "string")
+        return { type: "error", message: "revert_last requires sessionId" };
+      return { type: "revert_last", sessionId: msg.sessionId };
 
     case "cancel_turn":
       if (typeof msg.sessionId !== "string")

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { applyTurnEvent, buildTimelineFromMessages } from "../src/app/web/state/reducer.js";
+import {
+  appReducer,
+  applyTurnEvent,
+  buildTimelineFromMessages,
+  initialAppState,
+} from "../src/app/web/state/reducer.js";
 import type { Message } from "../src/model/types.js";
 import type { TurnEvent } from "../src/session/loop.js";
 
@@ -76,5 +81,30 @@ describe("web timeline reducer", () => {
     expect(tools[0]).toMatchObject({ displayKind: "context" });
     expect(tools[1]).toMatchObject({ displayKind: "mutation" });
     expect(result[0]?.mutationDiffs).toHaveLength(1);
+  });
+
+  it("appends a status part when a session is rewound", () => {
+    const state = appReducer(initialAppState, {
+      type: "timeline_loaded",
+      sessionId: "s1",
+      messages: [{ role: "user", content: "edit" }],
+    });
+
+    const next = appReducer(state, {
+      type: "server_message",
+      message: {
+        type: "session_rewound",
+        sessionId: "s1",
+        checkpointId: "cp1",
+        files: [{ path: "a.txt", existed: true }],
+        message: "rewind restored checkpoint cp1",
+      },
+    });
+
+    expect(next.timelines.s1?.[0]?.assistantParts.at(-1)).toMatchObject({
+      kind: "status",
+      level: "info",
+      text: "rewind restored checkpoint cp1",
+    });
   });
 });

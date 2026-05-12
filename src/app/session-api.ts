@@ -10,6 +10,7 @@ import type { ServerMessage } from "./protocol.js";
 import { randomUUID } from "node:crypto";
 import type { Message } from "../model/types.js";
 import type { SkillSummary } from "../skill/types.js";
+import { revertLast, rewindSession } from "../session/revert.js";
 
 type PendingApproval = {
   id: string;
@@ -165,4 +166,57 @@ export class SessionManager {
 
     return { ok: true };
   }
+
+  async rewindSession(
+    sessionId: string,
+    checkpointId: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    const active = this.ensureSession(sessionId);
+    if (!active) return { ok: false, error: "Session not found" };
+    if (active.activeTurn) return { ok: false, error: "Turn already active for this session" };
+
+    const result = await rewindSession(active.session, checkpointId);
+    const message = formatRewindMessage("rewind", result);
+    const msg: Message = { role: "assistant", content: message };
+    active.session.messages.push(msg);
+    this.store.appendMessages(sessionId, [msg]);
+    this.sendEvent(sessionId, {
+      type: "session_rewound",
+      sessionId,
+      checkpointId: result.checkpointId,
+      files: result.files,
+      message,
+    });
+    return { ok: true };
+  }
+
+  async revertLast(sessionId: string): Promise<{ ok: boolean; error?: string }> {
+    const active = this.ensureSession(sessionId);
+    if (!active) return { ok: false, error: "Session not found" };
+    if (active.activeTurn) return { ok: false, error: "Turn already active for this session" };
+
+    const result = await revertLast(active.session);
+    const message = formatRewindMessage("revert-last", result);
+    const msg: Message = { role: "assistant", content: message };
+    active.session.messages.push(msg);
+    this.store.appendMessages(sessionId, [msg]);
+    this.sendEvent(sessionId, {
+      type: "session_rewound",
+      sessionId,
+      checkpointId: result.checkpointId,
+      files: result.files,
+      message,
+    });
+    return { ok: true };
+  }
+}
+
+function formatRewindMessage(
+  action: "rewind" | "revert-last",
+  result: { checkpointId: string; files: Array<{ path: string; existed: boolean }> },
+): string {
+  const files = result.files
+    .map((file) => `${file.existed ? "restored" : "deleted"} ${file.path}`)
+    .join(", ");
+  return `${action} restored checkpoint ${result.checkpointId}${files ? ` (${files})` : ""}`;
 }

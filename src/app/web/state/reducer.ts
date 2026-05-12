@@ -146,6 +146,18 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
           ),
         },
       };
+    case "session_rewound":
+      return {
+        ...state,
+        timelines: {
+          ...state.timelines,
+          [message.sessionId]: appendStatus(
+            state.timelines[message.sessionId] ?? [],
+            "info",
+            message.message,
+          ),
+        },
+      };
     case "error":
       return {
         ...state,
