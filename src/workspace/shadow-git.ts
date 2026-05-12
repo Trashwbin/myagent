@@ -43,7 +43,15 @@ export async function ensureShadowGitRepo(cwd: string): Promise<void> {
 export async function writeBlob(cwd: string, absPath: string): Promise<string> {
   await ensureShadowGitRepo(cwd);
   const paths = getCheckpointStorePaths(cwd);
-  return git([`--git-dir=${paths.repo}`, "hash-object", "-w", "--no-filters", "--", absPath]);
+  return git([
+    `--git-dir=${paths.repo}`,
+    `--work-tree=${cwd}`,
+    "hash-object",
+    "-w",
+    "--no-filters",
+    "--",
+    absPath,
+  ]);
 }
 
 export async function readBlob(cwd: string, blobHash: string): Promise<Buffer> {
@@ -51,7 +59,7 @@ export async function readBlob(cwd: string, blobHash: string): Promise<Buffer> {
   const paths = getCheckpointStorePaths(cwd);
   const stdout = await execFileAsync(
     "git",
-    [`--git-dir=${paths.repo}`, "cat-file", "-p", blobHash],
+    [`--git-dir=${paths.repo}`, `--work-tree=${cwd}`, "cat-file", "-p", blobHash],
     {
       env: process.env,
       encoding: "buffer",
@@ -75,13 +83,20 @@ export async function createTree(cwd: string, files: CheckpointFile[]): Promise<
   const env = { GIT_INDEX_FILE: indexPath };
 
   try {
-    await git([`--git-dir=${paths.repo}`, "read-tree", "--empty"], { env });
+    await git([`--git-dir=${paths.repo}`, `--work-tree=${cwd}`, "read-tree", "--empty"], {
+      env,
+    });
 
     if (lines) {
       await new Promise<void>((resolve, reject) => {
         const child = execFile(
           "git",
-          [`--git-dir=${paths.repo}`, "update-index", "--index-info"],
+          [
+            `--git-dir=${paths.repo}`,
+            `--work-tree=${cwd}`,
+            "update-index",
+            "--index-info",
+          ],
           {
             env: { ...process.env, ...env },
             timeout: 10_000,
@@ -99,7 +114,9 @@ export async function createTree(cwd: string, files: CheckpointFile[]): Promise<
       });
     }
 
-    return await git([`--git-dir=${paths.repo}`, "write-tree"], { env });
+    return await git([`--git-dir=${paths.repo}`, `--work-tree=${cwd}`, "write-tree"], {
+      env,
+    });
   } finally {
     await rm(indexDir, { recursive: true, force: true });
   }
@@ -113,7 +130,7 @@ export async function createCommit(
 ): Promise<string> {
   await ensureShadowGitRepo(cwd);
   const paths = getCheckpointStorePaths(cwd);
-  const args = [`--git-dir=${paths.repo}`, "commit-tree", treeHash];
+  const args = [`--git-dir=${paths.repo}`, `--work-tree=${cwd}`, "commit-tree", treeHash];
   if (parentCommitHash) args.push("-p", parentCommitHash);
   args.push("-m", `checkpoint ${checkpointId}`);
 
@@ -142,7 +159,7 @@ async function readParentCommit(cwd: string): Promise<string | undefined> {
 async function updateCheckpointHead(cwd: string, commitHash: string): Promise<void> {
   await ensureShadowGitRepo(cwd);
   const paths = getCheckpointStorePaths(cwd);
-  await git([`--git-dir=${paths.repo}`, "update-ref", HEAD_REF, commitHash]);
+  await git([`--git-dir=${paths.repo}`, `--work-tree=${cwd}`, "update-ref", HEAD_REF, commitHash]);
 }
 
 export async function createShadowCheckpoint(
