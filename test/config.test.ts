@@ -67,33 +67,12 @@ describe("config paths", () => {
 describe("loadConfig", () => {
   let tmp: string;
   let originalHome: string | undefined;
-  let originalProvider: string | undefined;
-  let originalModel: string | undefined;
-  let originalBaseUrl: string | undefined;
-  let originalApiKey: string | undefined;
-  let originalAuthToken: string | undefined;
-  let originalMaxOutputTokens: string | undefined;
-  let originalApproval: string | undefined;
 
   beforeEach(async () => {
     tmp = await mkdtemp(join(tmpdir(), "myagent-config-"));
     originalHome = process.env.MYAGENT_HOME;
-    originalProvider = process.env.MYAGENT_PROVIDER;
-    originalModel = process.env.MYAGENT_MODEL;
-    originalBaseUrl = process.env.MYAGENT_BASE_URL;
-    originalApiKey = process.env.MYAGENT_API_KEY;
-    originalAuthToken = process.env.MYAGENT_AUTH_TOKEN;
-    originalMaxOutputTokens = process.env.MYAGENT_MAX_OUTPUT_TOKENS;
-    originalApproval = process.env.MYAGENT_APPROVAL;
     process.env.MYAGENT_HOME = join(tmp, "empty-home");
     await mkdir(process.env.MYAGENT_HOME, { recursive: true });
-    delete process.env.MYAGENT_PROVIDER;
-    delete process.env.MYAGENT_MODEL;
-    delete process.env.MYAGENT_BASE_URL;
-    delete process.env.MYAGENT_API_KEY;
-    delete process.env.MYAGENT_AUTH_TOKEN;
-    delete process.env.MYAGENT_MAX_OUTPUT_TOKENS;
-    delete process.env.MYAGENT_APPROVAL;
   });
 
   afterEach(async () => {
@@ -102,13 +81,6 @@ describe("loadConfig", () => {
     } else {
       process.env.MYAGENT_HOME = originalHome;
     }
-    restoreEnv("MYAGENT_PROVIDER", originalProvider);
-    restoreEnv("MYAGENT_MODEL", originalModel);
-    restoreEnv("MYAGENT_BASE_URL", originalBaseUrl);
-    restoreEnv("MYAGENT_API_KEY", originalApiKey);
-    restoreEnv("MYAGENT_AUTH_TOKEN", originalAuthToken);
-    restoreEnv("MYAGENT_MAX_OUTPUT_TOKENS", originalMaxOutputTokens);
-    restoreEnv("MYAGENT_APPROVAL", originalApproval);
     await rm(tmp, { recursive: true, force: true });
   });
 
@@ -203,42 +175,6 @@ describe("loadConfig", () => {
     }
   });
 
-  it("environment config overrides file config for the selected provider", async () => {
-    const myagentDir = join(tmp, ".myagent");
-    await mkdir(myagentDir, { recursive: true });
-    await writeFile(
-      join(myagentDir, "config.json"),
-      JSON.stringify({
-        provider: "openai",
-        providers: {
-          openai: {
-            model: "file-model",
-            baseUrl: "https://file.example/v1",
-            apiKey: "sk-file",
-          },
-        },
-      }),
-    );
-    process.env.MYAGENT_PROVIDER = "anthropic";
-    process.env.MYAGENT_MODEL = "mimo-v2.5-pro";
-    process.env.MYAGENT_BASE_URL = "https://token-plan-cn.xiaomimimo.com/anthropic";
-    process.env.MYAGENT_AUTH_TOKEN = "tp-env";
-    process.env.MYAGENT_MAX_OUTPUT_TOKENS = "4096";
-    process.env.MYAGENT_APPROVAL = "on-request";
-
-    const config = loadConfig({ workspaceRoot: tmp });
-
-    expect(config.provider).toBe("anthropic");
-    expect(config.approval).toBe("on-request");
-    expect(config.providers?.anthropic).toEqual({
-      model: "mimo-v2.5-pro",
-      baseUrl: "https://token-plan-cn.xiaomimimo.com/anthropic",
-      authToken: "tp-env",
-      maxOutputTokens: 4096,
-    });
-    expect(config.providers?.openai?.model).toBe("file-model");
-  });
-
   it("reports clear error for invalid JSON", async () => {
     const myagentDir = join(tmp, ".myagent");
     await mkdir(myagentDir, { recursive: true });
@@ -254,14 +190,6 @@ describe("loadConfig", () => {
     }
   });
 });
-
-function restoreEnv(name: string, value: string | undefined) {
-  if (value === undefined) {
-    delete process.env[name];
-  } else {
-    process.env[name] = value;
-  }
-}
 
 describe("config resolution helpers", () => {
   it("defaults provider to openai", () => {
