@@ -24,18 +24,24 @@ v0.
 
 ## Model Layer
 
-Support two first-class provider formats:
+Support provider/model selection separately from protocol lowering/parsing. The
+runtime should not rely on one broad compatibility layer to hard-eat every
+model family.
 
-- OpenAI-compatible
-- Anthropic-compatible
+Current protocols:
 
-Use native adapters instead of a broad provider gateway.
+- OpenAI Chat-compatible (`protocol: "chat"`)
+- OpenAI Responses (`protocol: "responses"`)
+- Anthropic Messages-compatible (`protocol: "messages"`)
+
+Use native protocol adapters instead of a broad provider gateway.
 
 ```text
 src/model/
   provider.ts
   types.ts
   openai-compatible.ts
+  openai-responses.ts
   anthropic-compatible.ts
 ```
 
@@ -64,12 +70,14 @@ Supported fields:
   "providers": {
     "openai": {
       "model": "...",
+      "protocol": "chat" | "responses",
       "baseUrl": "...",
       "apiKey": "...",
       "maxOutputTokens": 4096
     },
     "anthropic": {
       "model": "...",
+      "protocol": "messages",
       "baseUrl": "...",
       "apiKey": "...",
       "authToken": "...",
@@ -91,13 +99,19 @@ Internal stream boundary:
 
 ```ts
 type ModelEvent =
-  | { type: "text_delta"; text: string }
-  | { type: "tool_call"; id: string; name: string; input: unknown }
-  | { type: "stop"; reason: "end_turn" | "tool_use" | "length" };
+  | { type: "text"; id?: string; delta: string; providerMetadata?: ProviderMetadata }
+  | { type: "reasoning"; id?: string; delta: string; providerMetadata?: ProviderMetadata }
+  | { type: "tool-call"; id: string; name: string; input: unknown; providerMetadata?: ProviderMetadata }
+  | { type: "tool-result"; id: string; name: string; result: unknown; isError?: boolean; providerMetadata?: ProviderMetadata }
+  | { type: "finish"; reason: "stop" | "tool-calls" | "length" | "error"; usage?: ModelUsage; providerMetadata?: ProviderMetadata };
 ```
 
-The session loop only depends on `ModelEvent`. Each provider adapter translates
-its native request, tool schema, stream delta, tool-call, and stop-reason format.
+The session loop only depends on canonical `ModelEvent`. Each provider adapter
+translates its native request, tool schema, stream delta, reasoning payload,
+tool-call, usage, provider metadata, and stop-reason format. Provider-specific
+IDs such as OpenAI Responses `response.id` and output item IDs are preserved in
+`providerMetadata` so tool-result continuation can use the provider-native
+conversation linkage instead of replaying incompatible raw history.
 
 ## Provider Error Handling
 
