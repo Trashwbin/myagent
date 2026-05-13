@@ -11,7 +11,7 @@ import type {
   Message,
   ProviderConfig,
   ProviderMetadata,
-  ProviderProtocol,
+  ProviderMode,
   ToolSchema,
 } from "./types.js";
 
@@ -65,10 +65,10 @@ export function tools(tools?: ToolSchema[]): ToolSet | undefined {
 
 export function providerOptions(input: {
   config: ProviderConfig;
-  protocol: ProviderProtocol;
+  mode: ProviderMode;
   messages: Message[];
 }): ProviderOptions {
-  if (input.config.provider !== "openai" || input.protocol !== "responses") {
+  if (input.config.provider !== "openai" || input.mode !== "responses") {
     return {};
   }
 

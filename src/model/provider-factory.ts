@@ -3,7 +3,7 @@ import { AiSdkProvider } from "./ai-sdk-provider.js";
 import type { Provider } from "./provider.js";
 
 export function createProviderFromProfile(profile: ModelProfile): Provider {
-  if (profile.type === "openai") {
+  if (profile.adapter === "@ai-sdk/openai" || profile.adapter === "@ai-sdk/openai-compatible") {
     if (!profile.apiKey) {
       throw new Error(
         `Model ${profile.id} requires apiKey in config.providers.${profile.provider} or the model profile.`,
@@ -11,11 +11,12 @@ export function createProviderFromProfile(profile: ModelProfile): Provider {
     }
     return new AiSdkProvider({
       provider: "openai",
+      adapter: profile.adapter,
       model: profile.model,
       baseUrl: profile.baseUrl,
       apiKey: profile.apiKey,
       maxOutputTokens: profile.maxOutputTokens,
-      protocol: profile.protocol,
+      mode: profile.mode,
     });
   }
 
@@ -26,6 +27,7 @@ export function createProviderFromProfile(profile: ModelProfile): Provider {
   }
   return new AiSdkProvider({
     provider: "anthropic",
+    adapter: profile.adapter,
     model: profile.model,
     baseUrl: profile.baseUrl,
     apiKey: profile.apiKey,
@@ -37,14 +39,14 @@ export function createProviderFromProfile(profile: ModelProfile): Provider {
 export function publicModelProfile(profile: ModelProfile): {
   id: string;
   provider: string;
-  type: string;
+  adapter: string;
   model: string;
   name?: string;
 } {
   return {
     id: profile.id,
     provider: profile.provider,
-    type: profile.type,
+    adapter: profile.adapter,
     model: profile.model,
     name: profile.name,
   };

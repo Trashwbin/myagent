@@ -24,15 +24,15 @@ v0.
 
 ## Model Layer
 
-Support provider/model selection separately from protocol lowering/parsing. The
+Support provider/model selection separately from adapter and mode lowering/parsing. The
 runtime should not rely on one broad compatibility layer to hard-eat every
 model family.
 
-Current protocols:
+Current adapters and modes:
 
-- OpenAI Chat-compatible (`protocol: "chat"`)
-- OpenAI Responses (`protocol: "responses"`)
-- Anthropic Messages-compatible (`protocol: "messages"`)
+- `@ai-sdk/openai-compatible` with OpenAI Chat-compatible mode (`mode: "chat"`)
+- `@ai-sdk/openai` with OpenAI Chat or Responses mode (`mode: "chat" | "responses"`)
+- `@ai-sdk/anthropic` with Anthropic Messages mode (`mode: "messages"`)
 
 Use AI SDK provider packages for the actual model calls, with a thin local
 adapter that maps AI SDK `fullStream` parts into the runtime's canonical
@@ -74,8 +74,8 @@ Supported fields:
   "approval": "auto" | "on-request",
   "providers": {
     "mimo": {
-      "type": "openai",
-      "protocol": "chat" | "responses",
+      "adapter": "@ai-sdk/openai-compatible",
+      "mode": "chat",
       "baseUrl": "...",
       "apiKey": "...",
       "maxOutputTokens": 4096,
@@ -86,13 +86,14 @@ Supported fields:
         },
         "accurate": {
           "model": "gpt-4o",
-          "protocol": "responses"
+          "adapter": "@ai-sdk/openai",
+          "mode": "responses"
         }
       }
     },
     "mimo-claude": {
-      "type": "anthropic",
-      "protocol": "messages",
+      "adapter": "@ai-sdk/anthropic",
+      "mode": "messages",
       "baseUrl": "...",
       "apiKey": "...",
       "authToken": "...",
@@ -107,11 +108,11 @@ Supported fields:
 }
 ```
 
-Provider keys are user-facing provider IDs, not SDK adapter names. The `type`
-field selects the adapter: `openai` uses the OpenAI Chat/Responses compatible
-path and `anthropic` uses the Anthropic Messages compatible path. This allows a
-provider such as `mimo`, `abin`, or `gateway-prod` to expose whichever protocol
-it supports without pretending that the provider ID itself is `openai`.
+Provider keys are user-facing provider IDs, not SDK adapter names. The `adapter`
+field selects the SDK integration, while `mode` selects the request shape for
+adapters that expose more than one shape. This allows a provider such as `mimo`,
+`abin`, or `gateway-prod` to expose whichever SDK-compatible surface it supports
+without pretending that the provider ID itself is `openai` or `anthropic`.
 
 Model profile IDs use `provider-id/model-id`, for example `mimo/fast` or
 `mimo-claude/sonnet`. During a conversation, `/model` lists available profiles
@@ -119,10 +120,10 @@ and `/model <id>` switches the active model for that session. The selected
 profile is stored with the session, so resume and compaction use the same active
 model.
 
-Provider-level `type`, `baseUrl`, credentials, `protocol`, and `maxOutputTokens`
+Provider-level `adapter`, `baseUrl`, credentials, `mode`, and `maxOutputTokens`
 are inherited by nested `providers.<name>.models.<id>` entries. A model entry can
-override endpoint/protocol fields when one provider serves multiple incompatible
-protocols or endpoints. If `providers.<name>.models` is omitted, myAgent
+override endpoint/adapter/mode fields when one provider serves multiple incompatible
+model surfaces or endpoints. If `providers.<name>.models` is omitted, myAgent
 synthesizes a single profile from `providers.<name>.model`.
 
 Top-level `provider`, `model`, `baseUrl`, `apiKey`, `authToken`, and

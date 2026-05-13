@@ -1,5 +1,6 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import {
   streamText,
   type FinishReason,
@@ -18,14 +19,16 @@ import type {
   ModelFinishReason,
   ModelUsage,
   ProviderConfig,
+  ProviderAdapter,
   ProviderKind,
   ProviderMetadata,
+  ProviderMode,
   ToolSchema,
 } from "./types.js";
 import { normalizeProviderError, ProviderRuntimeError } from "./errors.js";
 import * as ProviderTransform from "./provider-transform.js";
 
-type AiSdkProtocol = "chat" | "responses" | "messages";
+type AiSdkMode = ProviderMode;
 
 function toProviderMetadata(metadata: AiProviderMetadata | undefined): ProviderMetadata | undefined {
   return metadata as ProviderMetadata | undefined;
@@ -182,12 +185,23 @@ export function mapStreamPartToModelEvent(
 
 function createLanguageModel(config: ProviderConfig): LanguageModel {
   if (config.provider === "openai") {
+    if (config.adapter === "@ai-sdk/openai-compatible") {
+      const compatible = createOpenAICompatible({
+        name: "openai-compatible",
+        apiKey: config.apiKey,
+        baseURL: config.baseUrl ?? "https://api.openai.com/v1",
+        headers: { "User-Agent": "myagent/0.0.1" },
+        includeUsage: true,
+      });
+      return compatible.chatModel(config.model as never);
+    }
+
     const openai = createOpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseUrl,
       headers: { "User-Agent": "myagent/0.0.1" },
     });
-    return config.protocol === "chat"
+    return config.mode === "chat"
       ? openai.chat(config.model as never)
       : openai.responses(config.model as never);
   }
@@ -211,20 +225,27 @@ function isOfficialOpenAIBaseUrl(baseUrl: string | undefined): boolean {
   }
 }
 
-function defaultOpenAIProtocol(config: ProviderConfig): AiSdkProtocol {
+function defaultOpenAIMode(config: ProviderConfig): AiSdkMode {
+  if (config.adapter === "@ai-sdk/openai-compatible") return "chat";
   return isOfficialOpenAIBaseUrl(config.baseUrl) ? "responses" : "chat";
 }
 
 export class AiSdkProvider implements Provider {
   readonly name: ProviderKind;
-  readonly protocol: AiSdkProtocol;
+  readonly adapter: ProviderAdapter;
+  readonly mode: AiSdkMode;
 
   constructor(private config: ProviderConfig) {
     this.name = config.provider;
-    this.protocol =
+    this.adapter =
+      config.adapter ??
+      (config.provider === "anthropic" ? "@ai-sdk/anthropic" : "@ai-sdk/openai");
+    const mode =
+      this.adapter === "@ai-sdk/openai-compatible" ? "chat" : config.mode;
+    this.mode =
       config.provider === "anthropic"
         ? "messages"
-        : config.protocol ?? defaultOpenAIProtocol(config);
+        : mode ?? defaultOpenAIMode(config);
   }
 
   async *stream(
@@ -236,7 +257,7 @@ export class AiSdkProvider implements Provider {
     try {
       const aiTools = ProviderTransform.tools(tools);
       result = streamText({
-        model: createLanguageModel({ ...this.config, protocol: this.protocol }),
+        model: createLanguageModel({ ...this.config, mode: this.mode }),
         messages: await ProviderTransform.messages({
           messages,
           config: this.config,
@@ -247,7 +268,7 @@ export class AiSdkProvider implements Provider {
         maxOutputTokens: this.config.maxOutputTokens,
         providerOptions: ProviderTransform.providerOptions({
           config: this.config,
-          protocol: this.protocol,
+          mode: this.mode,
           messages,
         }),
         stopWhen: undefined,

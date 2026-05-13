@@ -126,14 +126,20 @@ export type ToolSchema = {
 
 export type ProviderKind = "openai" | "anthropic";
 
-export type ProviderProtocol = "chat" | "responses" | "messages";
+export type ProviderAdapter =
+  | "@ai-sdk/openai"
+  | "@ai-sdk/openai-compatible"
+  | "@ai-sdk/anthropic";
+
+export type ProviderMode = "chat" | "responses" | "messages";
 
 export type ProviderConfig = {
   provider: ProviderKind;
+  adapter?: ProviderAdapter;
   model: string;
   baseUrl?: string;
   apiKey?: string;
   authToken?: string;
   maxOutputTokens?: number;
-  protocol?: ProviderProtocol;
+  mode?: ProviderMode;
 };

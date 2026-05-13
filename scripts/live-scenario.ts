@@ -68,6 +68,7 @@ function resolveConfig(values: ReturnType<typeof parseCliValues>): LiveScenarioC
     baseUrl: providerConfig.baseUrl,
     apiKey: providerConfig.apiKey,
     authToken: providerConfig.authToken,
+    mode: providerConfig.mode,
     cwd: process.cwd(),
     maxTurns: config.maxTurns,
     maxOutputTokens: providerConfig.maxOutputTokens,

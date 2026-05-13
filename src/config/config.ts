@@ -3,21 +3,26 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { readFileSync, existsSync } from "node:fs";
 
-const ProviderTypeSchema = z.enum(["openai", "anthropic"]);
+const ProviderAdapterSchema = z.enum([
+  "@ai-sdk/openai",
+  "@ai-sdk/openai-compatible",
+  "@ai-sdk/anthropic",
+]);
+const ModelModeSchema = z.enum(["chat", "responses", "messages"]);
 const ProviderIdSchema = z.string().min(1);
 
 const ProviderModelConfigSchema = z.strictObject({
   name: z.string().optional(),
   model: z.string().optional(),
+  adapter: ProviderAdapterSchema.optional(),
   baseUrl: z.string().optional(),
   apiKey: z.string().optional(),
   authToken: z.string().optional(),
   maxOutputTokens: z.number().int().positive().optional(),
-  protocol: z.enum(["chat", "responses", "messages"]).optional(),
+  mode: ModelModeSchema.optional(),
 });
 
 const ProviderConfigSchema = ProviderModelConfigSchema.extend({
-  type: ProviderTypeSchema.optional(),
   models: z.record(ProviderModelConfigSchema).optional(),
 });
 
@@ -36,7 +41,8 @@ export const ConfigSchema = z.strictObject({
 });
 
 export type ProviderName = z.infer<typeof ProviderIdSchema>;
-export type ProviderType = z.infer<typeof ProviderTypeSchema>;
+export type ProviderAdapter = z.infer<typeof ProviderAdapterSchema>;
+export type ModelMode = z.infer<typeof ModelModeSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 export type ProviderModelConfig = z.infer<typeof ProviderModelConfigSchema>;
 export type Config = z.infer<typeof ConfigSchema>;
@@ -44,14 +50,14 @@ export type Config = z.infer<typeof ConfigSchema>;
 export type ModelProfile = {
   id: string;
   provider: ProviderName;
-  type: ProviderType;
+  adapter: ProviderAdapter;
   model: string;
   name?: string;
   baseUrl?: string;
   apiKey?: string;
   authToken?: string;
   maxOutputTokens?: number;
-  protocol?: "chat" | "responses" | "messages";
+  mode?: ModelMode;
 };
 
 export function globalConfigPath(): string {
@@ -182,7 +188,7 @@ export function resolveProviderConfig(
   provider: ProviderName,
 ): ProviderConfig {
   return {
-    type: resolveProviderType(config, provider),
+    adapter: resolveProviderAdapter(config, provider),
     name: config.providers?.[provider]?.name,
     model: resolveConfigValue(config.providers?.[provider]?.model, config.model),
     baseUrl: resolveConfigValue(config.providers?.[provider]?.baseUrl, config.baseUrl),
@@ -195,7 +201,7 @@ export function resolveProviderConfig(
       config.providers?.[provider]?.maxOutputTokens,
       config.maxOutputTokens,
     ),
-    protocol: config.providers?.[provider]?.protocol,
+    mode: config.providers?.[provider]?.mode,
     models: config.providers?.[provider]?.models,
   };
 }
@@ -300,10 +306,10 @@ export function defaultModelProfileId(config: Config): string {
 function resolveProviderBaseConfig(
   config: Config,
   provider: ProviderName,
-): ProviderModelConfig & { type: ProviderType } {
+): ProviderModelConfig & { adapter: ProviderAdapter } {
   const providerConfig = config.providers?.[provider];
   return {
-    type: resolveProviderType(config, provider),
+    adapter: resolveProviderAdapter(config, provider),
     name: providerConfig?.name,
     baseUrl: resolveConfigValue(providerConfig?.baseUrl, config.baseUrl),
     apiKey: resolveConfigValue(providerConfig?.apiKey, config.apiKey),
@@ -312,21 +318,26 @@ function resolveProviderBaseConfig(
       providerConfig?.maxOutputTokens,
       config.maxOutputTokens,
     ),
-    protocol: providerConfig?.protocol,
+    mode: providerConfig?.mode,
   };
 }
 
 function buildModelProfile(
   provider: ProviderName,
   modelId: string,
-  base: ProviderModelConfig & { type: ProviderType },
+  base: ProviderModelConfig & { adapter: ProviderAdapter },
   modelConfig: ProviderModelConfig,
 ): ModelProfile {
   const model = modelConfig.model ?? modelId;
+  const adapter = resolveConfigValue(modelConfig.adapter, base.adapter)!;
+  const mode = normalizeModelMode(
+    adapter,
+    resolveConfigValue(modelConfig.mode, base.mode),
+  );
   return {
     id: `${provider}/${modelId}`,
     provider,
-    type: base.type,
+    adapter,
     model,
     name: modelConfig.name ?? base.name,
     baseUrl: resolveConfigValue(modelConfig.baseUrl, base.baseUrl),
@@ -336,7 +347,7 @@ function buildModelProfile(
       modelConfig.maxOutputTokens,
       base.maxOutputTokens,
     ),
-    protocol: resolveConfigValue(modelConfig.protocol, base.protocol),
+    mode,
   };
 }
 
@@ -349,7 +360,7 @@ function modelNameFromConfig(config: Config, provider: ProviderName): string {
     return stripProviderPrefix(config.model, provider);
   }
   if (!config.provider && config.model && !config.model.includes("/")) return config.model;
-  return resolveProviderType(config, provider) === "openai"
+  return isOpenAIAdapter(resolveProviderAdapter(config, provider))
     ? "gpt-4o"
     : "claude-sonnet-4-5";
 }
@@ -374,8 +385,23 @@ function stripProviderPrefix(value: string, provider: ProviderName): string {
   return value.startsWith(prefix) ? value.slice(prefix.length) : value;
 }
 
-function resolveProviderType(config: Config, provider: ProviderName): ProviderType {
-  const configured = config.providers?.[provider]?.type;
+function resolveProviderAdapter(config: Config, provider: ProviderName): ProviderAdapter {
+  const configured = config.providers?.[provider]?.adapter;
   if (configured) return configured;
-  return provider === "anthropic" ? "anthropic" : "openai";
+  if (provider === "anthropic") return "@ai-sdk/anthropic";
+  if (provider === "openai") return "@ai-sdk/openai";
+  return "@ai-sdk/openai-compatible";
+}
+
+function isOpenAIAdapter(adapter: ProviderAdapter): boolean {
+  return adapter === "@ai-sdk/openai" || adapter === "@ai-sdk/openai-compatible";
+}
+
+function normalizeModelMode(
+  adapter: ProviderAdapter,
+  mode: ModelMode | undefined,
+): ModelMode | undefined {
+  if (adapter === "@ai-sdk/openai-compatible") return "chat";
+  if (adapter === "@ai-sdk/anthropic") return "messages";
+  return mode;
 }

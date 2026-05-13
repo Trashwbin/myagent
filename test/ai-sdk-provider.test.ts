@@ -134,7 +134,7 @@ describe("AI SDK provider adapter", () => {
     ]);
   });
 
-  it("defaults official OpenAI to the Responses protocol", () => {
+  it("defaults official OpenAI to Responses mode", () => {
     const provider = new AiSdkProvider({
       provider: "openai",
       model: "gpt-5",
@@ -142,7 +142,7 @@ describe("AI SDK provider adapter", () => {
     });
 
     expect(provider.name).toBe("openai");
-    expect(provider.protocol).toBe("responses");
+    expect(provider.mode).toBe("responses");
   });
 
   it("defaults custom OpenAI-compatible base URLs to Chat Completions", () => {
@@ -154,10 +154,25 @@ describe("AI SDK provider adapter", () => {
     });
 
     expect(provider.name).toBe("openai");
-    expect(provider.protocol).toBe("chat");
+    expect(provider.mode).toBe("chat");
   });
 
-  it("uses Anthropic Messages protocol", () => {
+  it("uses the OpenAI-compatible SDK adapter in chat mode", () => {
+    const provider = new AiSdkProvider({
+      provider: "openai",
+      adapter: "@ai-sdk/openai-compatible",
+      model: "mimo-v2.5-pro",
+      apiKey: "sk-test",
+      baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+      mode: "responses",
+    });
+
+    expect(provider.name).toBe("openai");
+    expect(provider.adapter).toBe("@ai-sdk/openai-compatible");
+    expect(provider.mode).toBe("chat");
+  });
+
+  it("uses Anthropic Messages mode", () => {
     const provider = new AiSdkProvider({
       provider: "anthropic",
       model: "claude-test",
@@ -165,7 +180,7 @@ describe("AI SDK provider adapter", () => {
     });
 
     expect(provider.name).toBe("anthropic");
-    expect(provider.protocol).toBe("messages");
+    expect(provider.mode).toBe("messages");
   });
 
   it("keeps Anthropic prompt history free of empty text parts", async () => {
@@ -196,7 +211,7 @@ describe("AI SDK provider adapter", () => {
     expect(
       providerOptions({
         config: { provider: "openai", model: "gpt-5" },
-        protocol: "responses",
+        mode: "responses",
         messages: [
           {
             role: "assistant",

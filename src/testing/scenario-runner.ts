@@ -56,7 +56,7 @@ function createProviderFromConfig(config: LiveScenarioConfig): Provider {
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
     maxOutputTokens: config.maxOutputTokens,
-    protocol: config.protocol,
+    mode: config.mode,
   };
 
   return new AiSdkProvider({

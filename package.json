@@ -12,6 +12,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.77",
     "@ai-sdk/openai": "^3.0.63",
+    "@ai-sdk/openai-compatible": "^2.0.47",
     "ai": "^6.0.180",
     "better-sqlite3": "^12.9.0",
     "commander": "^13.0.0",

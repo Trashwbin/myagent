@@ -110,7 +110,7 @@ async function startTestServer(store: TranscriptStore) {
       {
         id: "openai/test-model",
         provider: "openai",
-        type: "openai",
+        adapter: "@ai-sdk/openai",
         model: "test-model",
         apiKey: "sk-test",
       },
@@ -216,7 +216,7 @@ describe("HTTP API", () => {
       {
         id: "openai/test-model",
         provider: "openai",
-        type: "openai",
+        adapter: "@ai-sdk/openai",
         model: "test-model",
       },
     ]);
@@ -423,14 +423,14 @@ describe("WebSocket", () => {
         {
           id: "openai/first",
           provider: "openai",
-          type: "openai",
+          adapter: "@ai-sdk/openai",
           model: "first",
           apiKey: "sk-test",
         },
         {
           id: "mimo-claude/second",
           provider: "mimo-claude",
-          type: "anthropic",
+          adapter: "@ai-sdk/anthropic",
           model: "second",
           authToken: "sk-test",
         },
