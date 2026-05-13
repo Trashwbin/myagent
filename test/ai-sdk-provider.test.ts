@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { AiSdkProvider, convertMessages } from "../src/model/ai-sdk-provider.js";
+import {
+  AiSdkProvider,
+  convertMessages,
+  convertMessagesToUI,
+} from "../src/model/ai-sdk-provider.js";
 
 describe("AI SDK provider adapter", () => {
-  it("converts transcript messages into AI SDK model messages", () => {
-    const messages = convertMessages([
+  it("converts structured transcript parts into AI SDK UI messages", () => {
+    const messages = convertMessagesToUI([
       { role: "summary", content: "Already inspected package.json." },
       { role: "user", content: "read file" },
       {
@@ -36,19 +40,74 @@ describe("AI SDK provider adapter", () => {
 
     expect(messages).toEqual([
       {
+        id: "summary-0",
         role: "system",
-        content:
-          "<conversation_summary>\nAlready inspected package.json.\n</conversation_summary>",
+        parts: [
+          {
+            type: "text",
+            text:
+              "<conversation_summary>\nAlready inspected package.json.\n</conversation_summary>",
+          },
+        ],
       },
-      { role: "user", content: "read file" },
+      { id: "user-1", role: "user", parts: [{ type: "text", text: "read file" }] },
       {
+        id: "assistant-2",
         role: "assistant",
-        content: [
+        parts: [
           {
             type: "reasoning",
             text: "Need file contents.",
-            providerOptions: { openai: { itemId: "reasoning_1" } },
+            providerMetadata: { openai: { itemId: "reasoning_1" } },
           },
+          {
+            type: "tool-Read",
+            toolCallId: "call_1",
+            state: "output-available",
+            input: { path: "package.json" },
+            output: "hello",
+            callProviderMetadata: { openai: { itemId: "item_1" } },
+            resultProviderMetadata: { openai: { itemId: "item_1" } },
+          },
+        ],
+        metadata: { openai: { responseId: "resp_1" } },
+      },
+    ]);
+  });
+
+  it("uses AI SDK convertToModelMessages for final model messages", async () => {
+    const messages = await convertMessages([
+      { role: "user", content: "read file" },
+      {
+        role: "assistant",
+        content: "",
+        parts: [
+          {
+            type: "tool-call",
+            id: "call_1",
+            name: "Read",
+            input: { path: "package.json" },
+            providerMetadata: { openai: { itemId: "item_1" } },
+          },
+        ],
+      },
+      {
+        role: "tool_result",
+        toolCallId: "call_1",
+        toolName: "Read",
+        content: "hello",
+        providerMetadata: { openai: { itemId: "item_1" } },
+      },
+    ]);
+
+    expect(messages).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "read file" }],
+      },
+      {
+        role: "assistant",
+        content: [
           {
             type: "tool-call",
             toolCallId: "call_1",
@@ -57,7 +116,6 @@ describe("AI SDK provider adapter", () => {
             providerOptions: { openai: { itemId: "item_1" } },
           },
         ],
-        providerOptions: { openai: { responseId: "resp_1" } },
       },
       {
         role: "tool",

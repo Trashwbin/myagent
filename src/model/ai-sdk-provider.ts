@@ -1,6 +1,7 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import {
+  convertToModelMessages,
   jsonSchema,
   streamText,
   type FinishReason,
@@ -10,6 +11,7 @@ import {
   type ProviderMetadata as AiProviderMetadata,
   type TextStreamPart,
   type ToolSet,
+  type UIMessage,
 } from "ai";
 
 import type { Provider } from "./provider.js";
@@ -34,6 +36,10 @@ type AiToolResultOutput =
 
 function toProviderMetadata(metadata: AiProviderMetadata | undefined): ProviderMetadata | undefined {
   return metadata as ProviderMetadata | undefined;
+}
+
+function toAiProviderMetadata(metadata: ProviderMetadata | undefined): AiProviderMetadata | undefined {
+  return metadata as AiProviderMetadata | undefined;
 }
 
 function toUsage(usage: LanguageModelUsage | undefined): ModelUsage | undefined {
@@ -62,7 +68,7 @@ function toFinishReason(reason: FinishReason): ModelFinishReason {
   }
 }
 
-function toolResultOutput(content: string): AiToolResultOutput {
+function toToolResultOutput(content: string): AiToolResultOutput {
   try {
     return { type: "json", value: JSON.parse(content) as JsonValue };
   } catch {
@@ -70,90 +76,122 @@ function toolResultOutput(content: string): AiToolResultOutput {
   }
 }
 
-export function convertMessages(messages: Message[]): ModelMessage[] {
-  const result: ModelMessage[] = [];
-  type PendingToolResult = Extract<ModelMessage, { role: "tool" }>["content"][number];
-  let pendingToolResults: PendingToolResult[] = [];
+function toToolOutput(content: string): unknown {
+  const output = toToolResultOutput(content);
+  return output.type === "json" ? output.value : output.value;
+}
 
-  const flushToolResults = () => {
-    if (pendingToolResults.length === 0) return;
-    result.push({ role: "tool", content: pendingToolResults });
-    pendingToolResults = [];
-  };
+export function convertMessagesToUI(messages: Message[]): UIMessage[] {
+  const result: UIMessage[] = [];
+  const activeToolCalls = new Map<
+    string,
+    {
+      message: UIMessage;
+      partIndex: number;
+      toolName: string;
+      input: unknown;
+      providerMetadata?: ProviderMetadata;
+    }
+  >();
 
   for (const msg of messages) {
-    if (msg.role !== "tool_result") flushToolResults();
-
     switch (msg.role) {
       case "summary":
         result.push({
+          id: `summary-${result.length}`,
           role: "system",
-          content: `<conversation_summary>\n${msg.content}\n</conversation_summary>`,
+          parts: [
+            {
+              type: "text",
+              text: `<conversation_summary>\n${msg.content}\n</conversation_summary>`,
+            },
+          ],
         });
         break;
 
       case "user":
-        result.push({ role: "user", content: msg.content });
+        result.push({
+          id: `user-${result.length}`,
+          role: "user",
+          parts: [{ type: "text", text: msg.content }],
+        });
         break;
 
       case "assistant": {
-        const content: Extract<ModelMessage, { role: "assistant" }>["content"] = [];
+        const uiMessage: UIMessage = {
+          id: `assistant-${result.length}`,
+          role: "assistant",
+          parts: [],
+          metadata: msg.providerMetadata,
+        };
         const parts = msg.parts ?? [];
         for (const part of parts) {
           if (part.type === "reasoning") {
-            content.push({
+            uiMessage.parts.push({
               type: "reasoning",
               text: part.text,
-              providerOptions: part.providerMetadata as AiProviderMetadata | undefined,
+              providerMetadata: toAiProviderMetadata(part.providerMetadata),
             });
           } else if (part.type === "text") {
-            content.push({
+            uiMessage.parts.push({
               type: "text",
               text: part.text,
-              providerOptions: part.providerMetadata as AiProviderMetadata | undefined,
+              providerMetadata: toAiProviderMetadata(part.providerMetadata),
             });
           }
         }
 
-        const hasTextPart = parts.some((part) => part.type === "text");
-        if (!hasTextPart && msg.content) {
-          content.push({ type: "text", text: msg.content });
-        }
-
-        const partToolCalls = parts.filter((part) => part.type === "tool-call");
-        const calls = partToolCalls.length > 0 ? partToolCalls : msg.toolCalls ?? [];
-        for (const tc of calls) {
-          content.push({
-            type: "tool-call",
+        for (const tc of parts.filter((part) => part.type === "tool-call")) {
+          const partIndex = uiMessage.parts.length;
+          uiMessage.parts.push({
+            type: `tool-${tc.name}`,
             toolCallId: tc.id,
+            state: "input-available",
+            input: tc.input,
+            callProviderMetadata: toAiProviderMetadata(tc.providerMetadata),
+          });
+          activeToolCalls.set(tc.id, {
+            message: uiMessage,
+            partIndex,
             toolName: tc.name,
             input: tc.input,
-            providerOptions: tc.providerMetadata as AiProviderMetadata | undefined,
+            providerMetadata: tc.providerMetadata,
           });
         }
 
-        result.push({
-          role: "assistant",
-          content,
-          providerOptions: msg.providerMetadata as AiProviderMetadata | undefined,
-        });
+        result.push(uiMessage);
         break;
       }
 
-      case "tool_result":
-        pendingToolResults.push({
-          type: "tool-result",
-          toolCallId: msg.toolCallId ?? "",
-          toolName: msg.toolName ?? "",
-          output: toolResultOutput(msg.content),
-          providerOptions: msg.providerMetadata as AiProviderMetadata | undefined,
-        });
+      case "tool_result": {
+        const toolCallId = msg.toolCallId ?? "";
+        const active = activeToolCalls.get(toolCallId);
+        if (!active) {
+          throw new Error(`Tool result without matching tool call: ${toolCallId}`);
+        }
+        active.message.parts[active.partIndex] = {
+          type: `tool-${active.toolName}`,
+          toolCallId,
+          state: "output-available",
+          input: active.input,
+          output: toToolOutput(msg.content),
+          callProviderMetadata: toAiProviderMetadata(active.providerMetadata),
+          resultProviderMetadata: toAiProviderMetadata(msg.providerMetadata),
+        };
+        activeToolCalls.delete(toolCallId);
         break;
+      }
     }
   }
 
-  flushToolResults();
   return result;
+}
+
+export async function convertMessages(
+  messages: Message[],
+  tools?: ToolSet,
+): Promise<ModelMessage[]> {
+  return convertToModelMessages(convertMessagesToUI(messages), { tools });
 }
 
 function convertTools(tools?: ToolSchema[]): ToolSet | undefined {
@@ -226,16 +264,23 @@ export class AiSdkProvider implements Provider {
       };
     }
 
-    const result = streamText({
-      model: createLanguageModel({ ...this.config, protocol: this.protocol }),
-      messages: convertMessages(messages),
-      tools: convertTools(tools),
-      system: options?.systemPrompt,
-      maxOutputTokens: this.config.maxOutputTokens,
-      providerOptions,
-      stopWhen: undefined,
-      maxRetries: 0,
-    });
+    let result: ReturnType<typeof streamText<ToolSet, never>>;
+    try {
+      const aiTools = convertTools(tools);
+      result = streamText({
+        model: createLanguageModel({ ...this.config, protocol: this.protocol }),
+        messages: await convertMessages(messages, aiTools),
+        tools: aiTools,
+        system: options?.systemPrompt,
+        maxOutputTokens: this.config.maxOutputTokens,
+        providerOptions,
+        stopWhen: undefined,
+        maxRetries: 0,
+      });
+    } catch (err) {
+      if (err instanceof ProviderRuntimeError) throw err;
+      throw normalizeProviderError(this.name, err);
+    }
 
     try {
       for await (const part of result.fullStream) {

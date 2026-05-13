@@ -36,20 +36,19 @@ Current protocols:
 
 Use AI SDK provider packages for the actual model calls, with a thin local
 adapter that maps AI SDK `fullStream` parts into the runtime's canonical
-`ModelEvent` stream.
+`ModelEvent` stream. Transcript lowering goes through AI SDK UI messages and
+`convertToModelMessages`, so tool calls and tool results keep the same
+part-shaped boundary that the SDK expects.
 
 ```text
 src/model/
   provider.ts
   types.ts
   ai-sdk-provider.ts
-  openai-compatible.ts
-  openai-responses.ts
-  anthropic-compatible.ts
 ```
 
-The older raw SDK adapters remain as compatibility fixtures and protocol tests;
-the CLI and live scenario runner use `AiSdkProvider`.
+The CLI and live scenario runner use `AiSdkProvider`; provider-specific behavior
+belongs behind that adapter instead of a parallel compatibility path.
 
 Provider config:
 
