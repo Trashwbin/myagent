@@ -3,6 +3,7 @@ import type { ToolDisplay } from "../session/tool-display.js";
 export type ModelEvent =
   | { type: "text_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: unknown }
+  | { type: "assistant_raw"; value: unknown }
   | { type: "stop"; reason: "end_turn" | "tool_use" | "length" };
 
 export type MessageToolCall = {
@@ -20,6 +21,7 @@ export type Message = {
   toolCalls?: MessageToolCall[];
   toolDisplay?: ToolDisplay;
   checkpointId?: string;
+  providerRaw?: unknown;
 };
 
 export type ToolSchema = {

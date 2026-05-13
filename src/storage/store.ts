@@ -82,6 +82,7 @@ function serializeMessage(msg: Message): Record<string, unknown> {
     tool_name: msg.toolName ?? null,
     tool_calls_json: msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
     tool_display_json: msg.toolDisplay ? JSON.stringify(msg.toolDisplay) : null,
+    provider_raw_json: msg.providerRaw ? JSON.stringify(msg.providerRaw) : null,
     checkpoint_id: msg.checkpointId ?? null,
     created_at: now(),
   };
@@ -96,6 +97,7 @@ function deserializeMessage(row: Record<string, unknown>): Message {
   if (row.tool_name) msg.toolName = row.tool_name as string;
   if (row.tool_calls_json) msg.toolCalls = JSON.parse(row.tool_calls_json as string);
   if (row.tool_display_json) msg.toolDisplay = JSON.parse(row.tool_display_json as string);
+  if (row.provider_raw_json) msg.providerRaw = JSON.parse(row.provider_raw_json as string);
   if (row.checkpoint_id) msg.checkpointId = row.checkpoint_id as string;
   return msg;
 }
@@ -129,6 +131,7 @@ export function openStore(options?: StoreOptions): TranscriptStore {
     tool_name TEXT,
     tool_calls_json TEXT,
     tool_display_json TEXT,
+    provider_raw_json TEXT,
     checkpoint_id TEXT,
     created_at INTEGER NOT NULL
   )`);
@@ -141,6 +144,12 @@ export function openStore(options?: StoreOptions): TranscriptStore {
 
   try {
     db.exec("ALTER TABLE messages ADD COLUMN tool_display_json TEXT");
+  } catch {
+    // Existing databases already have the column.
+  }
+
+  try {
+    db.exec("ALTER TABLE messages ADD COLUMN provider_raw_json TEXT");
   } catch {
     // Existing databases already have the column.
   }
@@ -181,7 +190,7 @@ export function openStore(options?: StoreOptions): TranscriptStore {
   function insertMessages(sessionId: string, messages: Message[], startSeq: number) {
     let seq = startSeq;
     const stmt = db.prepare(
-      "INSERT INTO messages (id, session_id, seq, role, content, tool_call_id, tool_name, tool_calls_json, tool_display_json, checkpoint_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO messages (id, session_id, seq, role, content, tool_call_id, tool_name, tool_calls_json, tool_display_json, provider_raw_json, checkpoint_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
 
     for (const msg of messages) {
@@ -197,6 +206,7 @@ export function openStore(options?: StoreOptions): TranscriptStore {
         r.tool_name,
         r.tool_calls_json,
         r.tool_display_json,
+        r.provider_raw_json,
         r.checkpoint_id,
         r.created_at,
       );

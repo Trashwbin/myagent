@@ -54,6 +54,28 @@ describe("Anthropic convertMessages", () => {
     });
   });
 
+  it("uses provider raw assistant blocks when present", () => {
+    const providerRaw = [
+      { type: "thinking", thinking: "need list", signature: "sig" },
+      {
+        type: "tool_use",
+        id: "tu1",
+        name: "list_dir",
+        input: { path: "." },
+      },
+    ];
+    const result = convertMessages([
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "tu1", name: "list_dir", input: { path: "." } }],
+        providerRaw,
+      },
+    ]);
+
+    expect(result).toEqual([{ role: "assistant", content: providerRaw }]);
+  });
+
   it("converts assistant message with both text and tool calls", () => {
     const result = convertMessages([
       {
@@ -231,5 +253,76 @@ describe("Anthropic convertMessages", () => {
     await collectEvents(provider.stream([{ role: "user", content: "hello" }]));
 
     expect(capturedParams.max_tokens).toBe(4096);
+  });
+
+  it("emits raw assistant blocks with thinking before stop", async () => {
+    const provider = new AnthropicCompatibleProvider({
+      provider: "anthropic",
+      model: "test-model",
+      apiKey: "test-key",
+    });
+
+    (provider as any).client = {
+      messages: {
+        stream: () =>
+          chunks([
+            {
+              type: "content_block_start",
+              index: 0,
+              content_block: { type: "thinking", thinking: "", signature: "" },
+            },
+            {
+              type: "content_block_delta",
+              index: 0,
+              delta: { type: "thinking_delta", thinking: "need list" },
+            },
+            {
+              type: "content_block_delta",
+              index: 0,
+              delta: { type: "signature_delta", signature: "sig" },
+            },
+            { type: "content_block_stop", index: 0 },
+            {
+              type: "content_block_start",
+              index: 1,
+              content_block: {
+                type: "tool_use",
+                id: "tu1",
+                name: "list_dir",
+                input: {},
+              },
+            },
+            {
+              type: "content_block_delta",
+              index: 1,
+              delta: { type: "input_json_delta", partial_json: '{"path":"."}' },
+            },
+            { type: "content_block_stop", index: 1 },
+            {
+              type: "message_delta",
+              delta: { stop_reason: "tool_use" },
+            },
+          ]),
+      },
+    };
+
+    const events = await collectEvents(provider.stream([{ role: "user", content: "list" }]));
+
+    expect(events).toEqual([
+      { type: "tool_call", id: "tu1", name: "list_dir", input: { path: "." } },
+      {
+        type: "assistant_raw",
+        value: [
+          { type: "thinking", thinking: "need list", signature: "sig" },
+          {
+            type: "tool_use",
+            id: "tu1",
+            name: "list_dir",
+            input: { path: "." },
+          },
+        ],
+      },
+      { type: "stop", reason: "tool_use" },
+    ]);
   });
 });

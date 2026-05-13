@@ -12,6 +12,18 @@ const FINISH_REASON_MAP: Record<string, StopReason> = {
   length: "length",
 };
 
+function openAIProviderRaw(value: unknown): { reasoning_content: string } | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.reasoning_content === "string" && raw.reasoning_content.length > 0) {
+    return { reasoning_content: raw.reasoning_content };
+  }
+  return undefined;
+}
+
 export function convertMessages(
   messages: Message[],
 ): OpenAI.ChatCompletionMessageParam[] {
@@ -41,6 +53,12 @@ export function convertMessages(
                 typeof tc.input === "string" ? tc.input : JSON.stringify(tc.input),
             },
           }));
+        }
+        const raw = openAIProviderRaw(msg.providerRaw);
+        if (raw) {
+          (result as OpenAI.ChatCompletionAssistantMessageParam & {
+            reasoning_content?: string;
+          }).reasoning_content = raw.reasoning_content;
         }
         return result;
       }
@@ -112,6 +130,7 @@ export class OpenAICompatibleProvider implements Provider {
       number,
       { id: string; name: string; arguments: string }
     >();
+    let reasoningContent = "";
 
     try {
       for await (const chunk of stream) {
@@ -119,6 +138,13 @@ export class OpenAICompatibleProvider implements Provider {
         if (!choice) continue;
 
         const delta = choice.delta;
+        const rawDelta = delta as Record<string, unknown>;
+
+        if (typeof rawDelta.reasoning_content === "string") {
+          reasoningContent += rawDelta.reasoning_content;
+        } else if (typeof rawDelta.reasoning === "string") {
+          reasoningContent += rawDelta.reasoning;
+        }
 
         if (delta.content) {
           yield { type: "text_delta", text: delta.content };
@@ -165,6 +191,13 @@ export class OpenAICompatibleProvider implements Provider {
               id: tc.id,
               name: tc.name,
               input,
+            };
+          }
+
+          if (reasoningContent.length > 0) {
+            yield {
+              type: "assistant_raw",
+              value: { reasoning_content: reasoningContent },
             };
           }
 

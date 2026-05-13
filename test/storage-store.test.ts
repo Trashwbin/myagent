@@ -121,6 +121,32 @@ describe("appendMessages + getSession", () => {
     await cleanup();
   });
 
+  it("roundtrips provider raw message metadata", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/ws" });
+    const providerRaw = [
+      { type: "thinking", thinking: "need list", signature: "sig" },
+      {
+        type: "tool_use",
+        id: "tu1",
+        name: "list_dir",
+        input: { path: "." },
+      },
+    ];
+    store.appendMessages(session.id, [
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "tu1", name: "list_dir", input: { path: "." } }],
+        providerRaw,
+      },
+    ]);
+    const restored = store.getSession(session.id)!;
+    expect(restored.messages[0].providerRaw).toEqual(providerRaw);
+    await cleanup();
+  });
+
   it("roundtrips tool_result toolCallId and toolName", async () => {
     const base = await tmpBaseDir();
     const store = openTestStore(base);

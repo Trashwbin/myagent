@@ -60,6 +60,30 @@ describe("OpenAI convertMessages", () => {
     });
   });
 
+  it("converts assistant message with provider reasoning payload", () => {
+    const result = convertMessages([
+      {
+        role: "assistant",
+        content: "",
+        providerRaw: { reasoning_content: "Need to inspect files." },
+        toolCalls: [{ id: "tc1", name: "list_dir", input: { path: "." } }],
+      },
+    ]);
+
+    expect(result[0]).toMatchObject({
+      role: "assistant",
+      content: null,
+      reasoning_content: "Need to inspect files.",
+      tool_calls: [
+        {
+          id: "tc1",
+          type: "function",
+          function: { name: "list_dir", arguments: '{"path":"."}' },
+        },
+      ],
+    });
+  });
+
   it("converts assistant message with null content when empty", () => {
     const result = convertMessages([
       {
@@ -199,6 +223,70 @@ describe("OpenAI convertMessages", () => {
         id: "call_1",
         name: "Read",
         input: { path: "package.json" },
+      },
+      { type: "stop", reason: "tool_use" },
+    ]);
+  });
+
+  it("streams provider reasoning payload before stop", async () => {
+    const provider = new OpenAICompatibleProvider({
+      provider: "openai",
+      model: "test-model",
+      apiKey: "test-key",
+    });
+
+    (provider as any).client = {
+      chat: {
+        completions: {
+          create: async () =>
+            chunks([
+              {
+                choices: [
+                  {
+                    delta: { reasoning_content: "Need to " },
+                  },
+                ],
+              },
+              {
+                choices: [
+                  {
+                    delta: { reasoning_content: "list files." },
+                  },
+                ],
+              },
+              {
+                choices: [
+                  {
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: 0,
+                          id: "call_1",
+                          function: { name: "list_dir", arguments: '{"path":"."}' },
+                        },
+                      ],
+                    },
+                    finish_reason: "tool_calls",
+                  },
+                ],
+              },
+            ]),
+        },
+      },
+    };
+
+    const events = await collectEvents(provider.stream([]));
+
+    expect(events).toEqual([
+      {
+        type: "tool_call",
+        id: "call_1",
+        name: "list_dir",
+        input: { path: "." },
+      },
+      {
+        type: "assistant_raw",
+        value: { reasoning_content: "Need to list files." },
       },
       { type: "stop", reason: "tool_use" },
     ]);

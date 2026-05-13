@@ -150,6 +150,7 @@ async function runAgentLoop(
 
   for (let turn = 0; turn < maxTurns; turn++) {
     let assistantText = "";
+    let assistantRaw: unknown;
     const toolCalls: Array<{ id: string; name: string; input: unknown; display?: ToolDisplay }> = [];
 
     for await (const event of provider.stream([...messages], toolSchemas, {
@@ -176,6 +177,9 @@ async function runAgentLoop(
               display: buildToolInputDisplay(event.name, event.input),
             });
           break;
+        case "assistant_raw":
+          assistantRaw = event.value;
+          break;
         case "stop":
           lastStopReason = event.reason;
           break;
@@ -186,6 +190,7 @@ async function runAgentLoop(
       role: "assistant",
       content: assistantText,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      providerRaw: assistantRaw,
     };
     messages.push(assistantMsg);
     newMessages.push(assistantMsg);

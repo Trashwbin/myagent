@@ -35,6 +35,12 @@ export function convertMessages(messages: Message[]): Anthropic.MessageParam[] {
         break;
 
       case "assistant": {
+        if (isAnthropicContentBlocks(msg.providerRaw)) {
+          result.push({ role: "assistant", content: msg.providerRaw });
+          i++;
+          break;
+        }
+
         const content: Anthropic.ContentBlockParam[] = [];
         if (msg.content) {
           content.push({ type: "text", text: msg.content });
@@ -72,6 +78,19 @@ export function convertMessages(messages: Message[]): Anthropic.MessageParam[] {
   }
 
   return result;
+}
+
+function isAnthropicContentBlocks(value: unknown): value is Anthropic.ContentBlockParam[] {
+  return Array.isArray(value) && value.every((block) => {
+    if (typeof block !== "object" || block === null) return false;
+    const type = (block as { type?: unknown }).type;
+    return (
+      type === "text" ||
+      type === "thinking" ||
+      type === "tool_use" ||
+      type === "redacted_thinking"
+    );
+  });
 }
 
 function convertTools(tools?: ToolSchema[]): Anthropic.Tool[] | undefined {
@@ -127,23 +146,58 @@ export class AnthropicCompatibleProvider implements Provider {
     let currentToolId = "";
     let currentToolName = "";
     let currentToolInput = "";
+    let currentContentIndex = -1;
+    const rawContent: Anthropic.ContentBlockParam[] = [];
 
     try {
       for await (const event of stream) {
         switch (event.type) {
+          case "content_block_start": {
+            currentContentIndex = event.index;
+            const block = event.content_block;
+            if (block.type === "tool_use") {
+              currentToolId = block.id;
+              currentToolName = block.name;
+              currentToolInput = "";
+              rawContent[event.index] = {
+                type: "tool_use",
+                id: block.id,
+                name: block.name,
+                input: {},
+              };
+            } else if (block.type === "text") {
+              rawContent[event.index] = { type: "text", text: "" };
+            } else if (block.type === "thinking") {
+              rawContent[event.index] = {
+                type: "thinking",
+                thinking: "",
+                signature: "",
+              } as Anthropic.ContentBlockParam;
+            } else {
+              rawContent[event.index] = block as Anthropic.ContentBlockParam;
+            }
+            break;
+          }
+
           case "content_block_delta":
             if (event.delta.type === "text_delta") {
               yield { type: "text_delta", text: event.delta.text };
+              const block = rawContent[currentContentIndex];
+              if (block?.type === "text") {
+                block.text += event.delta.text;
+              }
             } else if (event.delta.type === "input_json_delta") {
               currentToolInput += event.delta.partial_json;
-            }
-            break;
-
-          case "content_block_start":
-            if (event.content_block.type === "tool_use") {
-              currentToolId = event.content_block.id;
-              currentToolName = event.content_block.name;
-              currentToolInput = "";
+            } else if (event.delta.type === "thinking_delta") {
+              const block = rawContent[currentContentIndex] as
+                | (Anthropic.ContentBlockParam & { type: "thinking"; thinking: string })
+                | undefined;
+              if (block?.type === "thinking") block.thinking += event.delta.thinking;
+            } else if (event.delta.type === "signature_delta") {
+              const block = rawContent[currentContentIndex] as
+                | (Anthropic.ContentBlockParam & { type: "thinking"; signature: string })
+                | undefined;
+              if (block?.type === "thinking") block.signature = event.delta.signature;
             }
             break;
 
@@ -162,6 +216,10 @@ export class AnthropicCompatibleProvider implements Provider {
                   },
                 );
               }
+              const block = rawContent[currentContentIndex];
+              if (block?.type === "tool_use") {
+                block.input = input as Record<string, unknown>;
+              }
               yield {
                 type: "tool_call",
                 id: currentToolId,
@@ -175,6 +233,12 @@ export class AnthropicCompatibleProvider implements Provider {
             break;
 
           case "message_delta":
+            if (event.delta.stop_reason && rawContent.length > 0) {
+              yield {
+                type: "assistant_raw",
+                value: rawContent.filter(Boolean),
+              };
+            }
             if (event.delta.stop_reason) {
               yield {
                 type: "stop",
