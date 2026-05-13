@@ -5,9 +5,9 @@ import type { ModelEvent, ProviderConfig } from "../src/model/types.js";
 describe("ModelEvent / FakeProvider", () => {
   it("emits events in order", async () => {
     const events: ModelEvent[] = [
-      { type: "text_delta", text: "Hello" },
-      { type: "tool_call", id: "1", name: "Read", input: { path: "a.txt" } },
-      { type: "stop", reason: "tool_use" },
+      { type: "text", delta: "Hello" },
+      { type: "tool-call", id: "1", name: "Read", input: { path: "a.txt" } },
+      { type: "finish", reason: "tool-calls" },
     ];
     const provider = new FakeProvider([events]);
 
@@ -27,7 +27,7 @@ describe("ModelEvent / FakeProvider", () => {
       collected.push(event);
     }
 
-    expect(collected).toEqual([{ type: "stop", reason: "end_turn" }]);
+    expect(collected).toEqual([{ type: "finish", reason: "stop" }]);
   });
 
   it("echoes latest user message when event sets are exhausted", async () => {
@@ -39,43 +39,43 @@ describe("ModelEvent / FakeProvider", () => {
     }
 
     expect(collected).toEqual([
-      { type: "text_delta", text: "Received task: hello" },
-      { type: "stop", reason: "end_turn" },
+      { type: "text", delta: "Received task: hello" },
+      { type: "finish", reason: "stop" },
     ]);
   });
 
   it("supports multi-turn event sets", async () => {
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "turn 1" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "turn 1" },
+        { type: "finish", reason: "stop" },
       ],
       [
-        { type: "text_delta", text: "turn 2" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "turn 2" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
     const t1: ModelEvent[] = [];
     for await (const e of provider.stream([])) t1.push(e);
     expect(t1).toEqual([
-      { type: "text_delta", text: "turn 1" },
-      { type: "stop", reason: "end_turn" },
+      { type: "text", delta: "turn 1" },
+      { type: "finish", reason: "stop" },
     ]);
 
     const t2: ModelEvent[] = [];
     for await (const e of provider.stream([])) t2.push(e);
     expect(t2).toEqual([
-      { type: "text_delta", text: "turn 2" },
-      { type: "stop", reason: "end_turn" },
+      { type: "text", delta: "turn 2" },
+      { type: "finish", reason: "stop" },
     ]);
   });
 
-  it("emits tool_call with input", async () => {
+  it("emits canonical tool-call with input", async () => {
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc1", name: "bash", input: { command: "echo hi" } },
-        { type: "stop", reason: "tool_use" },
+        { type: "tool-call", id: "tc1", name: "bash", input: { command: "echo hi" } },
+        { type: "finish", reason: "tool-calls" },
       ],
     ]);
 
@@ -83,7 +83,7 @@ describe("ModelEvent / FakeProvider", () => {
     for await (const e of provider.stream([])) collected.push(e);
 
     expect(collected[0]).toEqual({
-      type: "tool_call",
+      type: "tool-call",
       id: "tc1",
       name: "bash",
       input: { command: "echo hi" },

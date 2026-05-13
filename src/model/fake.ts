@@ -25,19 +25,19 @@ export class FakeProvider implements Provider {
   private defaultEvents(messages: Message[]): ModelEvent[] {
     const lastUser = messages.findLast((m) => m.role === "user");
     const summary = messages.findLast((m) => m.role === "summary");
-    if (!lastUser) return [{ type: "stop", reason: "end_turn" }];
+    if (!lastUser) return [{ type: "finish", reason: "stop" }];
     if (summary) {
       return [
         {
-          type: "text_delta",
-          text: `Received task: ${lastUser.content} with summary: ${summary.content}`,
+          type: "text",
+          delta: `Received task: ${lastUser.content} with summary: ${summary.content}`,
         },
-        { type: "stop", reason: "end_turn" },
+        { type: "finish", reason: "stop" },
       ];
     }
     return [
-      { type: "text_delta", text: `Received task: ${lastUser.content}` },
-      { type: "stop", reason: "end_turn" },
+      { type: "text", delta: `Received task: ${lastUser.content}` },
+      { type: "finish", reason: "stop" },
     ];
   }
 }

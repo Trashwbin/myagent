@@ -28,16 +28,16 @@ describe("read_file outside workspace", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: `../${sibling.split("/").at(-1)}/secret.txt` },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -69,16 +69,16 @@ describe("read_file outside workspace", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: `../${sibling.split("/").at(-1)}/data.txt` },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -107,16 +107,16 @@ describe("read_file outside workspace", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: `../${sibling.split("/").at(-1)}/data.txt` },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -146,16 +146,16 @@ describe("read_file outside workspace", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: "outside/secret.txt" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -182,16 +182,16 @@ describe("read_file outside workspace", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: ".env" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 

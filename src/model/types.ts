@@ -74,17 +74,7 @@ export type CanonicalModelEvent =
     }
   | { type: "abort"; reason?: string };
 
-export type LegacyModelEvent =
-  | { type: "text_delta"; text: string }
-  | { type: "tool_call"; id: string; name: string; input: unknown }
-  | { type: "assistant_raw"; value: unknown }
-  | { type: "stop"; reason: "end_turn" | "tool_use" | "length" };
-
-export type ModelEvent =
-  | CanonicalModelEvent
-  // Compatibility input for older tests and temporary custom providers. Core
-  // providers should emit CanonicalModelEvent.
-  | LegacyModelEvent;
+export type ModelEvent = CanonicalModelEvent;
 
 export type MessagePart =
   | { type: "text"; text: string; providerMetadata?: ProviderMetadata }

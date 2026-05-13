@@ -475,12 +475,12 @@ describe("multi-turn integration with runTurn", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "hello" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "hello" },
+        { type: "finish", reason: "stop" },
       ],
       [
-        { type: "text_delta", text: "world" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "world" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -518,16 +518,16 @@ describe("multi-turn integration with runTurn", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: "data.txt" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 

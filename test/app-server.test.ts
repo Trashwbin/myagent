@@ -45,8 +45,8 @@ function noopProvider(): Provider {
   return {
     name: "test",
     async *stream() {
-      yield { type: "text_delta" as const, text: "ok" };
-      yield { type: "stop" as const, reason: "end_turn" as const };
+      yield { type: "text" as const, delta: "ok" };
+      yield { type: "finish" as const, reason: "stop" as const };
     },
   };
 }
@@ -56,8 +56,8 @@ function delayedProvider(blocker: Promise<void>): Provider {
     name: "test",
     async *stream() {
       await blocker;
-      yield { type: "text_delta" as const, text: "ok" };
-      yield { type: "stop" as const, reason: "end_turn" as const };
+      yield { type: "text" as const, delta: "ok" };
+      yield { type: "finish" as const, reason: "stop" as const };
     },
   };
 }
@@ -66,8 +66,8 @@ function summaryProvider(summary: string): Provider {
   return {
     name: "test",
     async *stream() {
-      yield { type: "text_delta" as const, text: summary };
-      yield { type: "stop" as const, reason: "end_turn" as const };
+      yield { type: "text" as const, delta: summary };
+      yield { type: "finish" as const, reason: "stop" as const };
     },
   };
 }

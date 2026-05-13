@@ -144,46 +144,6 @@ function blockedMsg(
   };
 }
 
-function canonicalModelEvent(event: ModelEvent): CanonicalModelEvent | undefined {
-  switch (event.type) {
-    case "start":
-    case "step-start":
-    case "step-finish":
-    case "text-start":
-    case "text-end":
-    case "reasoning-start":
-    case "reasoning-end":
-    case "text":
-    case "reasoning":
-    case "tool-call":
-    case "tool-result":
-    case "finish":
-    case "abort":
-      return event;
-    case "text_delta":
-      return { type: "text", delta: event.text };
-    case "tool_call":
-      return {
-        type: "tool-call",
-        id: event.id,
-        name: event.name,
-        input: event.input,
-      };
-    case "stop":
-      return {
-        type: "finish",
-        reason:
-          event.reason === "tool_use"
-            ? "tool-calls"
-            : event.reason === "length"
-              ? "length"
-              : "stop",
-      };
-    case "assistant_raw":
-      return undefined;
-  }
-}
-
 function providerRawFromMetadata(metadata: ProviderMetadata | undefined): unknown {
   if (!metadata) return undefined;
   if ("raw" in metadata) return metadata.raw;
@@ -226,17 +186,9 @@ async function runAgentLoop(
       providerMetadata?: ProviderMetadata;
     }> = [];
 
-    for await (const event of provider.stream([...messages], toolSchemas, {
+    for await (const canonical of provider.stream([...messages], toolSchemas, {
       systemPrompt,
     })) {
-      if (event.type === "assistant_raw") {
-        assistantRaw = event.value;
-        continue;
-      }
-
-      const canonical = canonicalModelEvent(event);
-      if (!canonical) continue;
-
       switch (canonical.type) {
         case "start":
           if (onEvent) await onEvent({ type: "provider_stream_started" });

@@ -70,9 +70,9 @@ async function generateSummary(provider: Provider, prompt: string): Promise<stri
     undefined,
     { systemPrompt: COMPACT_SYSTEM_PROMPT },
   )) {
-    if (event.type === "text_delta") {
-      summary += event.text;
-    } else if (event.type === "tool_call") {
+    if (event.type === "text") {
+      summary += event.delta;
+    } else if (event.type === "tool-call") {
       throw new Error("Compaction provider attempted an unsupported tool call");
     }
   }

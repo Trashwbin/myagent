@@ -43,8 +43,8 @@ describe("Session loop (runSession wrapper)", () => {
         options?: ProviderStreamOptions,
       ): AsyncGenerator<ModelEvent> {
         capturedOptions = options;
-        yield { type: "text_delta", text: "ok" };
-        yield { type: "stop", reason: "end_turn" };
+        yield { type: "text", delta: "ok" };
+        yield { type: "finish", reason: "stop" };
       },
     };
 
@@ -59,12 +59,12 @@ describe("Session loop (runSession wrapper)", () => {
     expect(capturedOptions?.systemPrompt).toContain("edit_file");
   });
 
-  it("consumes text_delta events", async () => {
+  it("consumes canonical text events", async () => {
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "Hello, " },
-        { type: "text_delta", text: "world!" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "Hello, " },
+        { type: "text", delta: "world!" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -93,12 +93,12 @@ describe("Session loop (runSession wrapper)", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc1", name: "Read", input: { path: "hello.txt" } },
-        { type: "stop", reason: "tool_use" },
+        { type: "tool-call", id: "tc1", name: "Read", input: { path: "hello.txt" } },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "I read the file." },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "I read the file." },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -144,10 +144,10 @@ describe("Session loop (runSession wrapper)", () => {
     );
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc1", name: "skill", input: { name: "reviewer" } },
-        { type: "stop", reason: "tool_use" },
+        { type: "tool-call", id: "tc1", name: "skill", input: { name: "reviewer" } },
+        { type: "finish", reason: "tool-calls" },
       ],
-      [{ type: "text_delta", text: "Loaded." }, { type: "stop", reason: "end_turn" }],
+      [{ type: "text", delta: "Loaded." }, { type: "finish", reason: "stop" }],
     ]);
 
     const { transcript } = await runSession(
@@ -189,12 +189,12 @@ describe("Session loop (runSession wrapper)", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "skill",
           input: { name: "global-docs" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
     ]);
     const events: TurnEvent[] = [];
@@ -226,12 +226,12 @@ describe("Session loop (runSession wrapper)", () => {
   it("blocks denied tool_call", async () => {
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc2", name: "bash", input: { command: "rm -rf /" } },
-        { type: "stop", reason: "tool_use" },
+        { type: "tool-call", id: "tc2", name: "bash", input: { command: "rm -rf /" } },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "ok" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "ok" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -255,13 +255,13 @@ describe("Session loop (runSession wrapper)", () => {
   it("transcript contains assistant text and tool results", async () => {
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "Let me check." },
-        { type: "tool_call", id: "tc3", name: "bash", input: { command: "pwd" } },
-        { type: "stop", reason: "tool_use" },
+        { type: "text", delta: "Let me check." },
+        { type: "tool-call", id: "tc3", name: "bash", input: { command: "pwd" } },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "Done." },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "Done." },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -288,8 +288,8 @@ describe("Session loop (runSession wrapper)", () => {
       name: "capture",
       async *stream(messages: Message[]): AsyncGenerator<ModelEvent> {
         capturedMessages = [...messages];
-        yield { type: "text_delta", text: "continued" };
-        yield { type: "stop", reason: "end_turn" };
+        yield { type: "text", delta: "continued" };
+        yield { type: "finish", reason: "stop" };
       },
     };
 
@@ -323,16 +323,16 @@ describe("Session loop (runSession wrapper)", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc4",
           name: "edit_file",
           input: { path: "a.txt", old_string: "x", new_string: "y" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "ok" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "ok" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -362,16 +362,16 @@ describe("Session loop (runSession wrapper)", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc5",
           name: "edit_file",
           input: { path: "a.txt", old_string: "old", new_string: "new" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -406,16 +406,16 @@ describe("Session loop (runSession wrapper)", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc6",
           name: "edit_file",
           input: { path: "a.txt", old_string: "x", new_string: "y" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "ok" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "ok" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -448,16 +448,16 @@ describe("Session loop (runSession wrapper)", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc7",
           name: "edit_file",
           input: { path: "data.txt", old_string: "v1", new_string: "v2" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "edited" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "edited" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -500,8 +500,8 @@ describe("runTurn", () => {
   it("appends user input to session.messages", async () => {
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "hi" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "hi" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -522,8 +522,8 @@ describe("runTurn", () => {
   it("returns only new messages in newMessages", async () => {
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "response" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "response" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -556,8 +556,8 @@ describe("runTurn", () => {
       name: "spy",
       async *stream(messages: Message[]): AsyncGenerator<ModelEvent> {
         capturedMessages.push([...messages]);
-        yield { type: "text_delta", text: "ok" };
-        yield { type: "stop", reason: "end_turn" };
+        yield { type: "text", delta: "ok" };
+        yield { type: "finish", reason: "stop" };
       },
     };
 
@@ -588,12 +588,12 @@ describe("runTurn", () => {
   it("preserves existing messages across turns", async () => {
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "t1" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "t1" },
+        { type: "finish", reason: "stop" },
       ],
       [
-        { type: "text_delta", text: "t2" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "t2" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -632,9 +632,9 @@ describe("TurnEvent ordering", () => {
   it("emits assistant_text_delta before assistant_message", async () => {
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "Hello" },
-        { type: "text_delta", text: " world" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "Hello" },
+        { type: "text", delta: " world" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -703,12 +703,12 @@ describe("TurnEvent ordering", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc1", name: "bash", input: { command: "touch x.txt" } },
-        { type: "stop", reason: "tool_use" },
+        { type: "tool-call", id: "tc1", name: "bash", input: { command: "touch x.txt" } },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -743,16 +743,16 @@ describe("TurnEvent ordering", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "bash",
           input: { command: "touch approved.txt" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "ok" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "ok" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -781,12 +781,12 @@ describe("TurnEvent ordering", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc1", name: "Read", input: { path: "f.txt" } },
-        { type: "stop", reason: "tool_use" },
+        { type: "tool-call", id: "tc1", name: "Read", input: { path: "f.txt" } },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -822,16 +822,16 @@ describe("TurnEvent ordering", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "write_file",
           input: { path: "note.txt", content: "hello" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -922,16 +922,16 @@ describe("TurnEvent ordering", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "bash",
           input: { command: "touch denied.txt" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "ok" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "ok" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -964,13 +964,13 @@ describe("TurnEvent ordering", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "Reading." },
-        { type: "tool_call", id: "tc1", name: "Read", input: { path: "test.txt" } },
-        { type: "stop", reason: "tool_use" },
+        { type: "text", delta: "Reading." },
+        { type: "tool-call", id: "tc1", name: "Read", input: { path: "test.txt" } },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "Done." },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "Done." },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -1017,16 +1017,16 @@ describe("TurnEvent ordering", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: `../${sibling.split("/").at(-1)}/data.txt` },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -1081,16 +1081,16 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "edit_file",
           input: { path: "f.txt", old_string: "hello", new_string: "world" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -1125,16 +1125,16 @@ describe("Approval memory and abort", () => {
     const provider1 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "edit_file",
           input: { path: "f.txt", old_string: "content", new_string: "v1" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     const session = makeSession(tmp);
@@ -1150,16 +1150,16 @@ describe("Approval memory and abort", () => {
     const provider2 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "edit_file",
           input: { path: "f.txt", old_string: "v1", new_string: "v2" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     const r2 = await runTurn(provider2, registry, r1.session, "edit again", {
@@ -1188,16 +1188,16 @@ describe("Approval memory and abort", () => {
     const provider1 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "edit_file",
           input: { path: "f.txt", old_string: "content", new_string: "v1" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     const session1 = makeSession(tmp);
@@ -1218,16 +1218,16 @@ describe("Approval memory and abort", () => {
     const provider2 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "edit_file",
           input: { path: "f.txt", old_string: "v1", new_string: "v2" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     let handlerCalled = false;
@@ -1265,16 +1265,16 @@ describe("Approval memory and abort", () => {
     const provider1 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "edit_file",
           input: { path: "f.txt", old_string: "content", new_string: "v1" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     await runTurn(provider1, registry, makeSession(tmp1), "edit", {
@@ -1290,16 +1290,16 @@ describe("Approval memory and abort", () => {
     const provider2 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "edit_file",
           input: { path: "f.txt", old_string: "content", new_string: "v2" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     await runTurn(provider2, registry, makeSession(tmp2), "edit", {
@@ -1323,12 +1323,12 @@ describe("Approval memory and abort", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc1", name: "bash", input: { command: "touch x.txt" } },
-        { type: "stop", reason: "tool_use" },
+        { type: "tool-call", id: "tc1", name: "bash", input: { command: "touch x.txt" } },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "ok" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "ok" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -1360,12 +1360,12 @@ describe("Approval memory and abort", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc1", name: "bash", input: { command: "touch x.txt" } },
-        { type: "stop", reason: "tool_use" },
+        { type: "tool-call", id: "tc1", name: "bash", input: { command: "touch x.txt" } },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "ok" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "ok" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -1398,16 +1398,16 @@ describe("Approval memory and abort", () => {
     const provider1 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "edit_file",
           input: { path: "data.txt", old_string: "v1", new_string: "v2" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     const session = makeSession(tmp);
@@ -1426,16 +1426,16 @@ describe("Approval memory and abort", () => {
     const provider2 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "edit_file",
           input: { path: "data.txt", old_string: "v2", new_string: "v3" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     const r2 = await runTurn(provider2, registry, r1.session, "edit again", {
@@ -1465,12 +1465,12 @@ describe("Approval memory and abort", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc1", name: "bash", input: { command: "rm -rf /" } },
-        { type: "stop", reason: "tool_use" },
+        { type: "tool-call", id: "tc1", name: "bash", input: { command: "rm -rf /" } },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "ok" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "ok" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -1517,16 +1517,16 @@ describe("Approval memory and abort", () => {
     const provider1 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: join(ext, "a.txt") },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     const session = makeSession(ws);
@@ -1545,16 +1545,16 @@ describe("Approval memory and abort", () => {
     const provider2 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "Read",
           input: { path: join(ext, "b.txt") },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     const r2 = await runTurn(provider2, registry, r1.session, "read another", {
@@ -1590,16 +1590,16 @@ describe("Approval memory and abort", () => {
     const provider1 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: join(ext1, "a.txt") },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     await runTurn(provider1, registry, makeSession(ws), "read", {
@@ -1613,16 +1613,16 @@ describe("Approval memory and abort", () => {
     const provider2 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "Read",
           input: { path: join(ext2, "b.txt") },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     await runTurn(provider2, registry, makeSession(ws), "read", {
@@ -1657,16 +1657,16 @@ describe("Approval memory and abort", () => {
     const provider1 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: join(ext, "a.txt") },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     await runTurn(provider1, registry, makeSession(ws), "read", {
@@ -1680,16 +1680,16 @@ describe("Approval memory and abort", () => {
     const provider2 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "Read",
           input: { path: join(ext, ".env") },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     await runTurn(provider2, registry, makeSession(ws), "read env", {
@@ -1721,16 +1721,16 @@ describe("Approval memory and abort", () => {
     const provider1 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "list_dir",
           input: { path: ext },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     await runTurn(provider1, registry, makeSession(ws), "list", {
@@ -1744,16 +1744,16 @@ describe("Approval memory and abort", () => {
     const provider2 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "list_dir",
           input: { path: ext },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     await runTurn(provider2, registry, makeSession(ws), "list again", {
@@ -1785,16 +1785,16 @@ describe("Approval memory and abort", () => {
     const provider1 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "grep",
           input: { pattern: "TODO", path: ext },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     await runTurn(provider1, registry, makeSession(ws), "search", {
@@ -1808,16 +1808,16 @@ describe("Approval memory and abort", () => {
     const provider2 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "grep",
           input: { pattern: "fix", path: ext },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     const r2 = await runTurn(provider2, registry, makeSession(ws), "search again", {
@@ -1848,16 +1848,16 @@ describe("Approval memory and abort", () => {
     const provider1 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: join(ext, "pkg.json") },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     await runTurn(provider1, registry, makeSession(ws), "read", {
@@ -1877,16 +1877,16 @@ describe("Approval memory and abort", () => {
     const provider2 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "Read",
           input: { path: join(ext, "other.txt") },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     let handlerCalled = false;
@@ -1922,16 +1922,16 @@ describe("Approval memory and abort", () => {
     const provider1 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: join(ext, "shared.txt") },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     await runTurn(provider1, registry, makeSession(ws1), "read", {
@@ -1946,16 +1946,16 @@ describe("Approval memory and abort", () => {
     const provider2 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "Read",
           input: { path: join(ext, "shared.txt") },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     await runTurn(provider2, registry, makeSession(ws2), "read", {
@@ -2002,28 +2002,28 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: join(ext, "src", "permission", "a.ts") },
         },
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "Read",
           input: { path: join(ext, "src", "session", "b.ts") },
         },
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc3",
           name: "Read",
           input: { path: join(ext, "src", "tools", "c.ts") },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2072,22 +2072,22 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: join(ext, "src", "a.ts") },
         },
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "Read",
           input: { path: join(ext, ".env") },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2130,22 +2130,22 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "bash",
           input: { command: `cd ${ext} && git diff` },
         },
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "Read",
           input: { path: join(ext, "src", "session", "loop.ts") },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2196,16 +2196,16 @@ describe("Approval memory and abort", () => {
     const provider1 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "bash",
           input: { command: `cd ${ext} && git diff` },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2221,16 +2221,16 @@ describe("Approval memory and abort", () => {
     const provider2 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "bash",
           input: { command: `cd ${ext} && cat .env` },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2262,16 +2262,16 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: ".env" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2311,16 +2311,16 @@ describe("Approval memory and abort", () => {
     const provider1 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: ".env" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2340,16 +2340,16 @@ describe("Approval memory and abort", () => {
     const provider2 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "Read",
           input: { path: ".env" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2377,16 +2377,16 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: ".env" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2421,16 +2421,16 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "bash",
           input: { command: "cat .env" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2470,16 +2470,16 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: join(ext, ".env") },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2521,16 +2521,16 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "bash",
           input: { command: "rg SECRET .env" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2559,16 +2559,16 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: ".env" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "ok" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "ok" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2607,25 +2607,25 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: "data.txt" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "write_file",
           input: { path: "data.txt", content: "replaced" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2672,16 +2672,16 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "write_file",
           input: { path: "newfile.txt", content: "new content" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2725,25 +2725,25 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: "data.txt" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "write_file",
           input: { path: "data.txt", content: "overwritten" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2783,16 +2783,16 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "write_file",
           input: { path: "new.txt", content: "data" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -2818,22 +2818,22 @@ describe("Approval memory and abort", () => {
     const provider1 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc0",
           name: "Read",
           input: { path: "f.txt" },
         },
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "write_file",
           input: { path: "f.txt", content: "v2" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     const r1 = await runTurn(provider1, registry, makeSession(tmp), "write", {
@@ -2852,22 +2852,22 @@ describe("Approval memory and abort", () => {
     const provider2 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc-read2",
           name: "Read",
           input: { path: "f.txt" },
         },
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "write_file",
           input: { path: "f.txt", content: "v3" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     const r2 = await runTurn(provider2, registry, r1.session, "write again", {
@@ -2903,16 +2903,16 @@ describe("Approval memory and abort", () => {
     const provider1 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: join(ext, "a.txt") },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     await runTurn(provider1, registry, makeSession(ws), "read", {
@@ -2926,16 +2926,16 @@ describe("Approval memory and abort", () => {
     const provider2 = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "write_file",
           input: { path: join(ext, "b.txt"), content: "new" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
     const r2 = await runTurn(provider2, registry, makeSession(ws), "write external", {
@@ -2964,22 +2964,22 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "Read",
           input: { path: "data.txt" },
         },
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc2",
           name: "write_file",
           input: { path: "data.txt", content: "updated content" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -3014,12 +3014,12 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "write_file",
           input: { path: "data.txt", content: "updated" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
     ]);
 
@@ -3055,12 +3055,12 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "write_file",
           input: { path: "data.txt", content: "new\n" },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
     ]);
 
@@ -3106,16 +3106,16 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "apply_patch",
           input: { patch },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -3165,16 +3165,16 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "apply_patch",
           input: { patch },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -3212,16 +3212,16 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "apply_patch",
           input: { patch },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -3257,12 +3257,12 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "apply_patch",
           input: { patch },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
     ]);
 
@@ -3319,12 +3319,12 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "apply_patch",
           input: { patch },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
     ]);
 
@@ -3364,16 +3364,16 @@ describe("Approval memory and abort", () => {
     const provider = new FakeProvider([
       [
         {
-          type: "tool_call",
+          type: "tool-call",
           id: "tc1",
           name: "apply_patch",
           input: { patch },
         },
-        { type: "stop", reason: "tool_use" },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -3401,8 +3401,8 @@ describe("Truncation handling", () => {
   it("marks stopReason as length when provider returns length stop", async () => {
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "I was cut off mid-" },
-        { type: "stop", reason: "length" },
+        { type: "text", delta: "I was cut off mid-" },
+        { type: "finish", reason: "length" },
       ],
     ]);
 
@@ -3421,8 +3421,8 @@ describe("Truncation handling", () => {
   it("emits turn_truncated event when stop reason is length", async () => {
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "partial" },
-        { type: "stop", reason: "length" },
+        { type: "text", delta: "partial" },
+        { type: "finish", reason: "length" },
       ],
     ]);
 
@@ -3441,8 +3441,8 @@ describe("Truncation handling", () => {
   it("does not emit turn_truncated on normal end_turn", async () => {
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "complete" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "complete" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -3466,12 +3466,12 @@ describe("Truncation handling", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc1", name: "Read", input: { path: "f.txt" } },
-        { type: "stop", reason: "tool_use" },
+        { type: "tool-call", id: "tc1", name: "Read", input: { path: "f.txt" } },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "done" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -3494,8 +3494,8 @@ describe("Truncation handling", () => {
   it("truncation is not the same as aborted", async () => {
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "cut short" },
-        { type: "stop", reason: "length" },
+        { type: "text", delta: "cut short" },
+        { type: "finish", reason: "length" },
       ],
     ]);
 
@@ -3514,8 +3514,8 @@ describe("Truncation handling", () => {
   it("runSession propagates stopReason", async () => {
     const provider = new FakeProvider([
       [
-        { type: "text_delta", text: "truncated output" },
-        { type: "stop", reason: "length" },
+        { type: "text", delta: "truncated output" },
+        { type: "finish", reason: "length" },
       ],
     ]);
 
@@ -3553,12 +3553,12 @@ describe("Patch validation vs permission deny", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc1", name: "apply_patch", input: { patch } },
-        { type: "stop", reason: "tool_use" },
+        { type: "tool-call", id: "tc1", name: "apply_patch", input: { patch } },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "ok" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "ok" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -3592,12 +3592,12 @@ describe("Patch validation vs permission deny", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc1", name: "apply_patch", input: { patch } },
-        { type: "stop", reason: "tool_use" },
+        { type: "tool-call", id: "tc1", name: "apply_patch", input: { patch } },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "ok" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "ok" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 
@@ -3636,12 +3636,12 @@ describe("Patch validation vs permission deny", () => {
 
     const provider = new FakeProvider([
       [
-        { type: "tool_call", id: "tc1", name: "apply_patch", input: { patch } },
-        { type: "stop", reason: "tool_use" },
+        { type: "tool-call", id: "tc1", name: "apply_patch", input: { patch } },
+        { type: "finish", reason: "tool-calls" },
       ],
       [
-        { type: "text_delta", text: "ok" },
-        { type: "stop", reason: "end_turn" },
+        { type: "text", delta: "ok" },
+        { type: "finish", reason: "stop" },
       ],
     ]);
 

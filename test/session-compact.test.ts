@@ -30,9 +30,9 @@ class CapturingProvider implements Provider {
 describe("compactSession", () => {
   it("replaces old transcript with a summary and retained latest user turn", async () => {
     const provider = new CapturingProvider([
-      { type: "text_delta", text: "User wants the bug fixed. " },
-      { type: "text_delta", text: "Checkpoint cp1 can restore auth.ts." },
-      { type: "stop", reason: "end_turn" },
+      { type: "text", delta: "User wants the bug fixed. " },
+      { type: "text", delta: "Checkpoint cp1 can restore auth.ts." },
+      { type: "finish", reason: "stop" },
     ]);
     const session = makeSession([
       { role: "user", content: "fix auth bug" },
@@ -80,8 +80,8 @@ describe("compactSession", () => {
 
   it("does not compact when there is no older transcript", async () => {
     const provider = new CapturingProvider([
-      { type: "text_delta", text: "unused" },
-      { type: "stop", reason: "end_turn" },
+      { type: "text", delta: "unused" },
+      { type: "finish", reason: "stop" },
     ]);
 
     await expect(
@@ -92,7 +92,7 @@ describe("compactSession", () => {
 
   it("rejects tool calls during compaction", async () => {
     const provider = new CapturingProvider([
-      { type: "tool_call", id: "tc1", name: "Read", input: { path: "a.txt" } },
+      { type: "tool-call", id: "tc1", name: "Read", input: { path: "a.txt" } },
     ]);
 
     await expect(
