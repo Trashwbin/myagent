@@ -1,6 +1,7 @@
 import type { ApprovalResponse, ApprovalRule } from "../permission/approval.js";
 import type { ApprovalMode } from "../permission/policy.js";
 import type { Provider } from "../model/provider.js";
+import { formatProviderError, ProviderRuntimeError } from "../model/errors.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { TranscriptStore } from "../storage/store.js";
 import type { SessionState, ApprovalRequest, TurnEvent } from "../session/loop.js";
@@ -156,11 +157,12 @@ export class SessionManager {
         if (followupMessages.length > 0) {
           this.store.appendMessages(active.session.id, followupMessages);
         }
-      } catch {
+      } catch (err) {
+        const message = formatTurnError(err);
         this.sendEvent(sessionId, {
           type: "error",
           sessionId,
-          message: "Turn failed",
+          message,
           code: "TURN_ERROR",
         });
       } finally {
@@ -233,6 +235,12 @@ export class SessionManager {
     });
     return { ok: true };
   }
+}
+
+function formatTurnError(err: unknown): string {
+  if (err instanceof ProviderRuntimeError) return formatProviderError(err);
+  if (err instanceof Error && err.message.trim()) return `Turn failed: ${err.message}`;
+  return "Turn failed";
 }
 
 function formatCompactMessage(result: {

@@ -2,6 +2,7 @@ import { describe, expect, it, afterEach } from "vitest";
 import { parseClientMessage } from "../src/app/protocol.js";
 import { createAppServer, findAvailablePort } from "../src/app/server.js";
 import { SessionManager } from "../src/app/session-api.js";
+import { ProviderRuntimeError } from "../src/model/errors.js";
 import type { Provider } from "../src/model/provider.js";
 import type { TranscriptStore } from "../src/storage/store.js";
 import { openStore } from "../src/storage/store.js";
@@ -67,6 +68,15 @@ function summaryProvider(summary: string): Provider {
     async *stream() {
       yield { type: "text_delta" as const, text: summary };
       yield { type: "stop" as const, reason: "end_turn" as const };
+    },
+  };
+}
+
+function throwingProvider(error: unknown): Provider {
+  return {
+    name: "test",
+    async *stream() {
+      throw error;
     },
   };
 }
@@ -542,6 +552,74 @@ describe("SessionManager", () => {
       "second",
       "ok",
     ]);
+  });
+
+  it("sends the real turn failure message", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/test" });
+    const events: unknown[] = [];
+    const manager = new SessionManager({
+      provider: throwingProvider(new Error("boom")),
+      registry: new ToolRegistry(),
+      approval: "auto",
+      store,
+      sendEvent: (_sessionId, event) => events.push(event),
+    });
+    manager.registerSession(session);
+
+    expect(manager.handleUserMessage(session.id, "hi")).toEqual({ ok: true });
+    await waitForCondition(
+      () => !manager.hasActiveTurn(session.id),
+      "turn did not finish",
+    );
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        code: "TURN_ERROR",
+        message: "Turn failed: boom",
+      }),
+    );
+  });
+
+  it("formats provider turn failures for the web app", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/test" });
+    const events: unknown[] = [];
+    const manager = new SessionManager({
+      provider: throwingProvider(
+        new ProviderRuntimeError("openai", "auth", "bad key", {
+          status: 401,
+          hint: "check credentials",
+          requestId: "req_1",
+        }),
+      ),
+      registry: new ToolRegistry(),
+      approval: "auto",
+      store,
+      sendEvent: (_sessionId, event) => events.push(event),
+    });
+    manager.registerSession(session);
+
+    expect(manager.handleUserMessage(session.id, "hi")).toEqual({ ok: true });
+    await waitForCondition(
+      () => !manager.hasActiveTurn(session.id),
+      "turn did not finish",
+    );
+
+    const error = events.find(
+      (event) =>
+        typeof event === "object" &&
+        event !== null &&
+        (event as { type?: string }).type === "error",
+    ) as { message?: string } | undefined;
+
+    expect(error?.message).toContain("Provider error [openai/auth]: bad key");
+    expect(error?.message).toContain("Hint: check credentials");
+    expect(error?.message).toContain("Status: 401");
+    expect(error?.message).toContain("Request ID: req_1");
   });
 });
 
