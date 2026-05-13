@@ -7,6 +7,7 @@ import { Composer } from "./components/composer/Composer.js";
 import { Sidebar } from "./components/layout/Sidebar.js";
 import { Topbar } from "./components/layout/Topbar.js";
 import { MessageTimeline } from "./components/session/MessageTimeline.js";
+import { parseSlashCommand } from "./slash-commands.js";
 import { appReducer, initialAppState } from "./state/reducer.js";
 import type { AppState, ClientConfig, SessionSummary } from "./state/types.js";
 
@@ -253,38 +254,51 @@ export function App() {
     const sessionId = state.activeSessionId;
     if (!text || !sessionId || !wsRef.current || isActiveRunning(state)) return;
 
-    if (text.startsWith("/rewind ")) {
-      const checkpointId = text.slice("/rewind ".length).trim();
-      if (!checkpointId) return;
-      wsRef.current.send(
-        JSON.stringify({
-          type: "rewind_session",
+    const slashCommand = parseSlashCommand(text);
+    if (slashCommand.type !== "none") {
+      if (slashCommand.type !== "valid") {
+        dispatch({
+          type: "status_local",
           sessionId,
-          checkpointId,
-        }),
-      );
-      setInput("");
-      return;
-    }
+          level: "warning",
+          text: slashCommand.message,
+        });
+        return;
+      }
 
-    if (text === "/revert-last") {
-      wsRef.current.send(
-        JSON.stringify({
-          type: "revert_last",
-          sessionId,
-        }),
-      );
-      setInput("");
-      return;
-    }
+      const { command, args } = slashCommand;
+      dispatch({
+        type: "status_local",
+        sessionId,
+        level: "info",
+        text: command.pendingMessage(args),
+      });
+      dispatch({ type: "session_running", sessionId, running: true });
 
-    if (text === "/compact") {
-      wsRef.current.send(
-        JSON.stringify({
-          type: "compact_session",
-          sessionId,
-        }),
-      );
+      if (command.id === "rewind") {
+        wsRef.current.send(
+          JSON.stringify({
+            type: "rewind_session",
+            sessionId,
+            checkpointId: args,
+          }),
+        );
+      } else if (command.id === "revert-last") {
+        wsRef.current.send(
+          JSON.stringify({
+            type: "revert_last",
+            sessionId,
+          }),
+        );
+      } else if (command.id === "compact") {
+        wsRef.current.send(
+          JSON.stringify({
+            type: "compact_session",
+            sessionId,
+          }),
+        );
+      }
+
       setInput("");
       return;
     }
@@ -346,6 +360,15 @@ export function App() {
           onChange={setInput}
           onSend={() => {
             void sendMessage();
+          }}
+          onCommandError={(message) => {
+            if (!state.activeSessionId) return;
+            dispatch({
+              type: "status_local",
+              sessionId: state.activeSessionId,
+              level: "warning",
+              text: message,
+            });
           }}
         />
       </main>

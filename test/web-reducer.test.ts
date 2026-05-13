@@ -109,10 +109,15 @@ describe("web timeline reducer", () => {
   });
 
   it("appends a status part when a session is compacted", () => {
-    const state = appReducer(initialAppState, {
+    const loaded = appReducer(initialAppState, {
       type: "timeline_loaded",
       sessionId: "s1",
       messages: [{ role: "user", content: "continue" }],
+    });
+    const state = appReducer(loaded, {
+      type: "session_running",
+      sessionId: "s1",
+      running: true,
     });
 
     const next = appReducer(state, {
@@ -130,6 +135,28 @@ describe("web timeline reducer", () => {
       kind: "status",
       level: "info",
       text: "Compacted 4 messages; retained 2 messages.",
+    });
+    expect(next.runningSessionIds).not.toContain("s1");
+  });
+
+  it("appends a local slash-command status", () => {
+    const state = appReducer(initialAppState, {
+      type: "timeline_loaded",
+      sessionId: "s1",
+      messages: [{ role: "user", content: "continue" }],
+    });
+
+    const next = appReducer(state, {
+      type: "status_local",
+      sessionId: "s1",
+      level: "warning",
+      text: "/rewind requires checkpointId. Usage: /rewind <checkpointId>",
+    });
+
+    expect(next.timelines.s1?.[0]?.assistantParts.at(-1)).toMatchObject({
+      kind: "status",
+      level: "warning",
+      text: "/rewind requires checkpointId. Usage: /rewind <checkpointId>",
     });
   });
 });

@@ -1502,6 +1502,53 @@ details.tool-details pre {
   padding: 14px 24px 16px;
 }
 
+.slash-menu {
+  max-width: var(--dock-width);
+  margin: 0 auto 8px;
+  border: 1px solid rgba(20, 24, 22, 0.09);
+  border-radius: 14px;
+  background: rgba(250, 251, 248, 0.98);
+  box-shadow: 0 12px 32px rgba(20, 24, 22, 0.08);
+  overflow: hidden;
+}
+
+.slash-command {
+  width: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--body);
+  padding: 10px 13px;
+  text-align: left;
+}
+
+.slash-command + .slash-command {
+  border-top: 1px solid rgba(20, 24, 22, 0.06);
+}
+
+.slash-command:hover,
+.slash-command.selected {
+  background: rgba(31, 107, 87, 0.08);
+}
+
+.slash-command-name {
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+}
+
+.slash-command-description {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .composer-inner {
   max-width: var(--dock-width);
   margin: 0 auto;

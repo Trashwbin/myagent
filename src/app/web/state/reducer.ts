@@ -28,6 +28,12 @@ export type AppAction =
   | { type: "set_active_session"; sessionId: string | null }
   | { type: "timeline_loaded"; sessionId: string; messages: Message[] }
   | { type: "user_message_local"; sessionId: string; turnId: string; text: string }
+  | {
+      type: "status_local";
+      sessionId: string;
+      level: "info" | "warning" | "error";
+      text: string;
+    }
   | { type: "session_running"; sessionId: string; running: boolean }
   | { type: "ws_open"; open: boolean }
   | { type: "server_message"; message: ServerMessage }
@@ -74,6 +80,18 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             ...(state.timelines[action.sessionId] ?? []),
             createTurn(action.turnId, action.text),
           ],
+        },
+      };
+    case "status_local":
+      return {
+        ...state,
+        timelines: {
+          ...state.timelines,
+          [action.sessionId]: appendStatus(
+            state.timelines[action.sessionId] ?? [],
+            action.level,
+            action.text,
+          ),
         },
       };
     case "session_running":
@@ -149,6 +167,7 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
     case "session_rewound":
       return {
         ...state,
+        runningSessionIds: state.runningSessionIds.filter((id) => id !== message.sessionId),
         timelines: {
           ...state.timelines,
           [message.sessionId]: appendStatus(
@@ -161,6 +180,7 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
     case "session_compacted":
       return {
         ...state,
+        runningSessionIds: state.runningSessionIds.filter((id) => id !== message.sessionId),
         timelines: {
           ...state.timelines,
           [message.sessionId]: appendStatus(
