@@ -34,16 +34,22 @@ Current protocols:
 - OpenAI Responses (`protocol: "responses"`)
 - Anthropic Messages-compatible (`protocol: "messages"`)
 
-Use native protocol adapters instead of a broad provider gateway.
+Use AI SDK provider packages for the actual model calls, with a thin local
+adapter that maps AI SDK `fullStream` parts into the runtime's canonical
+`ModelEvent` stream.
 
 ```text
 src/model/
   provider.ts
   types.ts
+  ai-sdk-provider.ts
   openai-compatible.ts
   openai-responses.ts
   anthropic-compatible.ts
 ```
+
+The older raw SDK adapters remain as compatibility fixtures and protocol tests;
+the CLI and live scenario runner use `AiSdkProvider`.
 
 Provider config:
 
