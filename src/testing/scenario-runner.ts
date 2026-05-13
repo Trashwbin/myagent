@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 
 import type { Provider } from "../model/provider.js";
 import { OpenAICompatibleProvider } from "../model/openai-compatible.js";
+import { OpenAIResponsesProvider } from "../model/openai-responses.js";
 import { AnthropicCompatibleProvider } from "../model/anthropic-compatible.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { readFileTool } from "../tools/read.js";
@@ -57,10 +58,13 @@ function createProviderFromConfig(config: LiveScenarioConfig): Provider {
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
     maxOutputTokens: config.maxOutputTokens,
+    protocol: config.protocol,
   };
 
   if (config.provider === "openai") {
-    return new OpenAICompatibleProvider(providerConfig);
+    return config.protocol === "responses"
+      ? new OpenAIResponsesProvider(providerConfig)
+      : new OpenAICompatibleProvider(providerConfig);
   }
   return new AnthropicCompatibleProvider({
     ...providerConfig,

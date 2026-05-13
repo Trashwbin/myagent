@@ -123,6 +123,7 @@ export type LiveScenarioConfig = {
   baseUrl?: string;
   apiKey?: string;
   authToken?: string;
+  protocol?: "chat" | "responses" | "messages";
   cwd: string;
   maxTurns?: number;
   maxOutputTokens?: number;

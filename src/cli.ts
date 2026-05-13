@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { realpathSync } from "node:fs";
 import * as readline from "node:readline";
 import { OpenAICompatibleProvider } from "./model/openai-compatible.js";
+import { OpenAIResponsesProvider } from "./model/openai-responses.js";
 import { AnthropicCompatibleProvider } from "./model/anthropic-compatible.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { readFileTool } from "./tools/read.js";
@@ -288,13 +289,17 @@ function createProvider(config: Config): Provider {
       );
       process.exit(1);
     }
-    return new OpenAICompatibleProvider({
+    const providerInput = {
       provider: "openai",
       model,
       baseUrl: providerConfig.baseUrl,
       apiKey: providerConfig.apiKey,
       maxOutputTokens: providerConfig.maxOutputTokens,
-    });
+      protocol: providerConfig.protocol,
+    } as const;
+    return providerConfig.protocol === "responses"
+      ? new OpenAIResponsesProvider(providerInput)
+      : new OpenAICompatibleProvider(providerInput);
   }
 
   if (!providerConfig.apiKey && !providerConfig.authToken) {

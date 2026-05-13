@@ -510,7 +510,11 @@ describe("SessionManager", () => {
 
     expect(store.getSession(session.id)?.messages).toEqual([
       { role: "user", content: "hi" },
-      { role: "assistant", content: "ok" },
+      {
+        role: "assistant",
+        content: "ok",
+        parts: [{ type: "text", text: "ok" }],
+      },
     ]);
   });
 

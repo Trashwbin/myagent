@@ -31,6 +31,7 @@ describe("ConfigSchema", () => {
           baseUrl: "https://api.example.com/v1",
           apiKey: "sk-test",
           maxOutputTokens: 4096,
+          protocol: "responses",
         },
       },
     };
@@ -209,6 +210,7 @@ describe("config resolution helpers", () => {
           apiKey: "sk-openai",
           baseUrl: "https://openai.example",
           maxOutputTokens: 2048,
+          protocol: "responses" as const,
         },
       },
     };
@@ -218,6 +220,7 @@ describe("config resolution helpers", () => {
       authToken: undefined,
       baseUrl: "https://openai.example",
       maxOutputTokens: 2048,
+      protocol: "responses",
     });
   });
 

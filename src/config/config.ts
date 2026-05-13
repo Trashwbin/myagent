@@ -11,6 +11,7 @@ const ProviderConfigSchema = z.strictObject({
   apiKey: z.string().optional(),
   authToken: z.string().optional(),
   maxOutputTokens: z.number().int().positive().optional(),
+  protocol: z.enum(["chat", "responses", "messages"]).optional(),
 });
 
 export const ConfigSchema = z.strictObject({
@@ -167,6 +168,7 @@ export function resolveProviderConfig(
       config.providers?.[provider]?.maxOutputTokens,
       config.maxOutputTokens,
     ),
+    protocol: config.providers?.[provider]?.protocol,
   };
 }
 
