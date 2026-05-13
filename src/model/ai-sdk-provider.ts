@@ -201,6 +201,20 @@ function createLanguageModel(config: ProviderConfig): LanguageModel {
   return anthropic.messages(config.model as never);
 }
 
+function isOfficialOpenAIBaseUrl(baseUrl: string | undefined): boolean {
+  if (!baseUrl) return true;
+  try {
+    const url = new URL(baseUrl);
+    return url.hostname === "api.openai.com";
+  } catch {
+    return false;
+  }
+}
+
+function defaultOpenAIProtocol(config: ProviderConfig): AiSdkProtocol {
+  return isOfficialOpenAIBaseUrl(config.baseUrl) ? "responses" : "chat";
+}
+
 export class AiSdkProvider implements Provider {
   readonly name: ProviderKind;
   readonly protocol: AiSdkProtocol;
@@ -208,7 +222,9 @@ export class AiSdkProvider implements Provider {
   constructor(private config: ProviderConfig) {
     this.name = config.provider;
     this.protocol =
-      config.provider === "anthropic" ? "messages" : config.protocol ?? "responses";
+      config.provider === "anthropic"
+        ? "messages"
+        : config.protocol ?? defaultOpenAIProtocol(config);
   }
 
   async *stream(

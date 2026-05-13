@@ -134,7 +134,7 @@ describe("AI SDK provider adapter", () => {
     ]);
   });
 
-  it("defaults OpenAI to the Responses protocol", () => {
+  it("defaults official OpenAI to the Responses protocol", () => {
     const provider = new AiSdkProvider({
       provider: "openai",
       model: "gpt-5",
@@ -143,6 +143,18 @@ describe("AI SDK provider adapter", () => {
 
     expect(provider.name).toBe("openai");
     expect(provider.protocol).toBe("responses");
+  });
+
+  it("defaults custom OpenAI-compatible base URLs to Chat Completions", () => {
+    const provider = new AiSdkProvider({
+      provider: "openai",
+      model: "mimo-v2.5-pro",
+      apiKey: "sk-test",
+      baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+    });
+
+    expect(provider.name).toBe("openai");
+    expect(provider.protocol).toBe("chat");
   });
 
   it("uses Anthropic Messages protocol", () => {
