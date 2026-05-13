@@ -87,6 +87,13 @@ export type SessionResult = {
 };
 
 export type TurnEvent =
+  | { type: "provider_stream_started" }
+  | { type: "provider_step_started" }
+  | { type: "provider_step_finished" }
+  | { type: "assistant_text_started" }
+  | { type: "assistant_text_finished" }
+  | { type: "assistant_reasoning_started" }
+  | { type: "assistant_reasoning_finished" }
   | { type: "assistant_text_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: unknown; display?: ToolDisplay }
   | { type: "assistant_message"; message: Message }
@@ -139,11 +146,19 @@ function blockedMsg(
 
 function canonicalModelEvent(event: ModelEvent): CanonicalModelEvent | undefined {
   switch (event.type) {
+    case "start":
+    case "step-start":
+    case "step-finish":
+    case "text-start":
+    case "text-end":
+    case "reasoning-start":
+    case "reasoning-end":
     case "text":
     case "reasoning":
     case "tool-call":
     case "tool-result":
     case "finish":
+    case "abort":
       return event;
     case "text_delta":
       return { type: "text", delta: event.text };
@@ -223,9 +238,34 @@ async function runAgentLoop(
       if (!canonical) continue;
 
       switch (canonical.type) {
+        case "start":
+          if (onEvent) await onEvent({ type: "provider_stream_started" });
+          break;
+        case "step-start":
+          if (onEvent) await onEvent({ type: "provider_step_started" });
+          break;
+        case "step-finish":
+          if (onEvent) await onEvent({ type: "provider_step_finished" });
+          providerMetadata = canonical.providerMetadata;
+          lastStopReason =
+            canonical.reason === "tool-calls"
+              ? "tool_use"
+              : canonical.reason === "length"
+                ? "length"
+                : "end_turn";
+          break;
+        case "text-start":
+          if (onEvent) await onEvent({ type: "assistant_text_started" });
+          break;
         case "text":
           assistantText += canonical.delta;
           if (onEvent) await onEvent({ type: "assistant_text_delta", text: canonical.delta });
+          break;
+        case "text-end":
+          if (onEvent) await onEvent({ type: "assistant_text_finished" });
+          break;
+        case "reasoning-start":
+          if (onEvent) await onEvent({ type: "assistant_reasoning_started" });
           break;
         case "reasoning":
           reasoningText += canonical.delta;
@@ -234,6 +274,9 @@ async function runAgentLoop(
             ...(canonical.providerMetadata ?? {}),
           };
           if (!assistantRaw) assistantRaw = providerRawFromMetadata(canonical.providerMetadata);
+          break;
+        case "reasoning-end":
+          if (onEvent) await onEvent({ type: "assistant_reasoning_finished" });
           break;
         case "tool-call":
           toolCalls.push({
@@ -262,6 +305,9 @@ async function runAgentLoop(
               : canonical.reason === "length"
                 ? "length"
                 : "end_turn";
+          break;
+        case "abort":
+          lastStopReason = "end_turn";
           break;
       }
     }

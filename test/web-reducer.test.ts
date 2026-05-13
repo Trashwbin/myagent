@@ -54,6 +54,26 @@ describe("web timeline reducer", () => {
     expect("streaming" in textParts[0]!).toBe(false);
   });
 
+  it("consumes stream boundary events without leaving status noise", () => {
+    const initial = buildTimelineFromMessages([{ role: "user", content: "hi" }]);
+    const events: TurnEvent[] = [
+      { type: "provider_stream_started" },
+      { type: "provider_step_started" },
+      { type: "assistant_reasoning_started" },
+      { type: "assistant_reasoning_finished" },
+      { type: "assistant_text_started" },
+      { type: "assistant_text_delta", text: "Hello" },
+      { type: "assistant_text_finished" },
+      { type: "provider_step_finished" },
+    ];
+
+    const result = events.reduce((timeline, event) => applyTurnEvent(timeline, event), initial);
+    const parts = result[0]?.assistantParts ?? [];
+
+    expect(parts.filter((part) => part.kind === "status")).toHaveLength(0);
+    expect(parts).toMatchObject([{ kind: "text", text: "Hello", streaming: false }]);
+  });
+
   it("keeps context tools as context-kind parts and mutation tools as mutation-kind parts", () => {
     const initial = buildTimelineFromMessages([{ role: "user", content: "inspect and edit" }]);
     const events: TurnEvent[] = [

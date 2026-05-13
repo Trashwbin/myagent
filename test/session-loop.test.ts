@@ -654,6 +654,50 @@ describe("TurnEvent ordering", () => {
     expect(finished).toBe(types.length - 1);
   });
 
+  it("consumes AI SDK stream boundary events before assistant output", async () => {
+    const provider = new FakeProvider([
+      [
+        { type: "start" },
+        { type: "step-start" },
+        { type: "reasoning-start", id: "rsn_1" },
+        { type: "reasoning", id: "rsn_1", delta: "Need answer." },
+        { type: "reasoning-end", id: "rsn_1" },
+        { type: "text-start", id: "txt_1" },
+        { type: "text", id: "txt_1", delta: "Hello" },
+        { type: "text-end", id: "txt_1" },
+        { type: "step-finish", reason: "stop" },
+        { type: "finish", reason: "stop" },
+      ],
+    ]);
+
+    const { events, onEvent } = captureEvents();
+    const result = await runTurn(provider, new ToolRegistry(), makeSession(process.cwd()), "hi", {
+      approval: "auto",
+      onEvent,
+    });
+
+    expect(events.map((event) => event.type)).toEqual([
+      "provider_stream_started",
+      "provider_step_started",
+      "assistant_reasoning_started",
+      "assistant_reasoning_finished",
+      "assistant_text_started",
+      "assistant_text_delta",
+      "assistant_text_finished",
+      "provider_step_finished",
+      "assistant_message",
+      "turn_finished",
+    ]);
+    expect(result.newMessages[1]).toMatchObject({
+      role: "assistant",
+      content: "Hello",
+      parts: [
+        { type: "reasoning", text: "Need answer." },
+        { type: "text", text: "Hello" },
+      ],
+    });
+  });
+
   it("emits tool_approval_required before approvalHandler resolves", async () => {
     let handlerCalled = false;
 

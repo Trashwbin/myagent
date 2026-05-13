@@ -287,6 +287,24 @@ export function applyTurnEvent(
   event: TurnEvent,
 ): TimelineTurn[] {
   switch (event.type) {
+    case "provider_stream_started":
+    case "provider_step_started":
+      return ensureTimelineTurn(timeline);
+    case "provider_step_finished":
+      return timeline;
+    case "assistant_text_started":
+      return removeStatus(ensureTimelineTurn(timeline), "provider:reasoning");
+    case "assistant_text_finished":
+      return finalizeStreamingText(ensureTimelineTurn(timeline));
+    case "assistant_reasoning_started":
+      return appendOrReplaceStatus(
+        ensureTimelineTurn(timeline),
+        "info",
+        "Thinking...",
+        "provider:reasoning",
+      );
+    case "assistant_reasoning_finished":
+      return removeStatus(ensureTimelineTurn(timeline), "provider:reasoning");
     case "assistant_text_delta":
       return updateLastTurn(ensureTimelineTurn(timeline), (turn) => {
         const parts = [...turn.assistantParts];
@@ -473,6 +491,46 @@ function appendStatus(
         text,
       },
     ],
+  }));
+}
+
+function appendOrReplaceStatus(
+  timeline: TimelineTurn[],
+  level: "info" | "warning" | "error",
+  text: string,
+  id: string,
+): TimelineTurn[] {
+  return updateLastTurn(ensureTimelineTurn(timeline), (turn) => {
+    const statusId = `${turn.id}:status:${id}`;
+    const parts = turn.assistantParts.map((part) =>
+      part.kind === "status" && part.id === statusId
+        ? { ...part, level, text }
+        : part,
+    );
+    const exists = parts.some((part) => part.kind === "status" && part.id === statusId);
+    return {
+      ...turn,
+      assistantParts: exists
+        ? parts
+        : [
+            ...parts,
+            {
+              id: statusId,
+              kind: "status",
+              level,
+              text,
+            },
+          ],
+    };
+  });
+}
+
+function removeStatus(timeline: TimelineTurn[], id: string): TimelineTurn[] {
+  return updateLastTurn(ensureTimelineTurn(timeline), (turn) => ({
+    ...turn,
+    assistantParts: turn.assistantParts.filter(
+      (part) => !(part.kind === "status" && part.id === `${turn.id}:status:${id}`),
+    ),
   }));
 }
 

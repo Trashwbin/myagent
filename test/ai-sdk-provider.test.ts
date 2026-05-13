@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AiSdkProvider } from "../src/model/ai-sdk-provider.js";
+import { AiSdkProvider, mapStreamPartToModelEvent } from "../src/model/ai-sdk-provider.js";
 import {
   convertMessages,
   convertMessagesToUI,
@@ -198,6 +198,59 @@ describe("AI SDK provider adapter", () => {
         store: true,
         previousResponseId: "resp_1",
       },
+    });
+  });
+
+  it("maps AI SDK stream boundaries into model events", () => {
+    expect(mapStreamPartToModelEvent({ type: "start" }, "openai")).toEqual({
+      type: "start",
+    });
+    expect(
+      mapStreamPartToModelEvent(
+        { type: "text-start", id: "txt_1", providerMetadata: { openai: { itemId: "msg_1" } } },
+        "openai",
+      ),
+    ).toEqual({
+      type: "text-start",
+      id: "txt_1",
+      providerMetadata: { openai: { itemId: "msg_1" } },
+    });
+    expect(
+      mapStreamPartToModelEvent(
+        {
+          type: "finish-step",
+          finishReason: "tool-calls",
+          rawFinishReason: "tool_calls",
+          usage: {
+            inputTokens: 10,
+            inputTokenDetails: {
+              cacheReadTokens: undefined,
+              cacheWriteTokens: undefined,
+              noCacheTokens: undefined,
+            },
+            outputTokens: 2,
+            outputTokenDetails: { reasoningTokens: 1, textTokens: 1 },
+            totalTokens: 12,
+          },
+          response: {
+            id: "resp_1",
+            timestamp: new Date("2026-05-13T00:00:00.000Z"),
+            modelId: "gpt-test",
+          },
+          providerMetadata: { openai: { responseId: "resp_1" } },
+        },
+        "openai",
+      ),
+    ).toMatchObject({
+      type: "step-finish",
+      reason: "tool-calls",
+      usage: {
+        inputTokens: 10,
+        outputTokens: 2,
+        totalTokens: 12,
+        reasoningTokens: 1,
+      },
+      providerMetadata: { openai: { responseId: "resp_1" } },
     });
   });
 });

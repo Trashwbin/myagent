@@ -57,6 +57,129 @@ function toFinishReason(reason: FinishReason): ModelFinishReason {
   }
 }
 
+export function mapStreamPartToModelEvent(
+  part: TextStreamPart<ToolSet>,
+  provider: ProviderKind,
+): ModelEvent | undefined {
+  switch (part.type) {
+    case "start":
+      return { type: "start" };
+
+    case "start-step":
+      return {
+        type: "step-start",
+      };
+
+    case "text-start":
+      return {
+        type: "text-start",
+        id: part.id,
+        providerMetadata: toProviderMetadata(part.providerMetadata),
+      };
+
+    case "text-delta":
+      return {
+        type: "text",
+        id: part.id,
+        delta: part.text,
+        providerMetadata: toProviderMetadata(part.providerMetadata),
+      };
+
+    case "text-end":
+      return {
+        type: "text-end",
+        id: part.id,
+        providerMetadata: toProviderMetadata(part.providerMetadata),
+      };
+
+    case "reasoning-start":
+      return {
+        type: "reasoning-start",
+        id: part.id,
+        providerMetadata: toProviderMetadata(part.providerMetadata),
+      };
+
+    case "reasoning-delta":
+      return {
+        type: "reasoning",
+        id: part.id,
+        delta: part.text,
+        providerMetadata: toProviderMetadata(part.providerMetadata),
+      };
+
+    case "reasoning-end":
+      return {
+        type: "reasoning-end",
+        id: part.id,
+        providerMetadata: toProviderMetadata(part.providerMetadata),
+      };
+
+    case "tool-call":
+      return {
+        type: "tool-call",
+        id: part.toolCallId,
+        name: part.toolName,
+        input: part.input,
+        providerMetadata: toProviderMetadata(part.providerMetadata),
+      };
+
+    case "tool-result":
+      return {
+        type: "tool-result",
+        id: part.toolCallId,
+        name: part.toolName,
+        result: part.output,
+        providerMetadata: toProviderMetadata(part.providerMetadata),
+      };
+
+    case "tool-error":
+      return {
+        type: "tool-result",
+        id: part.toolCallId,
+        name: part.toolName,
+        result: part.error,
+        isError: true,
+        providerMetadata: toProviderMetadata(part.providerMetadata),
+      };
+
+    case "tool-output-denied":
+      return {
+        type: "tool-result",
+        id: part.toolCallId,
+        name: part.toolName,
+        result: "Tool output denied.",
+        isError: true,
+      };
+
+    case "finish-step":
+      return {
+        type: "step-finish",
+        reason: toFinishReason(part.finishReason),
+        usage: toUsage(part.usage),
+        providerMetadata: toProviderMetadata(part.providerMetadata),
+      };
+
+    case "finish":
+      return {
+        type: "finish",
+        reason: toFinishReason(part.finishReason),
+        usage: toUsage(part.totalUsage),
+      };
+
+    case "abort":
+      return {
+        type: "abort",
+        reason: part.reason,
+      };
+
+    case "error":
+      throw normalizeProviderError(provider, part.error);
+
+    default:
+      return undefined;
+  }
+}
+
 function createLanguageModel(config: ProviderConfig): LanguageModel {
   if (config.provider === "openai") {
     const openai = createOpenAI({
@@ -121,7 +244,7 @@ export class AiSdkProvider implements Provider {
 
     try {
       for await (const part of result.fullStream) {
-        const event = this.mapStreamPart(part);
+        const event = mapStreamPartToModelEvent(part, this.name);
         if (event) yield event;
       }
     } catch (err) {
@@ -130,55 +253,4 @@ export class AiSdkProvider implements Provider {
     }
   }
 
-  private mapStreamPart(part: TextStreamPart<ToolSet>): ModelEvent | undefined {
-    switch (part.type) {
-      case "text-delta":
-        return {
-          type: "text",
-          id: part.id,
-          delta: part.text,
-          providerMetadata: toProviderMetadata(part.providerMetadata),
-        };
-
-      case "reasoning-delta":
-        return {
-          type: "reasoning",
-          id: part.id,
-          delta: part.text,
-          providerMetadata: toProviderMetadata(part.providerMetadata),
-        };
-
-      case "tool-call":
-        return {
-          type: "tool-call",
-          id: part.toolCallId,
-          name: part.toolName,
-          input: part.input,
-          providerMetadata: toProviderMetadata(part.providerMetadata),
-        };
-
-      case "tool-result":
-        return {
-          type: "tool-result",
-          id: part.toolCallId,
-          name: part.toolName,
-          result: part.output,
-          providerMetadata: toProviderMetadata(part.providerMetadata),
-        };
-
-      case "finish-step":
-        return {
-          type: "finish",
-          reason: toFinishReason(part.finishReason),
-          usage: toUsage(part.usage),
-          providerMetadata: toProviderMetadata(part.providerMetadata),
-        };
-
-      case "error":
-        throw normalizeProviderError(this.name, part.error);
-
-      default:
-        return undefined;
-    }
-  }
 }

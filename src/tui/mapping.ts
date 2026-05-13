@@ -15,6 +15,13 @@ export function eventToRows(
   options?: { sensitive?: boolean },
 ): TranscriptRow[] {
   switch (event.type) {
+    case "provider_stream_started":
+    case "provider_step_started":
+    case "provider_step_finished":
+    case "assistant_text_started":
+    case "assistant_text_finished":
+    case "assistant_reasoning_started":
+    case "assistant_reasoning_finished":
     case "assistant_text_delta":
       return [];
     case "assistant_message": {

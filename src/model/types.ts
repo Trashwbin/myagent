@@ -13,6 +13,37 @@ export type ModelUsage = {
 export type ModelFinishReason = "stop" | "tool-calls" | "length" | "error";
 
 export type CanonicalModelEvent =
+  | { type: "start" }
+  | {
+      type: "step-start";
+      providerMetadata?: ProviderMetadata;
+    }
+  | {
+      type: "step-finish";
+      reason: ModelFinishReason;
+      usage?: ModelUsage;
+      providerMetadata?: ProviderMetadata;
+    }
+  | {
+      type: "text-start";
+      id: string;
+      providerMetadata?: ProviderMetadata;
+    }
+  | {
+      type: "text-end";
+      id: string;
+      providerMetadata?: ProviderMetadata;
+    }
+  | {
+      type: "reasoning-start";
+      id: string;
+      providerMetadata?: ProviderMetadata;
+    }
+  | {
+      type: "reasoning-end";
+      id: string;
+      providerMetadata?: ProviderMetadata;
+    }
   | { type: "text"; id?: string; delta: string; providerMetadata?: ProviderMetadata }
   | {
       type: "reasoning";
@@ -40,7 +71,8 @@ export type CanonicalModelEvent =
       reason: ModelFinishReason;
       usage?: ModelUsage;
       providerMetadata?: ProviderMetadata;
-    };
+    }
+  | { type: "abort"; reason?: string };
 
 export type LegacyModelEvent =
   | { type: "text_delta"; text: string }
