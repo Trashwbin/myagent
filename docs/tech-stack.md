@@ -69,11 +69,12 @@ Supported fields:
 ```json
 {
   "$schema": "https://myagent.dev/config.json",
-  "model": "openai/fast",
+  "model": "mimo/fast",
   "maxTurns": 10,
   "approval": "auto" | "on-request",
   "providers": {
-    "openai": {
+    "mimo": {
+      "type": "openai",
       "protocol": "chat" | "responses",
       "baseUrl": "...",
       "apiKey": "...",
@@ -89,7 +90,8 @@ Supported fields:
         }
       }
     },
-    "anthropic": {
+    "mimo-claude": {
+      "type": "anthropic",
       "protocol": "messages",
       "baseUrl": "...",
       "apiKey": "...",
@@ -105,16 +107,23 @@ Supported fields:
 }
 ```
 
-Model profile IDs use `provider/model-id`, for example `openai/fast` or
-`anthropic/sonnet`. During a conversation, `/model` lists available profiles and
-`/model <id>` switches the active model for that session. The selected profile is
-stored with the session, so resume and compaction use the same active model.
+Provider keys are user-facing provider IDs, not SDK adapter names. The `type`
+field selects the adapter: `openai` uses the OpenAI Chat/Responses compatible
+path and `anthropic` uses the Anthropic Messages compatible path. This allows a
+provider such as `mimo`, `abin`, or `gateway-prod` to expose whichever protocol
+it supports without pretending that the provider ID itself is `openai`.
 
-Provider-level `baseUrl`, credentials, `protocol`, and `maxOutputTokens` are
-inherited by nested `providers.<name>.models.<id>` entries. A model entry can
-override those fields when one provider serves multiple incompatible protocols
-or endpoints. If `providers.<name>.models` is omitted, myAgent synthesizes a
-single profile from `providers.<name>.model`.
+Model profile IDs use `provider-id/model-id`, for example `mimo/fast` or
+`mimo-claude/sonnet`. During a conversation, `/model` lists available profiles
+and `/model <id>` switches the active model for that session. The selected
+profile is stored with the session, so resume and compaction use the same active
+model.
+
+Provider-level `type`, `baseUrl`, credentials, `protocol`, and `maxOutputTokens`
+are inherited by nested `providers.<name>.models.<id>` entries. A model entry can
+override endpoint/protocol fields when one provider serves multiple incompatible
+protocols or endpoints. If `providers.<name>.models` is omitted, myAgent
+synthesizes a single profile from `providers.<name>.model`.
 
 Top-level `provider`, `model`, `baseUrl`, `apiKey`, `authToken`, and
 `maxOutputTokens` are still accepted as flat compatibility keys, but new configs

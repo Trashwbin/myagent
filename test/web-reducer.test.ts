@@ -166,8 +166,8 @@ describe("web timeline reducer", () => {
         {
           id: "s1",
           workspaceRoot: "/tmp/ws",
-          modelProfileId: "openai/first",
-          provider: "openai",
+          modelProfileId: "mimo/first",
+          provider: "mimo",
           model: "first",
           createdAt: 1,
           updatedAt: 1,
@@ -182,22 +182,22 @@ describe("web timeline reducer", () => {
       message: {
         type: "session_model_changed",
         sessionId: "s1",
-        modelProfileId: "anthropic/second",
-        provider: "anthropic",
+        modelProfileId: "mimo-claude/second",
+        provider: "mimo-claude",
         model: "second",
-        message: "Switched model to anthropic/second.",
+        message: "Switched model to mimo-claude/second.",
       },
     });
 
     expect(next.sessions[0]).toMatchObject({
-      modelProfileId: "anthropic/second",
-      provider: "anthropic",
+      modelProfileId: "mimo-claude/second",
+      provider: "mimo-claude",
       model: "second",
     });
     expect(next.timelines.s1?.[0]?.assistantParts.at(-1)).toMatchObject({
       kind: "status",
       level: "info",
-      text: "Switched model to anthropic/second.",
+      text: "Switched model to mimo-claude/second.",
     });
     expect(next.runningSessionIds).not.toContain("s1");
   });

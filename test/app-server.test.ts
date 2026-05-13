@@ -110,6 +110,7 @@ async function startTestServer(store: TranscriptStore) {
       {
         id: "openai/test-model",
         provider: "openai",
+        type: "openai",
         model: "test-model",
         apiKey: "sk-test",
       },
@@ -215,6 +216,7 @@ describe("HTTP API", () => {
       {
         id: "openai/test-model",
         provider: "openai",
+        type: "openai",
         model: "test-model",
       },
     ]);
@@ -409,7 +411,7 @@ describe("WebSocket", () => {
     });
     const providers = {
       "openai/first": textProvider("first", "first provider"),
-      "anthropic/second": textProvider("second", "second provider"),
+      "mimo-claude/second": textProvider("second", "second provider"),
     };
     const port = await findAvailablePort(43200);
     const server = createAppServer({
@@ -421,12 +423,14 @@ describe("WebSocket", () => {
         {
           id: "openai/first",
           provider: "openai",
+          type: "openai",
           model: "first",
           apiKey: "sk-test",
         },
         {
-          id: "anthropic/second",
-          provider: "anthropic",
+          id: "mimo-claude/second",
+          provider: "mimo-claude",
+          type: "anthropic",
           model: "second",
           authToken: "sk-test",
         },
@@ -448,7 +452,7 @@ describe("WebSocket", () => {
         JSON.stringify({
           type: "user_message",
           sessionId: session.id,
-          text: "/model anthropic/second",
+          text: "/model mimo-claude/second",
         }),
       );
     }, (msg) => msg.type === "session_model_changed");
@@ -456,13 +460,13 @@ describe("WebSocket", () => {
     const switched = switchMessages.find((msg) => msg.type === "session_model_changed");
     expect(switched).toMatchObject({
       type: "session_model_changed",
-      modelProfileId: "anthropic/second",
-      provider: "anthropic",
+      modelProfileId: "mimo-claude/second",
+      provider: "mimo-claude",
       model: "second",
     });
     expect(store.getSession(session.id)).toMatchObject({
-      modelProfileId: "anthropic/second",
-      provider: "anthropic",
+      modelProfileId: "mimo-claude/second",
+      provider: "mimo-claude",
       model: "second",
     });
 

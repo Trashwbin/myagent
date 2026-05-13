@@ -3,7 +3,7 @@ import { findModelProfile } from "../config/config.js";
 
 export function formatModelProfile(profile: ModelProfile): string {
   const label = profile.name ? `${profile.name} ` : "";
-  return `${profile.id} ${label}(${profile.provider}/${profile.model})`;
+  return `${profile.id} ${label}(${profile.type}/${profile.model})`;
 }
 
 export function formatModelList(

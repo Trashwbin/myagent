@@ -3,10 +3,10 @@ import { AiSdkProvider } from "./ai-sdk-provider.js";
 import type { Provider } from "./provider.js";
 
 export function createProviderFromProfile(profile: ModelProfile): Provider {
-  if (profile.provider === "openai") {
+  if (profile.type === "openai") {
     if (!profile.apiKey) {
       throw new Error(
-        `Model ${profile.id} requires apiKey in config.providers.openai or the model profile.`,
+        `Model ${profile.id} requires apiKey in config.providers.${profile.provider} or the model profile.`,
       );
     }
     return new AiSdkProvider({
@@ -21,7 +21,7 @@ export function createProviderFromProfile(profile: ModelProfile): Provider {
 
   if (!profile.apiKey && !profile.authToken) {
     throw new Error(
-      `Model ${profile.id} requires apiKey or authToken in config.providers.anthropic or the model profile.`,
+      `Model ${profile.id} requires apiKey or authToken in config.providers.${profile.provider} or the model profile.`,
     );
   }
   return new AiSdkProvider({
@@ -37,12 +37,14 @@ export function createProviderFromProfile(profile: ModelProfile): Provider {
 export function publicModelProfile(profile: ModelProfile): {
   id: string;
   provider: string;
+  type: string;
   model: string;
   name?: string;
 } {
   return {
     id: profile.id,
     provider: profile.provider,
+    type: profile.type,
     model: profile.model,
     name: profile.name,
   };

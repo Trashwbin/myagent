@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { readFileSync, existsSync } from "node:fs";
 
-const ProviderNameSchema = z.enum(["openai", "anthropic"]);
+const ProviderTypeSchema = z.enum(["openai", "anthropic"]);
+const ProviderIdSchema = z.string().min(1);
 
 const ProviderModelConfigSchema = z.strictObject({
   name: z.string().optional(),
@@ -16,12 +17,13 @@ const ProviderModelConfigSchema = z.strictObject({
 });
 
 const ProviderConfigSchema = ProviderModelConfigSchema.extend({
+  type: ProviderTypeSchema.optional(),
   models: z.record(ProviderModelConfigSchema).optional(),
 });
 
 export const ConfigSchema = z.strictObject({
   $schema: z.string().optional(),
-  provider: ProviderNameSchema.optional(),
+  provider: ProviderIdSchema.optional(),
   model: z.string().optional(),
   approval: z.enum(["auto", "on-request", "never"]).optional(),
   maxTurns: z.number().int().positive().optional(),
@@ -30,16 +32,11 @@ export const ConfigSchema = z.strictObject({
   apiKey: z.string().optional(),
   authToken: z.string().optional(),
   maxOutputTokens: z.number().int().positive().optional(),
-  providers: z
-    .object({
-      openai: ProviderConfigSchema.optional(),
-      anthropic: ProviderConfigSchema.optional(),
-    })
-    .partial()
-    .optional(),
+  providers: z.record(ProviderConfigSchema).optional(),
 });
 
-export type ProviderName = z.infer<typeof ProviderNameSchema>;
+export type ProviderName = z.infer<typeof ProviderIdSchema>;
+export type ProviderType = z.infer<typeof ProviderTypeSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 export type ProviderModelConfig = z.infer<typeof ProviderModelConfigSchema>;
 export type Config = z.infer<typeof ConfigSchema>;
@@ -47,6 +44,7 @@ export type Config = z.infer<typeof ConfigSchema>;
 export type ModelProfile = {
   id: string;
   provider: ProviderName;
+  type: ProviderType;
   model: string;
   name?: string;
   baseUrl?: string;
@@ -121,9 +119,7 @@ function mergeConfig(base: Config, override: Config): Config {
     if (key === "providers") {
       const providers = value as Config["providers"];
       const merged = { ...(result.providers ?? {}) };
-      for (const provider of ProviderNameSchema.options) {
-        const incoming = providers?.[provider];
-        if (!incoming) continue;
+      for (const [provider, incoming] of Object.entries(providers ?? {})) {
         const existing = merged[provider];
         merged[provider] = {
           ...(existing ?? {}),
@@ -186,6 +182,7 @@ export function resolveProviderConfig(
   provider: ProviderName,
 ): ProviderConfig {
   return {
+    type: resolveProviderType(config, provider),
     name: config.providers?.[provider]?.name,
     model: resolveConfigValue(config.providers?.[provider]?.model, config.model),
     baseUrl: resolveConfigValue(config.providers?.[provider]?.baseUrl, config.baseUrl),
@@ -219,7 +216,7 @@ export function resolveModelName(
 export function resolveModelProfiles(config: Config): ModelProfile[] {
   const profiles = new Map<string, ModelProfile>();
 
-  for (const provider of ProviderNameSchema.options) {
+  for (const provider of Object.keys(config.providers ?? {})) {
     const providerConfig = config.providers?.[provider];
     if (!providerConfig) continue;
 
@@ -303,9 +300,10 @@ export function defaultModelProfileId(config: Config): string {
 function resolveProviderBaseConfig(
   config: Config,
   provider: ProviderName,
-): ProviderModelConfig {
+): ProviderModelConfig & { type: ProviderType } {
   const providerConfig = config.providers?.[provider];
   return {
+    type: resolveProviderType(config, provider),
     name: providerConfig?.name,
     baseUrl: resolveConfigValue(providerConfig?.baseUrl, config.baseUrl),
     apiKey: resolveConfigValue(providerConfig?.apiKey, config.apiKey),
@@ -321,13 +319,14 @@ function resolveProviderBaseConfig(
 function buildModelProfile(
   provider: ProviderName,
   modelId: string,
-  base: ProviderModelConfig,
+  base: ProviderModelConfig & { type: ProviderType },
   modelConfig: ProviderModelConfig,
 ): ModelProfile {
   const model = modelConfig.model ?? modelId;
   return {
     id: `${provider}/${modelId}`,
     provider,
+    type: base.type,
     model,
     name: modelConfig.name ?? base.name,
     baseUrl: resolveConfigValue(modelConfig.baseUrl, base.baseUrl),
@@ -350,7 +349,9 @@ function modelNameFromConfig(config: Config, provider: ProviderName): string {
     return stripProviderPrefix(config.model, provider);
   }
   if (!config.provider && config.model && !config.model.includes("/")) return config.model;
-  return provider === "openai" ? "gpt-4o" : "claude-sonnet-4-5";
+  return resolveProviderType(config, provider) === "openai"
+    ? "gpt-4o"
+    : "claude-sonnet-4-5";
 }
 
 function parseModelProfileId(
@@ -360,8 +361,8 @@ function parseModelProfileId(
   const slash = value.indexOf("/");
   if (slash <= 0 || slash === value.length - 1) return undefined;
   const provider = value.slice(0, slash);
-  if (!ProviderNameSchema.safeParse(provider).success) return undefined;
-  return { provider: provider as ProviderName, model: value.slice(slash + 1) };
+  if (!ProviderIdSchema.safeParse(provider).success) return undefined;
+  return { provider, model: value.slice(slash + 1) };
 }
 
 function normalizeModelProfileId(value: string): string {
@@ -371,4 +372,10 @@ function normalizeModelProfileId(value: string): string {
 function stripProviderPrefix(value: string, provider: ProviderName): string {
   const prefix = `${provider}/`;
   return value.startsWith(prefix) ? value.slice(prefix.length) : value;
+}
+
+function resolveProviderType(config: Config, provider: ProviderName): ProviderType {
+  const configured = config.providers?.[provider]?.type;
+  if (configured) return configured;
+  return provider === "anthropic" ? "anthropic" : "openai";
 }

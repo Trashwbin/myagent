@@ -48,7 +48,7 @@ describe("ConfigSchema", () => {
   });
 
   it("rejects invalid provider", () => {
-    expect(() => ConfigSchema.parse({ provider: "fake" })).toThrow();
+    expect(() => ConfigSchema.parse({ provider: "" })).toThrow();
   });
 
   it("rejects invalid approval", () => {
@@ -224,6 +224,7 @@ describe("config resolution helpers", () => {
       },
     };
     expect(resolveProviderConfig(config, "openai")).toEqual({
+      type: "openai",
       name: undefined,
       model: "gpt-4o-mini",
       apiKey: "sk-openai",
@@ -248,9 +249,10 @@ describe("config resolution helpers", () => {
 
   it("resolves configured provider model profiles", () => {
     const config = {
-      model: "openai/fast",
+      model: "mimo/fast",
       providers: {
-        openai: {
+        mimo: {
+          type: "openai" as const,
           baseUrl: "https://openai.example/v1",
           apiKey: "sk-openai",
           protocol: "chat" as const,
@@ -266,7 +268,8 @@ describe("config resolution helpers", () => {
             },
           },
         },
-        anthropic: {
+        "mimo-claude": {
+          type: "anthropic" as const,
           baseUrl: "https://anthropic.example",
           authToken: "sk-ant",
           models: {
@@ -278,8 +281,9 @@ describe("config resolution helpers", () => {
 
     expect(resolveModelProfiles(config)).toEqual([
       {
-        id: "openai/fast",
-        provider: "openai",
+        id: "mimo/fast",
+        provider: "mimo",
+        type: "openai",
         model: "mimo-v2.5-pro",
         name: "Fast",
         baseUrl: "https://openai.example/v1",
@@ -289,8 +293,9 @@ describe("config resolution helpers", () => {
         protocol: "chat",
       },
       {
-        id: "openai/accurate",
-        provider: "openai",
+        id: "mimo/accurate",
+        provider: "mimo",
+        type: "openai",
         model: "gpt-4o",
         name: undefined,
         baseUrl: "https://openai.example/v1",
@@ -300,8 +305,9 @@ describe("config resolution helpers", () => {
         protocol: "responses",
       },
       {
-        id: "anthropic/sonnet",
-        provider: "anthropic",
+        id: "mimo-claude/sonnet",
+        provider: "mimo-claude",
+        type: "anthropic",
         model: "claude-sonnet-4-5",
         name: undefined,
         baseUrl: "https://anthropic.example",
@@ -312,12 +318,13 @@ describe("config resolution helpers", () => {
       },
     ]);
     expect(resolveModelProfile(config)).toMatchObject({
-      id: "openai/fast",
+      id: "mimo/fast",
       model: "mimo-v2.5-pro",
     });
     expect(resolveModelProfile(config, "sonnet")).toMatchObject({
-      id: "anthropic/sonnet",
-      provider: "anthropic",
+      id: "mimo-claude/sonnet",
+      provider: "mimo-claude",
+      type: "anthropic",
     });
   });
 
@@ -337,6 +344,7 @@ describe("config resolution helpers", () => {
       {
         id: "anthropic/claude-test",
         provider: "anthropic",
+        type: "anthropic",
         model: "claude-test",
         name: undefined,
         baseUrl: "https://anthropic.example",

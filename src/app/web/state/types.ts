@@ -9,6 +9,7 @@ export type ClientConfig = {
   models?: Array<{
     id: string;
     provider: string;
+    type: string;
     model: string;
     name?: string;
   }>;
