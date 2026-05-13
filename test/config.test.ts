@@ -6,6 +6,8 @@ import {
   loadConfig,
   projectConfigPath,
   resolveApprovalMode,
+  resolveModelProfile,
+  resolveModelProfiles,
   resolveModelName,
   resolveProviderConfig,
   resolveProviderName,
@@ -32,6 +34,13 @@ describe("ConfigSchema", () => {
           apiKey: "sk-test",
           maxOutputTokens: 4096,
           protocol: "responses",
+          models: {
+            fast: {
+              name: "Fast model",
+              model: "gpt-4o-mini",
+              maxOutputTokens: 2048,
+            },
+          },
         },
       },
     };
@@ -215,12 +224,14 @@ describe("config resolution helpers", () => {
       },
     };
     expect(resolveProviderConfig(config, "openai")).toEqual({
+      name: undefined,
       model: "gpt-4o-mini",
       apiKey: "sk-openai",
       authToken: undefined,
       baseUrl: "https://openai.example",
       maxOutputTokens: 2048,
       protocol: "responses",
+      models: undefined,
     });
   });
 
@@ -233,5 +244,107 @@ describe("config resolution helpers", () => {
     expect(resolveApprovalMode({})).toBe("auto");
     expect(resolveApprovalMode({ approval: "on-request" })).toBe("on-request");
     expect(resolveApprovalMode({ approval: "never" })).toBe("never");
+  });
+
+  it("resolves configured provider model profiles", () => {
+    const config = {
+      model: "openai/fast",
+      providers: {
+        openai: {
+          baseUrl: "https://openai.example/v1",
+          apiKey: "sk-openai",
+          protocol: "chat" as const,
+          models: {
+            fast: {
+              name: "Fast",
+              model: "mimo-v2.5-pro",
+              maxOutputTokens: 2048,
+            },
+            accurate: {
+              model: "gpt-4o",
+              protocol: "responses" as const,
+            },
+          },
+        },
+        anthropic: {
+          baseUrl: "https://anthropic.example",
+          authToken: "sk-ant",
+          models: {
+            sonnet: { model: "claude-sonnet-4-5" },
+          },
+        },
+      },
+    };
+
+    expect(resolveModelProfiles(config)).toEqual([
+      {
+        id: "openai/fast",
+        provider: "openai",
+        model: "mimo-v2.5-pro",
+        name: "Fast",
+        baseUrl: "https://openai.example/v1",
+        apiKey: "sk-openai",
+        authToken: undefined,
+        maxOutputTokens: 2048,
+        protocol: "chat",
+      },
+      {
+        id: "openai/accurate",
+        provider: "openai",
+        model: "gpt-4o",
+        name: undefined,
+        baseUrl: "https://openai.example/v1",
+        apiKey: "sk-openai",
+        authToken: undefined,
+        maxOutputTokens: undefined,
+        protocol: "responses",
+      },
+      {
+        id: "anthropic/sonnet",
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+        name: undefined,
+        baseUrl: "https://anthropic.example",
+        apiKey: undefined,
+        authToken: "sk-ant",
+        maxOutputTokens: undefined,
+        protocol: undefined,
+      },
+    ]);
+    expect(resolveModelProfile(config)).toMatchObject({
+      id: "openai/fast",
+      model: "mimo-v2.5-pro",
+    });
+    expect(resolveModelProfile(config, "sonnet")).toMatchObject({
+      id: "anthropic/sonnet",
+      provider: "anthropic",
+    });
+  });
+
+  it("synthesizes one model profile from legacy provider fields", () => {
+    const config = {
+      provider: "anthropic" as const,
+      providers: {
+        anthropic: {
+          model: "claude-test",
+          baseUrl: "https://anthropic.example",
+          authToken: "sk-ant",
+        },
+      },
+    };
+
+    expect(resolveModelProfiles(config)).toEqual([
+      {
+        id: "anthropic/claude-test",
+        provider: "anthropic",
+        model: "claude-test",
+        name: undefined,
+        baseUrl: "https://anthropic.example",
+        apiKey: undefined,
+        authToken: "sk-ant",
+        maxOutputTokens: undefined,
+        protocol: undefined,
+      },
+    ]);
   });
 });
