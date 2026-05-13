@@ -9,6 +9,7 @@ import type { SessionState } from "../session/loop.js";
 export type SessionRow = {
   id: string;
   workspaceRoot: string;
+  modelProfileId?: string;
   provider?: string;
   model?: string;
   title?: string;
@@ -19,6 +20,7 @@ export type SessionRow = {
 export type TranscriptStore = {
   createSession(input: {
     workspaceRoot: string;
+    modelProfileId?: string;
     provider?: string;
     model?: string;
   }): SessionState;
@@ -27,6 +29,10 @@ export type TranscriptStore = {
   replaceMessages(sessionId: string, messages: Message[]): void;
   listSessions(): SessionRow[];
   updateSessionTimestamp(sessionId: string): void;
+  updateSessionModel(
+    sessionId: string,
+    input: { modelProfileId?: string; provider?: string; model?: string },
+  ): void;
   addPermissionRule(input: {
     workspaceRoot: string;
     toolName: string;
@@ -122,12 +128,19 @@ export function openStore(options?: StoreOptions): TranscriptStore {
   db.exec(`CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     workspace_root TEXT NOT NULL,
+    model_profile_id TEXT,
     provider TEXT,
     model TEXT,
     title TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   )`);
+
+  try {
+    db.exec("ALTER TABLE sessions ADD COLUMN model_profile_id TEXT");
+  } catch {
+    // Existing databases already have the column.
+  }
 
   db.exec(`CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
@@ -197,6 +210,21 @@ export function openStore(options?: StoreOptions): TranscriptStore {
     db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(now(), sessionId);
   }
 
+  function updateSessionModel(
+    sessionId: string,
+    input: { modelProfileId?: string; provider?: string; model?: string },
+  ) {
+    db.prepare(
+      "UPDATE sessions SET model_profile_id = ?, provider = ?, model = ?, updated_at = ? WHERE id = ?",
+    ).run(
+      input.modelProfileId ?? null,
+      input.provider ?? null,
+      input.model ?? null,
+      now(),
+      sessionId,
+    );
+  }
+
   function updateTitleFromUserMsg(sessionId: string, messages: Message[]) {
     for (const msg of messages) {
       if (msg.role === "user" && msg.content) {
@@ -242,9 +270,24 @@ export function openStore(options?: StoreOptions): TranscriptStore {
       const id = randomUUID();
       const ts = now();
       db.prepare(
-        "INSERT INTO sessions (id, workspace_root, provider, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-      ).run(id, input.workspaceRoot, input.provider ?? null, input.model ?? null, ts, ts);
-      return { id, cwd: input.workspaceRoot, messages: [] };
+        "INSERT INTO sessions (id, workspace_root, model_profile_id, provider, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).run(
+        id,
+        input.workspaceRoot,
+        input.modelProfileId ?? null,
+        input.provider ?? null,
+        input.model ?? null,
+        ts,
+        ts,
+      );
+      return {
+        id,
+        cwd: input.workspaceRoot,
+        modelProfileId: input.modelProfileId,
+        provider: input.provider,
+        model: input.model,
+        messages: [],
+      };
     },
 
     getSession(id) {
@@ -260,6 +303,9 @@ export function openStore(options?: StoreOptions): TranscriptStore {
       return {
         id: row.id as string,
         cwd: row.workspace_root as string,
+        modelProfileId: (row.model_profile_id as string) ?? undefined,
+        provider: (row.provider as string) ?? undefined,
+        model: (row.model as string) ?? undefined,
         messages: rows.map(deserializeMessage),
       };
     },
@@ -297,6 +343,7 @@ export function openStore(options?: StoreOptions): TranscriptStore {
       return rows.map((r) => ({
         id: r.id as string,
         workspaceRoot: r.workspace_root as string,
+        modelProfileId: (r.model_profile_id as string) ?? undefined,
         provider: (r.provider as string) ?? undefined,
         model: (r.model as string) ?? undefined,
         title: (r.title as string) ?? undefined,
@@ -306,6 +353,8 @@ export function openStore(options?: StoreOptions): TranscriptStore {
     },
 
     updateSessionTimestamp,
+
+    updateSessionModel,
 
     addPermissionRule(input: {
       workspaceRoot: string;

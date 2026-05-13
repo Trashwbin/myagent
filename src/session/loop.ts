@@ -47,6 +47,9 @@ export type SessionState = {
   id: string;
   /** Canonical workspace root — not process.cwd(). All tools resolve paths relative to this. */
   cwd: string;
+  modelProfileId?: string;
+  provider?: string;
+  model?: string;
   messages: Message[];
 };
 

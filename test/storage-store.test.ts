@@ -69,15 +69,51 @@ describe("createSession", () => {
   it("persists provider and model", async () => {
     const base = await tmpBaseDir();
     const store = openTestStore(base);
-    store.createSession({
+    const session = store.createSession({
       workspaceRoot: "/tmp/ws",
+      modelProfileId: "openai/gpt-4o",
       provider: "openai",
       model: "gpt-4o",
     });
     const listed = store.listSessions();
     expect(listed).toHaveLength(1);
+    expect(listed[0].modelProfileId).toBe("openai/gpt-4o");
     expect(listed[0].provider).toBe("openai");
     expect(listed[0].model).toBe("gpt-4o");
+    expect(store.getSession(session.id)).toMatchObject({
+      modelProfileId: "openai/gpt-4o",
+      provider: "openai",
+      model: "gpt-4o",
+    });
+    await cleanup();
+  });
+
+  it("updates the active session model", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({
+      workspaceRoot: "/tmp/ws",
+      modelProfileId: "openai/gpt-4o",
+      provider: "openai",
+      model: "gpt-4o",
+    });
+
+    store.updateSessionModel(session.id, {
+      modelProfileId: "anthropic/sonnet",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+    });
+
+    expect(store.getSession(session.id)).toMatchObject({
+      modelProfileId: "anthropic/sonnet",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+    });
+    expect(store.listSessions()[0]).toMatchObject({
+      modelProfileId: "anthropic/sonnet",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+    });
     await cleanup();
   });
 });
