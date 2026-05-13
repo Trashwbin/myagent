@@ -122,6 +122,38 @@ export type LoadConfigOptions = {
   workspaceRoot: string;
 };
 
+function envConfig(): Config {
+  const provider = process.env.MYAGENT_PROVIDER;
+  const model = process.env.MYAGENT_MODEL;
+  const baseUrl = process.env.MYAGENT_BASE_URL;
+  const apiKey = process.env.MYAGENT_API_KEY;
+  const authToken = process.env.MYAGENT_AUTH_TOKEN;
+  const maxOutputTokensRaw = process.env.MYAGENT_MAX_OUTPUT_TOKENS;
+  const approval = process.env.MYAGENT_APPROVAL;
+
+  const config: Config = {};
+  if (provider === "openai" || provider === "anthropic") config.provider = provider;
+  if (approval === "auto" || approval === "on-request" || approval === "never") {
+    config.approval = approval;
+  }
+
+  const selectedProvider = config.provider ?? "openai";
+  const providerConfig: ProviderConfig = {};
+  if (model) providerConfig.model = model;
+  if (baseUrl) providerConfig.baseUrl = baseUrl;
+  if (apiKey) providerConfig.apiKey = apiKey;
+  if (authToken) providerConfig.authToken = authToken;
+  if (maxOutputTokensRaw) {
+    const parsed = Number.parseInt(maxOutputTokensRaw, 10);
+    if (Number.isInteger(parsed) && parsed > 0) providerConfig.maxOutputTokens = parsed;
+  }
+
+  if (Object.keys(providerConfig).length > 0) {
+    config.providers = { [selectedProvider]: providerConfig };
+  }
+  return config;
+}
+
 /**
  * Load and merge config from three layers:
  * 1. global (~/.myagent/config.json)
@@ -135,7 +167,7 @@ export function loadConfig(options: LoadConfigOptions): Config {
   const global = mergeLayer(globalConfigPath(), globalLegacySettingsPath());
   const project = mergeLayer(projectConfigPath(options.workspaceRoot), projectLegacySettingsPath(options.workspaceRoot));
   const local = mergeLayer(localConfigPath(options.workspaceRoot), localLegacySettingsPath(options.workspaceRoot));
-  return mergeConfig(mergeConfig(global, project), local);
+  return mergeConfig(mergeConfig(mergeConfig(global, project), local), envConfig());
 }
 
 export function resolveConfigValue<T>(...values: Array<T | undefined>): T | undefined {
