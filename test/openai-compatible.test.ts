@@ -219,12 +219,21 @@ describe("OpenAI convertMessages", () => {
 
     expect(events).toEqual([
       {
-        type: "tool_call",
+        type: "tool-call",
         id: "call_1",
         name: "Read",
         input: { path: "package.json" },
+        providerMetadata: {
+          openaiCompatible: { toolCallId: "call_1" },
+        },
       },
-      { type: "stop", reason: "tool_use" },
+      {
+        type: "finish",
+        reason: "tool-calls",
+        providerMetadata: {
+          openaiCompatible: { finishReason: "tool_calls" },
+        },
+      },
     ]);
   });
 
@@ -279,16 +288,29 @@ describe("OpenAI convertMessages", () => {
 
     expect(events).toEqual([
       {
-        type: "tool_call",
+        type: "tool-call",
         id: "call_1",
         name: "list_dir",
         input: { path: "." },
+        providerMetadata: {
+          openaiCompatible: { toolCallId: "call_1" },
+        },
       },
       {
-        type: "assistant_raw",
-        value: { reasoning_content: "Need to list files." },
+        type: "reasoning",
+        id: "reasoning-0",
+        delta: "Need to list files.",
+        providerMetadata: {
+          openaiCompatible: { reasoning_content: "Need to list files." },
+        },
       },
-      { type: "stop", reason: "tool_use" },
+      {
+        type: "finish",
+        reason: "tool-calls",
+        providerMetadata: {
+          openaiCompatible: { finishReason: "tool_calls" },
+        },
+      },
     ]);
   });
 

@@ -81,6 +81,9 @@ describe("Session loop (runSession wrapper)", () => {
       role: "assistant",
       content: "Hello, world!",
       toolCalls: undefined,
+      parts: [{ type: "text", text: "Hello, world!" }],
+      providerMetadata: undefined,
+      providerRaw: undefined,
     });
   });
 

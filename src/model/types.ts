@@ -1,16 +1,86 @@
 import type { ToolDisplay } from "../session/tool-display.js";
 
-export type ModelEvent =
+export type ProviderMetadata = Record<string, unknown>;
+
+export type ModelUsage = {
+  inputTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+  providerMetadata?: ProviderMetadata;
+};
+
+export type ModelFinishReason = "stop" | "tool-calls" | "length" | "error";
+
+export type CanonicalModelEvent =
+  | { type: "text"; id?: string; delta: string; providerMetadata?: ProviderMetadata }
+  | {
+      type: "reasoning";
+      id?: string;
+      delta: string;
+      providerMetadata?: ProviderMetadata;
+    }
+  | {
+      type: "tool-call";
+      id: string;
+      name: string;
+      input: unknown;
+      providerMetadata?: ProviderMetadata;
+    }
+  | {
+      type: "tool-result";
+      id: string;
+      name: string;
+      result: unknown;
+      isError?: boolean;
+      providerMetadata?: ProviderMetadata;
+    }
+  | {
+      type: "finish";
+      reason: ModelFinishReason;
+      usage?: ModelUsage;
+      providerMetadata?: ProviderMetadata;
+    };
+
+export type LegacyModelEvent =
   | { type: "text_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: unknown }
   | { type: "assistant_raw"; value: unknown }
   | { type: "stop"; reason: "end_turn" | "tool_use" | "length" };
+
+export type ModelEvent =
+  | CanonicalModelEvent
+  // Compatibility input for older tests and temporary custom providers. Core
+  // providers should emit CanonicalModelEvent.
+  | LegacyModelEvent;
+
+export type MessagePart =
+  | { type: "text"; text: string; providerMetadata?: ProviderMetadata }
+  | { type: "reasoning"; text: string; providerMetadata?: ProviderMetadata }
+  | {
+      type: "tool-call";
+      id: string;
+      name: string;
+      input: unknown;
+      display?: ToolDisplay;
+      providerMetadata?: ProviderMetadata;
+    }
+  | {
+      type: "tool-result";
+      id: string;
+      name: string;
+      result: unknown;
+      isError?: boolean;
+      display?: ToolDisplay;
+      providerMetadata?: ProviderMetadata;
+    };
 
 export type MessageToolCall = {
   id: string;
   name: string;
   input: unknown;
   display?: ToolDisplay;
+  providerMetadata?: ProviderMetadata;
 };
 
 export type Message = {
@@ -21,6 +91,8 @@ export type Message = {
   toolCalls?: MessageToolCall[];
   toolDisplay?: ToolDisplay;
   checkpointId?: string;
+  parts?: MessagePart[];
+  providerMetadata?: ProviderMetadata;
   providerRaw?: unknown;
 };
 
@@ -32,6 +104,8 @@ export type ToolSchema = {
 
 export type ProviderKind = "openai" | "anthropic";
 
+export type ProviderProtocol = "chat" | "responses" | "messages";
+
 export type ProviderConfig = {
   provider: ProviderKind;
   model: string;
@@ -39,4 +113,5 @@ export type ProviderConfig = {
   apiKey?: string;
   authToken?: string;
   maxOutputTokens?: number;
+  protocol?: ProviderProtocol;
 };

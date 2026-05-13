@@ -4,11 +4,11 @@ import type { ProviderStreamOptions } from "./provider.js";
 import type { ModelEvent, Message, ProviderConfig, ToolSchema } from "./types.js";
 import { normalizeProviderError, ProviderRuntimeError } from "./errors.js";
 
-type StopReason = "end_turn" | "tool_use" | "length";
+type FinishReason = "stop" | "tool-calls" | "length";
 
-const FINISH_REASON_MAP: Record<string, StopReason> = {
-  stop: "end_turn",
-  tool_calls: "tool_use",
+const CANONICAL_FINISH_REASON_MAP: Record<string, FinishReason> = {
+  stop: "stop",
+  tool_calls: "tool-calls",
   length: "length",
 };
 
@@ -147,7 +147,7 @@ export class OpenAICompatibleProvider implements Provider {
         }
 
         if (delta.content) {
-          yield { type: "text_delta", text: delta.content };
+          yield { type: "text", delta: delta.content };
         }
 
         if (delta.tool_calls) {
@@ -187,23 +187,37 @@ export class OpenAICompatibleProvider implements Provider {
               );
             }
             yield {
-              type: "tool_call",
+              type: "tool-call",
               id: tc.id,
               name: tc.name,
               input,
+              providerMetadata: {
+                openaiCompatible: {
+                  toolCallId: tc.id,
+                },
+              },
             };
           }
 
           if (reasoningContent.length > 0) {
             yield {
-              type: "assistant_raw",
-              value: { reasoning_content: reasoningContent },
+              type: "reasoning",
+              id: "reasoning-0",
+              delta: reasoningContent,
+              providerMetadata: {
+                openaiCompatible: { reasoning_content: reasoningContent },
+              },
             };
           }
 
           yield {
-            type: "stop",
-            reason: FINISH_REASON_MAP[choice.finish_reason] ?? "end_turn",
+            type: "finish",
+            reason: CANONICAL_FINISH_REASON_MAP[choice.finish_reason] ?? "stop",
+            providerMetadata: {
+              openaiCompatible: {
+                finishReason: choice.finish_reason,
+              },
+            },
           };
         }
       }

@@ -147,6 +147,41 @@ describe("appendMessages + getSession", () => {
     await cleanup();
   });
 
+  it("roundtrips provider message parts and metadata", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/ws" });
+    const providerMetadata = {
+      openai: { responseId: "resp_1" },
+    };
+    const parts = [
+      {
+        type: "reasoning" as const,
+        text: "Need list",
+        providerMetadata: { openai: { itemId: "item_reasoning" } },
+      },
+      {
+        type: "tool-call" as const,
+        id: "call_1",
+        name: "list_dir",
+        input: { path: "." },
+        providerMetadata: { openai: { itemId: "item_call" } },
+      },
+    ];
+    store.appendMessages(session.id, [
+      {
+        role: "assistant",
+        content: "",
+        parts,
+        providerMetadata,
+      },
+    ]);
+    const restored = store.getSession(session.id)!;
+    expect(restored.messages[0].parts).toEqual(parts);
+    expect(restored.messages[0].providerMetadata).toEqual(providerMetadata);
+    await cleanup();
+  });
+
   it("roundtrips tool_result toolCallId and toolName", async () => {
     const base = await tmpBaseDir();
     const store = openTestStore(base);

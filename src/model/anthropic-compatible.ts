@@ -4,13 +4,13 @@ import type { ProviderStreamOptions } from "./provider.js";
 import type { ModelEvent, Message, ProviderConfig, ToolSchema } from "./types.js";
 import { normalizeProviderError, ProviderRuntimeError } from "./errors.js";
 
-type StopReason = "end_turn" | "tool_use" | "length";
+type FinishReason = "stop" | "tool-calls" | "length";
 
-const STOP_REASON_MAP: Record<string, StopReason> = {
-  end_turn: "end_turn",
-  tool_use: "tool_use",
+const CANONICAL_STOP_REASON_MAP: Record<string, FinishReason> = {
+  end_turn: "stop",
+  tool_use: "tool-calls",
   max_tokens: "length",
-  stop_sequence: "end_turn",
+  stop_sequence: "stop",
 };
 
 export function convertMessages(messages: Message[]): Anthropic.MessageParam[] {
@@ -148,6 +148,7 @@ export class AnthropicCompatibleProvider implements Provider {
     let currentToolInput = "";
     let currentContentIndex = -1;
     const rawContent: Anthropic.ContentBlockParam[] = [];
+    const reasoningByIndex = new Map<number, { text: string; signature?: string }>();
 
     try {
       for await (const event of stream) {
@@ -181,7 +182,7 @@ export class AnthropicCompatibleProvider implements Provider {
 
           case "content_block_delta":
             if (event.delta.type === "text_delta") {
-              yield { type: "text_delta", text: event.delta.text };
+              yield { type: "text", delta: event.delta.text };
               const block = rawContent[currentContentIndex];
               if (block?.type === "text") {
                 block.text += event.delta.text;
@@ -193,11 +194,17 @@ export class AnthropicCompatibleProvider implements Provider {
                 | (Anthropic.ContentBlockParam & { type: "thinking"; thinking: string })
                 | undefined;
               if (block?.type === "thinking") block.thinking += event.delta.thinking;
+              const current = reasoningByIndex.get(currentContentIndex) ?? { text: "" };
+              current.text += event.delta.thinking;
+              reasoningByIndex.set(currentContentIndex, current);
             } else if (event.delta.type === "signature_delta") {
               const block = rawContent[currentContentIndex] as
                 | (Anthropic.ContentBlockParam & { type: "thinking"; signature: string })
                 | undefined;
               if (block?.type === "thinking") block.signature = event.delta.signature;
+              const current = reasoningByIndex.get(currentContentIndex) ?? { text: "" };
+              current.signature = event.delta.signature;
+              reasoningByIndex.set(currentContentIndex, current);
             }
             break;
 
@@ -221,28 +228,49 @@ export class AnthropicCompatibleProvider implements Provider {
                 block.input = input as Record<string, unknown>;
               }
               yield {
-                type: "tool_call",
+                type: "tool-call",
                 id: currentToolId,
                 name: currentToolName,
                 input,
+                providerMetadata: {
+                  anthropic: {
+                    contentIndex: currentContentIndex,
+                    toolUseId: currentToolId,
+                  },
+                },
               };
               currentToolId = "";
               currentToolName = "";
               currentToolInput = "";
+            } else {
+              const reasoning = reasoningByIndex.get(event.index);
+              if (reasoning?.text) {
+                yield {
+                  type: "reasoning",
+                  id: `reasoning-${event.index}`,
+                  delta: reasoning.text,
+                  providerMetadata: {
+                    anthropic: {
+                      signature: reasoning.signature,
+                    },
+                    raw: rawContent.filter(Boolean),
+                  },
+                };
+              }
             }
             break;
 
           case "message_delta":
-            if (event.delta.stop_reason && rawContent.length > 0) {
-              yield {
-                type: "assistant_raw",
-                value: rawContent.filter(Boolean),
-              };
-            }
             if (event.delta.stop_reason) {
               yield {
-                type: "stop",
-                reason: STOP_REASON_MAP[event.delta.stop_reason] ?? "end_turn",
+                type: "finish",
+                reason: CANONICAL_STOP_REASON_MAP[event.delta.stop_reason] ?? "stop",
+                providerMetadata: {
+                  raw: rawContent.filter(Boolean),
+                  anthropic: {
+                    stopReason: event.delta.stop_reason,
+                  },
+                },
               };
             }
             break;

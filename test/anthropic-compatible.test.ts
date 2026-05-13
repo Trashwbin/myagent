@@ -309,10 +309,30 @@ describe("Anthropic convertMessages", () => {
     const events = await collectEvents(provider.stream([{ role: "user", content: "list" }]));
 
     expect(events).toEqual([
-      { type: "tool_call", id: "tu1", name: "list_dir", input: { path: "." } },
       {
-        type: "assistant_raw",
-        value: [
+        type: "reasoning",
+        id: "reasoning-0",
+        delta: "need list",
+        providerMetadata: {
+          anthropic: { signature: "sig" },
+          raw: [{ type: "thinking", thinking: "need list", signature: "sig" }],
+        },
+      },
+      {
+        type: "tool-call",
+        id: "tu1",
+        name: "list_dir",
+        input: { path: "." },
+        providerMetadata: {
+          anthropic: { contentIndex: 1, toolUseId: "tu1" },
+        },
+      },
+      {
+        type: "finish",
+        reason: "tool-calls",
+        providerMetadata: {
+          anthropic: { stopReason: "tool_use" },
+          raw: [
           { type: "thinking", thinking: "need list", signature: "sig" },
           {
             type: "tool_use",
@@ -321,8 +341,8 @@ describe("Anthropic convertMessages", () => {
             input: { path: "." },
           },
         ],
+        },
       },
-      { type: "stop", reason: "tool_use" },
     ]);
   });
 });

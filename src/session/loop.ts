@@ -1,5 +1,10 @@
 import type { Provider } from "../model/provider.js";
-import type { ToolSchema } from "../model/types.js";
+import type {
+  CanonicalModelEvent,
+  ModelEvent,
+  ProviderMetadata,
+  ToolSchema,
+} from "../model/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { checkToolPermission } from "../permission/policy.js";
 import type { ApprovalMode } from "../permission/policy.js";
@@ -128,6 +133,46 @@ function blockedMsg(tc: { id: string; name: string }, reason: string): Message {
   };
 }
 
+function canonicalModelEvent(event: ModelEvent): CanonicalModelEvent | undefined {
+  switch (event.type) {
+    case "text":
+    case "reasoning":
+    case "tool-call":
+    case "tool-result":
+    case "finish":
+      return event;
+    case "text_delta":
+      return { type: "text", delta: event.text };
+    case "tool_call":
+      return {
+        type: "tool-call",
+        id: event.id,
+        name: event.name,
+        input: event.input,
+      };
+    case "stop":
+      return {
+        type: "finish",
+        reason:
+          event.reason === "tool_use"
+            ? "tool-calls"
+            : event.reason === "length"
+              ? "length"
+              : "stop",
+      };
+    case "assistant_raw":
+      return undefined;
+  }
+}
+
+function providerRawFromMetadata(metadata: ProviderMetadata | undefined): unknown {
+  if (!metadata) return undefined;
+  if ("raw" in metadata) return metadata.raw;
+  if ("openaiCompatible" in metadata) return metadata.openaiCompatible;
+  if ("anthropic" in metadata) return metadata.anthropic;
+  return undefined;
+}
+
 async function runAgentLoop(
   provider: Provider,
   registry: ToolRegistry,
@@ -150,47 +195,101 @@ async function runAgentLoop(
 
   for (let turn = 0; turn < maxTurns; turn++) {
     let assistantText = "";
+    let reasoningText = "";
+    let reasoningMetadata: ProviderMetadata | undefined;
     let assistantRaw: unknown;
-    const toolCalls: Array<{ id: string; name: string; input: unknown; display?: ToolDisplay }> = [];
+    let providerMetadata: ProviderMetadata | undefined;
+    const toolCalls: Array<{
+      id: string;
+      name: string;
+      input: unknown;
+      display?: ToolDisplay;
+      providerMetadata?: ProviderMetadata;
+    }> = [];
 
     for await (const event of provider.stream([...messages], toolSchemas, {
       systemPrompt,
     })) {
-      switch (event.type) {
-        case "text_delta":
-          assistantText += event.text;
-          if (onEvent) await onEvent({ type: "assistant_text_delta", text: event.text });
+      if (event.type === "assistant_raw") {
+        assistantRaw = event.value;
+        continue;
+      }
+
+      const canonical = canonicalModelEvent(event);
+      if (!canonical) continue;
+
+      switch (canonical.type) {
+        case "text":
+          assistantText += canonical.delta;
+          if (onEvent) await onEvent({ type: "assistant_text_delta", text: canonical.delta });
           break;
-        case "tool_call":
+        case "reasoning":
+          reasoningText += canonical.delta;
+          reasoningMetadata = {
+            ...(reasoningMetadata ?? {}),
+            ...(canonical.providerMetadata ?? {}),
+          };
+          if (!assistantRaw) assistantRaw = providerRawFromMetadata(canonical.providerMetadata);
+          break;
+        case "tool-call":
           toolCalls.push({
-            id: event.id,
-            name: event.name,
-            input: event.input,
-            display: buildToolInputDisplay(event.name, event.input),
+            id: canonical.id,
+            name: canonical.name,
+            input: canonical.input,
+            display: buildToolInputDisplay(canonical.name, canonical.input),
+            providerMetadata: canonical.providerMetadata,
           });
           if (onEvent)
             await onEvent({
               type: "tool_call",
-              id: event.id,
-              name: event.name,
-              input: event.input,
-              display: buildToolInputDisplay(event.name, event.input),
+              id: canonical.id,
+              name: canonical.name,
+              input: canonical.input,
+              display: buildToolInputDisplay(canonical.name, canonical.input),
             });
           break;
-        case "assistant_raw":
-          assistantRaw = event.value;
+        case "tool-result":
           break;
-        case "stop":
-          lastStopReason = event.reason;
+        case "finish":
+          providerMetadata = canonical.providerMetadata;
+          lastStopReason =
+            canonical.reason === "tool-calls"
+              ? "tool_use"
+              : canonical.reason === "length"
+                ? "length"
+                : "end_turn";
           break;
       }
     }
+
+    const parts = [
+      ...(reasoningText
+        ? [
+            {
+              type: "reasoning" as const,
+              text: reasoningText,
+              providerMetadata: reasoningMetadata,
+            },
+          ]
+        : []),
+      ...(assistantText ? [{ type: "text" as const, text: assistantText }] : []),
+      ...toolCalls.map((tc) => ({
+        type: "tool-call" as const,
+        id: tc.id,
+        name: tc.name,
+        input: tc.input,
+        display: tc.display,
+        providerMetadata: tc.providerMetadata,
+      })),
+    ];
 
     const assistantMsg: Message = {
       role: "assistant",
       content: assistantText,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      providerRaw: assistantRaw,
+      parts: parts.length > 0 ? parts : undefined,
+      providerMetadata,
+      providerRaw: assistantRaw ?? providerRawFromMetadata(providerMetadata),
     };
     messages.push(assistantMsg);
     newMessages.push(assistantMsg);
