@@ -6,11 +6,18 @@ export type ClientConfig = {
   provider: string;
   model: string;
   approval: string;
+  models?: Array<{
+    id: string;
+    provider: string;
+    model: string;
+    name?: string;
+  }>;
 };
 
 export type SessionSummary = {
   id: string;
   workspaceRoot: string;
+  modelProfileId?: string;
   provider?: string;
   model?: string;
   title?: string;

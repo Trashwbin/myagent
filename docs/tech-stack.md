@@ -69,32 +69,56 @@ Supported fields:
 ```json
 {
   "$schema": "https://myagent.dev/config.json",
-  "provider": "openai" | "anthropic",
+  "model": "openai/fast",
   "maxTurns": 10,
   "approval": "auto" | "on-request",
   "providers": {
     "openai": {
-      "model": "...",
       "protocol": "chat" | "responses",
       "baseUrl": "...",
       "apiKey": "...",
-      "maxOutputTokens": 4096
+      "maxOutputTokens": 4096,
+      "models": {
+        "fast": {
+          "model": "gpt-4o-mini",
+          "name": "Fast"
+        },
+        "accurate": {
+          "model": "gpt-4o",
+          "protocol": "responses"
+        }
+      }
     },
     "anthropic": {
-      "model": "...",
       "protocol": "messages",
       "baseUrl": "...",
       "apiKey": "...",
       "authToken": "...",
-      "maxOutputTokens": 16384
+      "maxOutputTokens": 16384,
+      "models": {
+        "sonnet": {
+          "model": "claude-sonnet-4-5"
+        }
+      }
     }
   }
 }
 ```
 
-Top-level `model`, `baseUrl`, `apiKey`, `authToken`, and `maxOutputTokens` are
-still accepted as flat compatibility keys, but new configs should prefer the
-nested `providers.<name>` form.
+Model profile IDs use `provider/model-id`, for example `openai/fast` or
+`anthropic/sonnet`. During a conversation, `/model` lists available profiles and
+`/model <id>` switches the active model for that session. The selected profile is
+stored with the session, so resume and compaction use the same active model.
+
+Provider-level `baseUrl`, credentials, `protocol`, and `maxOutputTokens` are
+inherited by nested `providers.<name>.models.<id>` entries. A model entry can
+override those fields when one provider serves multiple incompatible protocols
+or endpoints. If `providers.<name>.models` is omitted, myAgent synthesizes a
+single profile from `providers.<name>.model`.
+
+Top-level `provider`, `model`, `baseUrl`, `apiKey`, `authToken`, and
+`maxOutputTokens` are still accepted as flat compatibility keys, but new configs
+should prefer the nested provider/model profile form.
 
 `maxOutputTokens` controls per-turn output length. When unset, OpenAI-compatible
 requests omit `max_tokens` and let the upstream decide the default. Anthropic

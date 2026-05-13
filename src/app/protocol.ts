@@ -28,6 +28,14 @@ export type ServerMessage =
       retainedCount: number;
       message: string;
     }
+  | {
+      type: "session_model_changed";
+      sessionId: string;
+      modelProfileId: string;
+      provider: string;
+      model: string;
+      message: string;
+    }
   | { type: "turn_finished"; sessionId: string }
   | { type: "error"; sessionId?: string; message: string; code?: string };
 

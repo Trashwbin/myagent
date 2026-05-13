@@ -190,6 +190,29 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
           ),
         },
       };
+    case "session_model_changed":
+      return {
+        ...state,
+        sessions: state.sessions.map((session) =>
+          session.id === message.sessionId
+            ? {
+                ...session,
+                modelProfileId: message.modelProfileId,
+                provider: message.provider,
+                model: message.model,
+              }
+            : session,
+        ),
+        runningSessionIds: state.runningSessionIds.filter((id) => id !== message.sessionId),
+        timelines: {
+          ...state.timelines,
+          [message.sessionId]: appendStatus(
+            state.timelines[message.sessionId] ?? [],
+            "info",
+            message.message,
+          ),
+        },
+      };
     case "error":
       return {
         ...state,

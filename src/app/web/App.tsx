@@ -51,9 +51,11 @@ export function App() {
   const activeTimeline = state.activeSessionId
     ? state.timelines[state.activeSessionId] ?? []
     : [];
-  const modelLabel = state.config
-    ? `${state.config.provider}/${state.config.model}`
-    : "model";
+  const modelLabel = activeSession?.provider && activeSession.model
+    ? `${activeSession.provider}/${activeSession.model}`
+    : state.config
+      ? `${state.config.provider}/${state.config.model}`
+      : "model";
   const status = !state.wsOpen
     ? "connecting"
     : isActiveRunning(state)
@@ -295,6 +297,14 @@ export function App() {
           JSON.stringify({
             type: "compact_session",
             sessionId,
+          }),
+        );
+      } else if (command.id === "model") {
+        wsRef.current.send(
+          JSON.stringify({
+            type: "user_message",
+            sessionId,
+            text,
           }),
         );
       }

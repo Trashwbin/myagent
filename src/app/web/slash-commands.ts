@@ -1,4 +1,4 @@
-export type SlashCommandId = "compact" | "revert-last" | "rewind";
+export type SlashCommandId = "compact" | "revert-last" | "rewind" | "model";
 
 export type SlashCommand = {
   id: SlashCommandId;
@@ -37,6 +37,15 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     requiresArgument: true,
     argumentLabel: "checkpointId",
     pendingMessage: (checkpointId) => `Restoring checkpoint ${checkpointId}...`,
+  },
+  {
+    id: "model",
+    name: "/model",
+    usage: "/model [id]",
+    description: "List model profiles or switch this session to a configured model.",
+    insertText: "/model ",
+    pendingMessage: (modelId) =>
+      modelId ? `Switching model to ${modelId}...` : "Listing available models...",
   },
 ];
 
@@ -86,7 +95,7 @@ export function parseSlashCommand(value: string): ParsedSlashCommand {
     };
   }
 
-  if (!command.requiresArgument && args) {
+  if (!command.requiresArgument && args && command.id !== "model") {
     return {
       type: "invalid",
       command,

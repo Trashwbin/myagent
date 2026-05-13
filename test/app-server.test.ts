@@ -72,6 +72,16 @@ function summaryProvider(summary: string): Provider {
   };
 }
 
+function textProvider(name: string, text: string): Provider {
+  return {
+    name,
+    async *stream() {
+      yield { type: "text" as const, delta: text };
+      yield { type: "finish" as const, reason: "stop" as const };
+    },
+  };
+}
+
 function throwingProvider(error: unknown): Provider {
   return {
     name: "test",
@@ -95,6 +105,15 @@ async function startTestServer(store: TranscriptStore) {
     provider: noopProvider(),
     providerName: "openai",
     modelName: "test-model",
+    modelProfileId: "openai/test-model",
+    modelProfiles: [
+      {
+        id: "openai/test-model",
+        provider: "openai",
+        model: "test-model",
+        apiKey: "sk-test",
+      },
+    ],
     registry: new ToolRegistry(),
     approval: "on-request",
     store,
@@ -192,6 +211,13 @@ describe("HTTP API", () => {
     expect(data.cwd).toBe("/test");
     expect(data.provider).toBe("openai");
     expect(data.model).toBe("test-model");
+    expect(data.models).toEqual([
+      {
+        id: "openai/test-model",
+        provider: "openai",
+        model: "test-model",
+      },
+    ]);
     expect(Object.keys(data)).not.toContain("apiKey");
     expect(Object.keys(data)).not.toContain("authToken");
   });
@@ -370,6 +396,89 @@ describe("WebSocket", () => {
       ),
     ).toBe(true);
     expect(store.getSession(session.id)?.messages.some((m) => m.role === "user")).toBe(true);
+  });
+
+  it("switches model over websocket and uses the new provider for the next turn", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({
+      workspaceRoot: "/test",
+      modelProfileId: "openai/first",
+      provider: "openai",
+      model: "first",
+    });
+    const providers = {
+      "openai/first": textProvider("first", "first provider"),
+      "anthropic/second": textProvider("second", "second provider"),
+    };
+    const port = await findAvailablePort(43200);
+    const server = createAppServer({
+      provider: providers["openai/first"],
+      providerName: "openai",
+      modelName: "first",
+      modelProfileId: "openai/first",
+      modelProfiles: [
+        {
+          id: "openai/first",
+          provider: "openai",
+          model: "first",
+          apiKey: "sk-test",
+        },
+        {
+          id: "anthropic/second",
+          provider: "anthropic",
+          model: "second",
+          authToken: "sk-test",
+        },
+      ],
+      createProvider: (profile) => providers[profile.id as keyof typeof providers],
+      registry: new ToolRegistry(),
+      approval: "auto",
+      store,
+      cwd: "/test",
+    });
+    activeServers.push(server);
+    await new Promise<void>((resolve) => {
+      server.listen(port, "127.0.0.1", () => resolve());
+    });
+
+    const switchMessages = await wsCollect(port, (ws) => {
+      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+      ws.send(
+        JSON.stringify({
+          type: "user_message",
+          sessionId: session.id,
+          text: "/model anthropic/second",
+        }),
+      );
+    }, (msg) => msg.type === "session_model_changed");
+
+    const switched = switchMessages.find((msg) => msg.type === "session_model_changed");
+    expect(switched).toMatchObject({
+      type: "session_model_changed",
+      modelProfileId: "anthropic/second",
+      provider: "anthropic",
+      model: "second",
+    });
+    expect(store.getSession(session.id)).toMatchObject({
+      modelProfileId: "anthropic/second",
+      provider: "anthropic",
+      model: "second",
+    });
+
+    const runMessages = await wsCollect(port, (ws) => {
+      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+      ws.send(JSON.stringify({ type: "user_message", sessionId: session.id, text: "hi" }));
+    }, (msg) => msg.type === "turn_finished");
+
+    expect(
+      runMessages.some(
+        (msg) =>
+          msg.type === "turn_event" &&
+          msg.event.type === "assistant_text_delta" &&
+          msg.event.text === "second provider",
+      ),
+    ).toBe(true);
   });
 
   it("rewinds a session over websocket", async () => {

@@ -3,7 +3,7 @@ import { Command } from "commander";
 import { resolve } from "node:path";
 import { realpathSync } from "node:fs";
 import * as readline from "node:readline";
-import { AiSdkProvider } from "./model/ai-sdk-provider.js";
+import { createProviderFromProfile } from "./model/provider-factory.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { readFileTool } from "./tools/read.js";
 import { searchTool } from "./tools/search.js";
@@ -30,11 +30,10 @@ import type { ApprovalResponse, ApprovalRule } from "./permission/approval.js";
 import {
   loadConfig,
   resolveApprovalMode,
-  resolveModelName,
-  resolveProviderConfig,
-  resolveProviderName,
+  resolveModelProfile,
+  resolveModelProfiles,
 } from "./config/config.js";
-import type { Config, ProviderName } from "./config/config.js";
+import type { Config, ModelProfile, ProviderName } from "./config/config.js";
 import { discoverSkills, summarizeSkills } from "./skill/discovery.js";
 import type { SkillInfo, SkillSummary } from "./skill/types.js";
 import { compactSession } from "./session/compact.js";
@@ -44,6 +43,12 @@ import {
   revertLast,
   rewindSession,
 } from "./session/revert.js";
+import {
+  formatModelList,
+  formatModelSwitch,
+  formatUnknownModel,
+  resolveRequestedModelProfile,
+} from "./session/model-switch.js";
 
 function canonicalWorkspaceRoot(path: string): string {
   return realpathSync.native(resolve(path));
@@ -231,15 +236,43 @@ function printCompactResult(result: CompactResult): void {
 }
 
 async function handleSessionCommand(
-  provider: Provider,
+  getProvider: () => Provider,
+  setModelProfile: (profile: ModelProfile) => void,
+  modelProfiles: ModelProfile[],
   session: SessionState,
   store: TranscriptStore,
   input: string,
 ): Promise<boolean> {
   const trimmed = input.trim();
+  if (trimmed === "/model" || trimmed.startsWith("/model ")) {
+    const requestedId = trimmed.slice("/model".length).trim();
+    if (!requestedId) {
+      console.log(formatModelList(modelProfiles, session.modelProfileId));
+      return true;
+    }
+    const profile = resolveRequestedModelProfile(modelProfiles, requestedId);
+    if (!profile) {
+      console.log(formatUnknownModel(requestedId, modelProfiles));
+      return true;
+    }
+    setModelProfile(profile);
+    store.updateSessionModel(session.id, {
+      modelProfileId: profile.id,
+      provider: profile.provider,
+      model: profile.model,
+    });
+    Object.assign(session, {
+      modelProfileId: profile.id,
+      provider: profile.provider,
+      model: profile.model,
+    });
+    console.log(formatModelSwitch(profile));
+    return true;
+  }
+
   if (trimmed === "/compact") {
     try {
-      const result = await compactSession(provider, session);
+      const result = await compactSession(getProvider(), session);
       session.messages = result.messages;
       store.replaceMessages(session.id, result.messages);
       printCompactResult(result);
@@ -276,52 +309,28 @@ async function handleSessionCommand(
 }
 
 function createProvider(config: Config): Provider {
-  const provider = resolveProviderName(config);
-  const providerConfig = resolveProviderConfig(config, provider);
-  const model = resolveModelName(config, provider);
+  return createProviderForProfile(resolveModelProfile(config));
+}
 
-  if (provider === "openai") {
-    if (!providerConfig.apiKey) {
-      console.error(
-        "OpenAI provider requires apiKey in config.providers.openai.apiKey or top-level apiKey.",
-      );
-      process.exit(1);
-    }
-    const providerInput = {
-      provider: "openai",
-      model,
-      baseUrl: providerConfig.baseUrl,
-      apiKey: providerConfig.apiKey,
-      maxOutputTokens: providerConfig.maxOutputTokens,
-      protocol: providerConfig.protocol,
-    } as const;
-    return new AiSdkProvider(providerInput);
-  }
-
-  if (!providerConfig.apiKey && !providerConfig.authToken) {
-    console.error(
-      "Anthropic provider requires apiKey or authToken in config.providers.anthropic or top-level config.",
-    );
+function createProviderForProfile(profile: ModelProfile): Provider {
+  try {
+    return createProviderFromProfile(profile);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : "Failed to create provider");
     process.exit(1);
   }
-  return new AiSdkProvider({
-    provider: "anthropic",
-    model,
-    baseUrl: providerConfig.baseUrl,
-    apiKey: providerConfig.apiKey,
-    authToken: providerConfig.authToken,
-    maxOutputTokens: providerConfig.maxOutputTokens,
-  });
 }
 
 function resolveSessionProvider(config: Config): {
   provider: ProviderName;
   model: string;
+  modelProfileId: string;
 } {
-  const provider = resolveProviderName(config);
+  const profile = resolveModelProfile(config);
   return {
-    provider,
-    model: resolveModelName(config, provider),
+    provider: profile.provider,
+    model: profile.model,
+    modelProfileId: profile.id,
   };
 }
 
@@ -342,6 +351,7 @@ function buildRegistry(skills: SkillInfo[] = []): ToolRegistry {
 
 async function chatMode(
   provider: Provider,
+  modelProfiles: ModelProfile[],
   registry: ToolRegistry,
   session: SessionState,
   approval: ApprovalMode,
@@ -357,6 +367,7 @@ async function chatMode(
   const readState = new ReadStateTracker();
   const approvalHandler = makeApprovalHandler(rl);
   const onEvent = makeEventRenderer();
+  let activeProvider = provider;
 
   console.log(`Session: ${session.id}`);
   console.log("Type your message, /exit to quit.\n");
@@ -368,14 +379,25 @@ async function chatMode(
       if (input === null) break;
       if (input.trim() === "") continue;
       if (input === "/exit" || input === "/quit") break;
-      if (await handleSessionCommand(provider, session, store, input)) continue;
+      if (
+        await handleSessionCommand(
+          () => activeProvider,
+          (profile) => {
+            activeProvider = createProviderForProfile(profile);
+          },
+          modelProfiles,
+          session,
+          store,
+          input,
+        )
+      ) continue;
 
       try {
         const {
           session: updated,
           newMessages,
           aborted,
-        } = await runTurn(provider, registry, session, input, {
+        } = await runTurn(activeProvider, registry, session, input, {
           approval,
           maxTurns,
           approvalHandler,
@@ -497,11 +519,14 @@ async function handleResume(sessionId: string, options: { cwd: string }): Promis
     }
     cwd = session.cwd;
     config = loadConfig({ workspaceRoot: cwd });
-    const provider = createProvider(config);
+    const modelProfiles = resolveModelProfiles(config);
+    const activeProfile = resolveModelProfile(config, session.modelProfileId);
+    const provider = createProviderForProfile(activeProfile);
     const skills = await discoverSkills({ cwd });
     const registry = buildRegistry(skills);
     await chatMode(
       provider,
+      modelProfiles,
       registry,
       session,
       resolveApprovalMode(config),
@@ -523,14 +548,17 @@ async function handleMainRun(options: { cwd: string }): Promise<void> {
   try {
     const session = store.createSession({
       workspaceRoot: cwd,
+      modelProfileId: resolved.modelProfileId,
       provider: resolved.provider,
       model: resolved.model,
     });
     const provider = createProvider(config);
+    const modelProfiles = resolveModelProfiles(config);
     const skills = await discoverSkills({ cwd });
     const registry = buildRegistry(skills);
     await chatMode(
       provider,
+      modelProfiles,
       registry,
       session,
       resolveApprovalMode(config),
@@ -552,6 +580,7 @@ async function handleTui(options: { cwd: string }): Promise<void> {
   try {
     const session = store.createSession({
       workspaceRoot: cwd,
+      modelProfileId: resolved.modelProfileId,
       provider: resolved.provider,
       model: resolved.model,
     });
@@ -565,6 +594,8 @@ async function handleTui(options: { cwd: string }): Promise<void> {
       provider,
       providerName: resolved.provider,
       modelName: resolved.model,
+      modelProfiles: resolveModelProfiles(config),
+      createProvider: createProviderForProfile,
       registry,
       approval: resolveApprovalMode(config),
       store,
@@ -585,6 +616,7 @@ async function handleApp(options: { cwd: string }): Promise<void> {
   const cwd = canonicalWorkspaceRoot(options.cwd);
   const config = loadConfig({ workspaceRoot: cwd });
   const resolved = resolveSessionProvider(config);
+  const modelProfiles = resolveModelProfiles(config);
   const provider = createProvider(config);
   const skills = await discoverSkills({ cwd });
   const registry = buildRegistry(skills);
@@ -595,6 +627,9 @@ async function handleApp(options: { cwd: string }): Promise<void> {
     provider,
     providerName: resolved.provider,
     modelName: resolved.model,
+    modelProfileId: resolved.modelProfileId,
+    modelProfiles,
+    createProvider: createProviderForProfile,
     registry,
     approval: resolveApprovalMode(config),
     store,

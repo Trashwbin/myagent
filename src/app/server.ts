@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { Provider } from "../model/provider.js";
+import type { ModelProfile } from "../config/config.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { TranscriptStore } from "../storage/store.js";
 import type { ApprovalMode } from "../permission/policy.js";
@@ -10,11 +11,15 @@ import { parseClientMessage } from "./protocol.js";
 import { SessionManager } from "./session-api.js";
 import { EMBEDDED_HTML } from "./html.js";
 import { getAppClientAsset } from "./web/bundle.js";
+import { publicModelProfile } from "../model/provider-factory.js";
 
 type AppServerDeps = {
   provider: Provider;
   providerName: string;
   modelName: string;
+  modelProfileId?: string;
+  modelProfiles?: ModelProfile[];
+  createProvider?: (profile: ModelProfile) => Provider;
   registry: ToolRegistry;
   approval: ApprovalMode;
   store: TranscriptStore;
@@ -39,6 +44,8 @@ export function createAppServer(deps: AppServerDeps): Server {
 
   const manager = new SessionManager({
     provider: deps.provider,
+    modelProfiles: deps.modelProfiles,
+    createProvider: deps.createProvider,
     registry: deps.registry,
     approval: deps.approval,
     store: deps.store,
@@ -97,6 +104,7 @@ export function createAppServer(deps: AppServerDeps): Server {
           cwd: deps.cwd,
           provider: deps.providerName,
           model: deps.modelName,
+          models: (deps.modelProfiles ?? []).map(publicModelProfile),
           approval: deps.approval,
         });
         return;
@@ -114,6 +122,7 @@ export function createAppServer(deps: AppServerDeps): Server {
         const cwd = typeof parsed.cwd === "string" ? parsed.cwd : deps.cwd;
         const session = deps.store.createSession({
           workspaceRoot: cwd,
+          modelProfileId: deps.modelProfileId,
           provider: deps.providerName,
           model: deps.modelName,
         });

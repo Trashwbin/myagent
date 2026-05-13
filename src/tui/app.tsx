@@ -3,6 +3,8 @@ import { Box, Text, useInput, useStdout } from "ink";
 import type { ApprovalResponse } from "../permission/approval.js";
 import type { ApprovalMode } from "../permission/policy.js";
 import type { Provider } from "../model/provider.js";
+import type { ModelProfile } from "../config/config.js";
+import { findModelProfile } from "../config/config.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { TranscriptStore } from "../storage/store.js";
 import type { SessionState, ApprovalRequest, TurnEvent } from "../session/loop.js";
@@ -31,12 +33,19 @@ import { expandPromptText } from "./prompt-input/paste.js";
 import { DEFAULT_MAX_VISIBLE_LINES, PromptInput } from "./prompt-input/PromptInput.js";
 import { PromptCursor } from "./prompt-input/cursor.js";
 import { MouseInputContext } from "./mouse-input.js";
+import {
+  formatModelList,
+  formatModelSwitch,
+  formatUnknownModel,
+} from "../session/model-switch.js";
 
 type AppProps = {
   session: SessionState;
   provider: Provider;
   providerName: string;
   modelName: string;
+  modelProfiles?: ModelProfile[];
+  createProvider?: (profile: ModelProfile) => Provider;
   registry: ToolRegistry;
   approval: ApprovalMode;
   store: TranscriptStore;
@@ -61,6 +70,11 @@ export function TuiApp(props: AppProps): React.ReactElement {
   const [inputState, setInputState] = useState({ value: "", cursor: 0 });
   const [pasteParts, setPasteParts] = useState<PastePart[]>([]);
   const [scrollOffset, setScrollOffset] = useState(0);
+  const [activeProvider, setActiveProvider] = useState(props.provider);
+  const [activeModel, setActiveModel] = useState({
+    provider: props.providerName,
+    model: props.modelName,
+  });
 
   const sensitiveSetRef = useRef(new Set<string>());
   const sessionApprovalRulesRef = useRef<
@@ -99,7 +113,7 @@ export function TuiApp(props: AppProps): React.ReactElement {
 
         const runCommand = async () => {
           try {
-            const result = await compactSession(props.provider, props.session);
+            const result = await compactSession(activeProvider, props.session);
             props.session.messages = result.messages;
             props.store.replaceMessages(props.session.id, result.messages);
             setTimeline((prev) => [
@@ -123,6 +137,60 @@ export function TuiApp(props: AppProps): React.ReactElement {
         };
 
         void runCommand();
+        return;
+      }
+
+      if (command === "/model" || command.startsWith("/model ")) {
+        const modelProfiles = props.modelProfiles ?? [];
+        const requestedId = command.slice("/model".length).trim();
+        if (!requestedId) {
+          setTimeline((prev) => [
+            ...prev,
+            {
+              type: "status",
+              level: "info",
+              text: formatModelList(modelProfiles, props.session.modelProfileId),
+            },
+          ]);
+          setInputState({ value: "", cursor: 0 });
+          setPasteParts([]);
+          return;
+        }
+
+        const profile = findModelProfile(modelProfiles, requestedId);
+        if (!profile) {
+          setTimeline((prev) => [
+            ...prev,
+            {
+              type: "status",
+              level: "error",
+              text: formatUnknownModel(requestedId, modelProfiles),
+            },
+          ]);
+          setInputState({ value: "", cursor: 0 });
+          setPasteParts([]);
+          return;
+        }
+
+        const nextProvider = props.createProvider?.(profile) ?? props.provider;
+        setActiveProvider(nextProvider);
+        setActiveModel({ provider: profile.provider, model: profile.model });
+        Object.assign(props.session, {
+          modelProfileId: profile.id,
+          provider: profile.provider,
+          model: profile.model,
+        });
+        props.store.updateSessionModel(props.session.id, {
+          modelProfileId: profile.id,
+          provider: profile.provider,
+          model: profile.model,
+        });
+        setTimeline((prev) => [
+          ...prev,
+          { type: "status", level: "info", text: formatModelSwitch(profile) },
+        ]);
+        setInputState({ value: "", cursor: 0 });
+        setPasteParts([]);
         return;
       }
 
@@ -211,7 +279,7 @@ export function TuiApp(props: AppProps): React.ReactElement {
             session: updated,
             newMessages,
             aborted,
-          } = await runTurn(props.provider, props.registry, props.session, expanded, {
+          } = await runTurn(activeProvider, props.registry, props.session, expanded, {
             approval: props.approval,
             maxTurns: props.maxTurns,
             approvalHandler,
@@ -245,7 +313,7 @@ export function TuiApp(props: AppProps): React.ReactElement {
       };
       void runAsync();
     },
-    [props, pasteParts, handleEvent],
+    [props, pasteParts, handleEvent, activeProvider],
   );
 
   const resolveApproval = useCallback(
@@ -335,8 +403,8 @@ export function TuiApp(props: AppProps): React.ReactElement {
   return (
     <Box flexDirection="column" width="100%" height={terminalRows}>
       <HeaderBar
-        providerName={props.providerName}
-        modelName={props.modelName}
+        providerName={activeModel.provider}
+        modelName={activeModel.model}
         approval={props.approval}
         cwd={props.session.cwd}
         sessionId={props.session.id}

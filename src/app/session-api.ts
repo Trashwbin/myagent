@@ -17,6 +17,13 @@ import {
   revertLast,
   rewindSession,
 } from "../session/revert.js";
+import type { ModelProfile } from "../config/config.js";
+import { findModelProfile } from "../config/config.js";
+import {
+  formatModelList,
+  formatModelSwitch,
+  formatUnknownModel,
+} from "../session/model-switch.js";
 
 type PendingApproval = {
   id: string;
@@ -26,6 +33,7 @@ type PendingApproval = {
 
 type ActiveSession = {
   session: SessionState;
+  provider: Provider;
   activeTurn: Promise<void> | null;
   pendingApprovals: Map<string, PendingApproval>;
   approvalRules: ApprovalRule[];
@@ -34,7 +42,9 @@ type ActiveSession = {
 
 export class SessionManager {
   private sessions = new Map<string, ActiveSession>();
-  private provider: Provider;
+  private defaultProvider: Provider;
+  private modelProfiles: ModelProfile[];
+  private createProvider: (profile: ModelProfile) => Provider;
   private registry: ToolRegistry;
   private approval: ApprovalMode;
   private store: TranscriptStore;
@@ -44,6 +54,8 @@ export class SessionManager {
 
   constructor(deps: {
     provider: Provider;
+    modelProfiles?: ModelProfile[];
+    createProvider?: (profile: ModelProfile) => Provider;
     registry: ToolRegistry;
     approval: ApprovalMode;
     store: TranscriptStore;
@@ -51,7 +63,9 @@ export class SessionManager {
     maxTurns?: number;
     sendEvent: (sessionId: string, msg: ServerMessage) => void;
   }) {
-    this.provider = deps.provider;
+    this.defaultProvider = deps.provider;
+    this.modelProfiles = deps.modelProfiles ?? [];
+    this.createProvider = deps.createProvider ?? (() => deps.provider);
     this.registry = deps.registry;
     this.approval = deps.approval;
     this.store = deps.store;
@@ -61,8 +75,10 @@ export class SessionManager {
   }
 
   registerSession(session: SessionState): void {
+    const profile = this.resolveSessionProfile(session);
     this.sessions.set(session.id, {
       session,
+      provider: profile ? this.createProvider(profile) : this.defaultProvider,
       activeTurn: null,
       pendingApprovals: new Map(),
       approvalRules: [],
@@ -105,6 +121,9 @@ export class SessionManager {
     if (!active) return { ok: false, error: "Session not found" };
     if (active.activeTurn) return { ok: false, error: "Turn already active for this session" };
 
+    const modelCommand = this.handleModelCommand(active, text);
+    if (modelCommand) return modelCommand;
+
     const persistedUserMessage: Message = { role: "user", content: text };
     const sessionForRun: SessionState = {
       ...active.session,
@@ -137,7 +156,7 @@ export class SessionManager {
     active.activeTurn = (async () => {
       try {
         const { session: updated, newMessages } = await runTurn(
-          this.provider,
+          active.provider,
           this.registry,
           sessionForRun,
           text,
@@ -222,7 +241,7 @@ export class SessionManager {
     if (!active) return { ok: false, error: "Session not found" };
     if (active.activeTurn) return { ok: false, error: "Turn already active for this session" };
 
-    const result = await compactSession(this.provider, active.session);
+    const result = await compactSession(active.provider, active.session);
     active.session.messages = result.messages;
     this.store.replaceMessages(sessionId, result.messages);
     const message = formatCompactMessage(result);
@@ -234,6 +253,94 @@ export class SessionManager {
       message,
     });
     return { ok: true };
+  }
+
+  private handleModelCommand(
+    active: ActiveSession,
+    text: string,
+  ): { ok: boolean; error?: string } | undefined {
+    const trimmed = text.trim();
+    if (trimmed !== "/model" && !trimmed.startsWith("/model ")) return undefined;
+
+    if (this.modelProfiles.length === 0) {
+      const message = "No model profiles configured.";
+      this.sendEvent(active.session.id, {
+        type: "error",
+        sessionId: active.session.id,
+        message,
+        code: "MODEL_NOT_CONFIGURED",
+      });
+      this.sendEvent(active.session.id, { type: "turn_finished", sessionId: active.session.id });
+      return { ok: true };
+    }
+
+    const requestedId = trimmed.slice("/model".length).trim();
+    if (!requestedId) {
+      const message = formatModelList(this.modelProfiles, active.session.modelProfileId);
+      this.appendAssistantStatus(active, message);
+      this.sendEvent(active.session.id, {
+        type: "turn_event",
+        sessionId: active.session.id,
+        event: { type: "assistant_message", message: { role: "assistant", content: message } },
+      });
+      this.sendEvent(active.session.id, { type: "turn_finished", sessionId: active.session.id });
+      return { ok: true };
+    }
+
+    const profile = findModelProfile(this.modelProfiles, requestedId);
+    if (!profile) {
+      const message = formatUnknownModel(requestedId, this.modelProfiles);
+      this.appendAssistantStatus(active, message);
+      this.sendEvent(active.session.id, {
+        type: "turn_event",
+        sessionId: active.session.id,
+        event: { type: "assistant_message", message: { role: "assistant", content: message } },
+      });
+      this.sendEvent(active.session.id, { type: "turn_finished", sessionId: active.session.id });
+      return { ok: true };
+    }
+
+    active.provider = this.createProvider(profile);
+    Object.assign(active.session, {
+      modelProfileId: profile.id,
+      provider: profile.provider,
+      model: profile.model,
+    });
+    this.store.updateSessionModel(active.session.id, {
+      modelProfileId: profile.id,
+      provider: profile.provider,
+      model: profile.model,
+    });
+
+    const message = formatModelSwitch(profile);
+    this.appendAssistantStatus(active, message);
+    this.sendEvent(active.session.id, {
+      type: "session_model_changed",
+      sessionId: active.session.id,
+      modelProfileId: profile.id,
+      provider: profile.provider,
+      model: profile.model,
+      message,
+    });
+    this.sendEvent(active.session.id, { type: "turn_finished", sessionId: active.session.id });
+    return { ok: true };
+  }
+
+  private appendAssistantStatus(active: ActiveSession, content: string): void {
+    const message: Message = { role: "assistant", content };
+    active.session.messages.push(message);
+    this.store.appendMessages(active.session.id, [message]);
+  }
+
+  private resolveSessionProfile(session: SessionState): ModelProfile | undefined {
+    return (
+      findModelProfile(this.modelProfiles, session.modelProfileId) ??
+      findModelProfile(
+        this.modelProfiles,
+        session.provider && session.model ? `${session.provider}/${session.model}` : undefined,
+      ) ??
+      this.modelProfiles[0]
+    );
   }
 }
 

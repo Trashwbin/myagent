@@ -159,6 +159,49 @@ describe("web timeline reducer", () => {
     expect(next.runningSessionIds).not.toContain("s1");
   });
 
+  it("updates session metadata when the model changes", () => {
+    const state = {
+      ...initialAppState,
+      sessions: [
+        {
+          id: "s1",
+          workspaceRoot: "/tmp/ws",
+          modelProfileId: "openai/first",
+          provider: "openai",
+          model: "first",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      timelines: buildTimelineFromMessages([{ role: "user", content: "/model second" }]),
+      runningSessionIds: ["s1"],
+    };
+
+    const next = appReducer(state, {
+      type: "server_message",
+      message: {
+        type: "session_model_changed",
+        sessionId: "s1",
+        modelProfileId: "anthropic/second",
+        provider: "anthropic",
+        model: "second",
+        message: "Switched model to anthropic/second.",
+      },
+    });
+
+    expect(next.sessions[0]).toMatchObject({
+      modelProfileId: "anthropic/second",
+      provider: "anthropic",
+      model: "second",
+    });
+    expect(next.timelines.s1?.[0]?.assistantParts.at(-1)).toMatchObject({
+      kind: "status",
+      level: "info",
+      text: "Switched model to anthropic/second.",
+    });
+    expect(next.runningSessionIds).not.toContain("s1");
+  });
+
   it("appends a local slash-command status", () => {
     const state = appReducer(initialAppState, {
       type: "timeline_loaded",

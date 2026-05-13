@@ -12,6 +12,7 @@ describe("web slash commands", () => {
       "/compact",
       "/revert-last",
       "/rewind",
+      "/model",
     ]);
   });
 
@@ -43,6 +44,19 @@ describe("web slash commands", () => {
       type: "valid",
       command: { id: "rewind" },
       args: "cp_123",
+    });
+  });
+
+  it("parses model list and model switch commands", () => {
+    expect(parseSlashCommand("/model")).toMatchObject({
+      type: "valid",
+      command: { id: "model" },
+      args: "",
+    });
+    expect(parseSlashCommand("/model anthropic/sonnet")).toMatchObject({
+      type: "valid",
+      command: { id: "model" },
+      args: "anthropic/sonnet",
     });
   });
 

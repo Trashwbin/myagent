@@ -16,6 +16,7 @@ import {
 } from "./mouse-input.js";
 import type { ApprovalMode } from "../permission/policy.js";
 import type { Provider } from "../model/provider.js";
+import type { ModelProfile } from "../config/config.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { TranscriptStore } from "../storage/store.js";
 import type { SessionState } from "../session/loop.js";
@@ -26,6 +27,8 @@ export type LaunchTuiOptions = {
   provider: Provider;
   providerName: string;
   modelName: string;
+  modelProfiles?: ModelProfile[];
+  createProvider?: (profile: ModelProfile) => Provider;
   registry: ToolRegistry;
   approval: ApprovalMode;
   store: TranscriptStore;
