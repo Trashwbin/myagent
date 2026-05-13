@@ -286,11 +286,11 @@ Use Go later only when a component has a stable boundary.
 Expected dependencies:
 
 ```text
-@anthropic-ai/sdk
-openai
+ai
+@ai-sdk/openai
+@ai-sdk/anthropic
 commander
 zod
-execa
 better-sqlite3
 ```
 
