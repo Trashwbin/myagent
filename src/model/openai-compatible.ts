@@ -55,6 +55,49 @@ export function convertMessages(
   });
 }
 
+export function convertMessagesWithToolResultsAsText(
+  messages: Message[],
+): OpenAI.ChatCompletionMessageParam[] {
+  return messages.flatMap((msg): OpenAI.ChatCompletionMessageParam[] => {
+    if (msg.role === "assistant" && msg.toolCalls?.length) {
+      const parts = [];
+      if (msg.content.trim()) parts.push(msg.content);
+      for (const call of msg.toolCalls) {
+        parts.push(
+          `<tool_call id="${escapeAttribute(call.id)}" name="${escapeAttribute(call.name)}">\n${formatToolInput(call.input)}\n</tool_call>`,
+        );
+      }
+      return [
+        {
+          role: "assistant" as const,
+          content: parts.join("\n\n"),
+        },
+      ];
+    }
+
+    if (msg.role !== "tool_result") return convertMessages([msg]);
+
+    const toolName = msg.toolName || "tool";
+    const toolCallId = msg.toolCallId
+      ? ` id="${escapeAttribute(msg.toolCallId)}"`
+      : "";
+    return [
+      {
+        role: "user" as const,
+        content: `<tool_result name="${escapeAttribute(toolName)}"${toolCallId}>\n${msg.content}\n</tool_result>`,
+      },
+    ];
+  });
+}
+
+function formatToolInput(input: unknown): string {
+  return typeof input === "string" ? input : JSON.stringify(input);
+}
+
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+}
+
 function convertTools(tools?: ToolSchema[]): OpenAI.ChatCompletionTool[] | undefined {
   if (!tools?.length) return undefined;
   return tools.map((t) => ({
@@ -105,7 +148,24 @@ export class OpenAICompatibleProvider implements Provider {
     try {
       stream = await this.client.chat.completions.create(params);
     } catch (err) {
-      throw normalizeProviderError("openai", err);
+      const normalized = normalizeProviderError("openai", err);
+      if (shouldRetryWithTextToolResults(normalized, messages)) {
+        try {
+          stream = await this.client.chat.completions.create({
+            ...params,
+            messages: options?.systemPrompt
+              ? [
+                  { role: "system", content: options.systemPrompt },
+                  ...convertMessagesWithToolResultsAsText(messages),
+                ]
+              : convertMessagesWithToolResultsAsText(messages),
+          });
+        } catch (retryErr) {
+          throw normalizeProviderError("openai", retryErr);
+        }
+      } else {
+        throw normalized;
+      }
     }
 
     const pendingToolCalls = new Map<
@@ -179,4 +239,14 @@ export class OpenAICompatibleProvider implements Provider {
       throw normalizeProviderError("openai", err);
     }
   }
+}
+
+function shouldRetryWithTextToolResults(
+  err: ProviderRuntimeError,
+  messages: Message[],
+): boolean {
+  return (
+    err.status === 400 &&
+    messages.some((message) => message.role === "tool_result")
+  );
 }
