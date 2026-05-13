@@ -124,12 +124,16 @@ function buildToolSchemas(registry: ToolRegistry): ToolSchema[] {
   });
 }
 
-function blockedMsg(tc: { id: string; name: string }, reason: string): Message {
+function blockedMsg(
+  tc: { id: string; name: string; providerMetadata?: ProviderMetadata },
+  reason: string,
+): Message {
   return {
     role: "tool_result",
     toolCallId: tc.id,
     toolName: tc.name,
     content: `Tool call denied and was not executed: ${reason}`,
+    providerMetadata: tc.providerMetadata,
   };
 }
 
@@ -316,6 +320,7 @@ async function runAgentLoop(
           toolName: tc.name,
           content: `Tool not found: ${tc.name}`,
           toolDisplay,
+          providerMetadata: tc.providerMetadata,
         };
         messages.push(msg);
         newMessages.push(msg);
@@ -415,6 +420,7 @@ async function runAgentLoop(
             toolName: tc.name,
             content: `Tool call requires approval and was not executed: ${decision.reason}`,
             toolDisplay,
+            providerMetadata: tc.providerMetadata,
           };
           messages.push(msg);
           newMessages.push(msg);
@@ -542,6 +548,7 @@ async function runAgentLoop(
           toolName: tc.name,
           content: `Patch validation failed before execution: ${validationResult}`,
           toolDisplay,
+          providerMetadata: tc.providerMetadata,
         };
         messages.push(msg);
         newMessages.push(msg);
@@ -586,6 +593,7 @@ async function runAgentLoop(
               toolName: tc.name,
               content: failure,
               toolDisplay,
+              providerMetadata: tc.providerMetadata,
             };
             messages.push(msg);
             newMessages.push(msg);
@@ -623,6 +631,7 @@ async function runAgentLoop(
         toolName: tc.name,
         content,
         toolDisplay,
+        providerMetadata: tc.providerMetadata,
         checkpointId: result.ok ? checkpointId : undefined,
       };
       messages.push(resultMsg);

@@ -841,6 +841,37 @@ describe("TurnEvent ordering", () => {
     await rm(tmp, { recursive: true });
   });
 
+  it("carries provider metadata from tool-call to tool_result message", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
+    await writeFile(join(tmp, "f.txt"), "hi");
+    const providerMetadata = { openai: { itemId: "item_1", callId: "call_1" } };
+
+    const provider = new FakeProvider([
+      [
+        {
+          type: "tool-call",
+          id: "call_1",
+          name: "Read",
+          input: { path: "f.txt" },
+          providerMetadata,
+        },
+        { type: "finish", reason: "tool-calls" },
+      ],
+      [{ type: "text", delta: "done" }, { type: "finish", reason: "stop" }],
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+
+    const { newMessages } = await runTurn(provider, registry, makeSession(tmp), "read", {
+      approval: "auto",
+    });
+
+    const toolResult = newMessages.find((message) => message.role === "tool_result");
+    expect(toolResult?.providerMetadata).toEqual(providerMetadata);
+    await rm(tmp, { recursive: true });
+  });
+
   it("denied tool emits tool_approval_decision and tool_result", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
 

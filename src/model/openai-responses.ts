@@ -41,6 +41,40 @@ type ResponsesEvent = {
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
+function openAIItemId(metadata: unknown): string | undefined {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    return undefined;
+  }
+  const openai = (metadata as Record<string, unknown>).openai;
+  if (typeof openai !== "object" || openai === null || Array.isArray(openai)) {
+    return undefined;
+  }
+  const itemId = (openai as Record<string, unknown>).itemId;
+  return typeof itemId === "string" && itemId.length > 0 ? itemId : undefined;
+}
+
+function openAIResponseId(metadata: unknown): string | undefined {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    return undefined;
+  }
+  const openai = (metadata as Record<string, unknown>).openai;
+  if (typeof openai !== "object" || openai === null || Array.isArray(openai)) {
+    return undefined;
+  }
+  const responseId = (openai as Record<string, unknown>).responseId;
+  return typeof responseId === "string" && responseId.length > 0
+    ? responseId
+    : undefined;
+}
+
+function convertToolResultMessage(msg: Message): ResponsesInputItem {
+  return {
+    type: "function_call_output",
+    call_id: openAIItemId(msg.providerMetadata) ?? msg.toolCallId ?? "",
+    output: msg.content,
+  };
+}
+
 export function convertMessages(
   messages: Message[],
   systemPrompt?: string,
@@ -85,7 +119,7 @@ export function convertMessages(
         for (const tc of calls) {
           input.push({
             type: "function_call",
-            call_id: tc.id,
+            call_id: openAIItemId(tc.providerMetadata) ?? tc.id,
             name: tc.name,
             arguments: typeof tc.input === "string" ? tc.input : JSON.stringify(tc.input),
           });
@@ -94,11 +128,7 @@ export function convertMessages(
       }
 
       case "tool_result":
-        input.push({
-          type: "function_call_output",
-          call_id: msg.toolCallId ?? "",
-          output: msg.content,
-        });
+        input.push(convertToolResultMessage(msg));
         break;
     }
   }
@@ -166,6 +196,29 @@ function mapFinishReason(event: ResponsesEvent): "stop" | "tool-calls" | "length
   return "stop";
 }
 
+function responsesContinuation(
+  messages: Message[],
+): { previous_response_id: string; input: ResponsesInputItem[] } | undefined {
+  const lastAssistantIndex = messages.findLastIndex(
+    (message) =>
+      message.role === "assistant" && openAIResponseId(message.providerMetadata),
+  );
+  if (lastAssistantIndex < 0) return undefined;
+
+  const tail = messages.slice(lastAssistantIndex + 1);
+  if (tail.length === 0 || !tail.every((message) => message.role === "tool_result")) {
+    return undefined;
+  }
+
+  const responseId = openAIResponseId(messages[lastAssistantIndex]?.providerMetadata);
+  if (!responseId) return undefined;
+
+  return {
+    previous_response_id: responseId,
+    input: tail.map(convertToolResultMessage),
+  };
+}
+
 function sseEvents(body: string): ResponsesEvent[] {
   if (!body.trim().startsWith("event:")) {
     const parsed = parseMaybeJsonString(body) as { output?: unknown[]; id?: string; usage?: unknown };
@@ -211,9 +264,10 @@ export class OpenAIResponsesProvider implements Provider {
       throw new ProviderRuntimeError("openai", "auth", "OpenAI Responses provider requires apiKey");
     }
 
+    const continuation = responsesContinuation(messages);
     const body = {
       model: this.config.model,
-      input: convertMessages(messages, options?.systemPrompt),
+      ...(continuation ?? { input: convertMessages(messages, options?.systemPrompt) }),
       tools: convertTools(tools),
       stream: true,
       max_output_tokens: this.config.maxOutputTokens,

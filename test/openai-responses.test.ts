@@ -54,7 +54,7 @@ describe("OpenAI Responses convertMessages", () => {
     ]);
   });
 
-  it("converts persisted canonical tool-call parts", () => {
+  it("converts persisted canonical tool-call parts with provider item ids", () => {
     const result = convertMessages([
       {
         role: "assistant",
@@ -69,20 +69,90 @@ describe("OpenAI Responses convertMessages", () => {
           },
         ],
       },
+      {
+        role: "tool_result",
+        toolCallId: "call_1",
+        toolName: "list_dir",
+        content: "package.json\n",
+        providerMetadata: { openai: { itemId: "item_1" } },
+      },
     ]);
 
     expect(result).toEqual([
       {
         type: "function_call",
-        call_id: "call_1",
+        call_id: "item_1",
         name: "list_dir",
         arguments: '{"path":"."}',
+      },
+      {
+        type: "function_call_output",
+        call_id: "item_1",
+        output: "package.json\n",
       },
     ]);
   });
 });
 
 describe("OpenAIResponsesProvider", () => {
+  it("continues tool calls with previous_response_id instead of replaying function calls", async () => {
+    let capturedBody: unknown;
+    globalThis.fetch = async (_url, init) => {
+      capturedBody = JSON.parse(String(init?.body));
+      return new Response(
+        'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_2","status":"completed"}}\n\n',
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    };
+
+    const provider = new OpenAIResponsesProvider({
+      provider: "openai",
+      protocol: "responses",
+      model: "test-model",
+      apiKey: "sk-test",
+      baseUrl: "https://example.test/v1",
+    });
+
+    await collectEvents(
+      provider.stream([
+        { role: "user", content: "list" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            {
+              id: "call_1",
+              name: "list_dir",
+              input: { path: "." },
+              providerMetadata: { openai: { itemId: "item_call", callId: "call_1" } },
+            },
+          ],
+          providerMetadata: { openai: { responseId: "resp_1" } },
+        },
+        {
+          role: "tool_result",
+          toolCallId: "call_1",
+          toolName: "list_dir",
+          content: "package.json\n",
+          providerMetadata: { openai: { itemId: "item_call", callId: "call_1" } },
+        },
+      ]),
+    );
+
+    expect(capturedBody).toMatchObject({
+      model: "test-model",
+      previous_response_id: "resp_1",
+      input: [
+        {
+          type: "function_call_output",
+          call_id: "item_call",
+          output: "package.json\n",
+        },
+      ],
+      stream: true,
+    });
+  });
+
   it("parses non-SSE JSON body returned with event-stream content type", async () => {
     globalThis.fetch = async () =>
       new Response(
