@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { AiSdkProvider } from "../src/model/ai-sdk-provider.js";
 import {
-  AiSdkProvider,
   convertMessages,
   convertMessagesToUI,
-} from "../src/model/ai-sdk-provider.js";
+  messages,
+  providerOptions,
+} from "../src/model/provider-transform.js";
 
 describe("AI SDK provider adapter", () => {
   it("converts structured transcript parts into AI SDK UI messages", () => {
@@ -152,5 +154,50 @@ describe("AI SDK provider adapter", () => {
 
     expect(provider.name).toBe("anthropic");
     expect(provider.protocol).toBe("messages");
+  });
+
+  it("keeps Anthropic prompt history free of empty text parts", async () => {
+    const result = await messages({
+      config: { provider: "anthropic", model: "claude-test" },
+      messages: [
+        { role: "user", content: "" },
+        {
+          role: "assistant",
+          content: "",
+          parts: [
+            { type: "text", text: "" },
+            { type: "reasoning", text: "thinking" },
+          ],
+        },
+      ],
+    });
+
+    expect(result).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "reasoning", text: "thinking" }],
+      },
+    ]);
+  });
+
+  it("builds OpenAI Responses continuation options", () => {
+    expect(
+      providerOptions({
+        config: { provider: "openai", model: "gpt-5" },
+        protocol: "responses",
+        messages: [
+          {
+            role: "assistant",
+            content: "done",
+            providerMetadata: { openai: { responseId: "resp_1" } },
+          },
+        ],
+      }),
+    ).toEqual({
+      openai: {
+        store: true,
+        previousResponseId: "resp_1",
+      },
+    });
   });
 });
