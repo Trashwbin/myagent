@@ -555,6 +555,8 @@ describe("WebSocket", () => {
       { role: "user", content: "first" },
       { role: "assistant", content: "first reply" },
       { role: "user", content: "second" },
+      { role: "assistant", content: "second reply" },
+      { role: "user", content: "third" },
     ]);
     const port = await findAvailablePort(43200);
     const server = createAppServer({
@@ -579,12 +581,14 @@ describe("WebSocket", () => {
     const compacted = messages.find((msg) => msg.type === "session_compacted");
     expect(compacted).toMatchObject({
       compactedCount: 2,
-      retainedCount: 1,
-      message: "Compacted 2 messages; retained 1 messages.",
+      retainedCount: 3,
+      message: "Compacted 2 messages; retained 3 messages.",
     });
     expect(store.getSession(session.id)?.messages).toEqual([
-      { role: "summary", content: "Summary of first turn" },
+      expect.objectContaining({ role: "summary", content: "Summary of first turn" }),
       { role: "user", content: "second" },
+      { role: "assistant", content: "second reply" },
+      { role: "user", content: "third" },
     ]);
   });
 });

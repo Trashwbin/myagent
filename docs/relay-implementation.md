@@ -305,11 +305,13 @@ restore 是文件级：
 
 `/compact` 在 `src/session/compact.ts`。它做的是 session continuation summary，不是长期记忆：
 
-1. 保留最近的用户 turn。
-2. 把旧 transcript 序列化成 bounded prompt。
-3. 调用当前 provider 生成 summary。
-4. 用一条 `summary` message 替换旧消息前缀。
-5. 保留尾部原始消息继续对话。
+1. 默认保留最近 2 个用户 turn。
+2. 用 `preserveRecentChars` 预算约束尾部上下文；如果尾部过大，会继续向后移动 tail 起点，避免 compact 后马上再次超限。
+3. 如果历史里已有 `summary`，新 compact 会把它作为 anchored previous summary 更新，而不是把 summary 当普通 transcript 再总结一遍。
+4. 把旧 transcript 序列化成 bounded prompt；普通消息和 tool output 有独立上限，旧工具输出会被裁剪，疑似 secret/token 会被脱敏。
+5. 调用当前 provider 生成 summary，compaction 期间不传工具，且拒绝 provider 发起 tool call。
+6. 用一条 `summary` message 替换旧消息前缀，并在 metadata 里记录 compacted/retained count、tail start、是否复用 previous summary、是否截断 transcript。
+7. 保留尾部原始消息继续对话。
 
 summary prompt 要求包含：
 
@@ -320,6 +322,8 @@ summary prompt 要求包含：
 - 可能需要恢复的 checkpoint id。
 
 所以 compact 后仍能继续当前任务，同时减少上下文长度。
+
+这条路径对齐的是 OpenCode 的本地 compaction 思路：选择要压缩的 head、保留最近 tail、把上一轮 summary 作为 anchor、裁剪旧工具输出，然后通过普通模型调用产出 continuation summary。当前没有接 Codex 那种 provider remote compact endpoint。
 
 ## Skills 渐进发现与按需调用
 
