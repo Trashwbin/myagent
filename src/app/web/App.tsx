@@ -383,6 +383,15 @@ export function App() {
         />
       </main>
 
+      <aside className="right-panel">
+        <div className="right-panel-title">Artifacts</div>
+        {activeSession ? (
+          <div className="right-panel-empty">Session artifacts will appear here</div>
+        ) : (
+          <div className="right-panel-empty">Select a session to begin</div>
+        )}
+      </aside>
+
       {state.pendingApproval &&
       state.pendingApproval.sessionId === state.activeSessionId ? (
         <ApprovalDock

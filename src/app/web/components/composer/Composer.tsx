@@ -73,51 +73,62 @@ export function Composer({
         </div>
       ) : null}
       <div className="composer-inner">
-        <textarea
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (showCommands && event.key === "ArrowDown") {
-              event.preventDefault();
-              setSelectedIndex((index) => (index + 1) % commands.length);
-              return;
-            }
-            if (showCommands && event.key === "ArrowUp") {
-              event.preventDefault();
-              setSelectedIndex((index) => (index + commands.length - 1) % commands.length);
-              return;
-            }
-            if (showCommands && event.key === "Tab") {
-              event.preventDefault();
-              applyCommand(commands[selectedIndex]!);
-              return;
-            }
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              const command = parseSlashCommand(value);
-              if (command.type === "valid") {
-                submit();
+        <div className="composer-row">
+          <textarea
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (showCommands && event.key === "ArrowDown") {
+                event.preventDefault();
+                setSelectedIndex((index) => (index + 1) % commands.length);
                 return;
               }
-              if (command.type === "incomplete" || command.type === "invalid") {
-                submit();
+              if (showCommands && event.key === "ArrowUp") {
+                event.preventDefault();
+                setSelectedIndex((index) => (index + commands.length - 1) % commands.length);
                 return;
               }
-              if (showCommands && commands[selectedIndex]) {
-                applyCommand(commands[selectedIndex]);
+              if (showCommands && event.key === "Tab") {
+                event.preventDefault();
+                applyCommand(commands[selectedIndex]!);
                 return;
               }
-              if (!disabled) submit();
-            }
-          }}
-          disabled={disabled}
-          placeholder="Ask myAgent to inspect, edit, test, or explain this workspace..."
-        />
-        <button className="primary" onClick={submit} disabled={disabled}>
-          Send
-        </button>
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                const command = parseSlashCommand(value);
+                if (command.type === "valid") {
+                  submit();
+                  return;
+                }
+                if (command.type === "incomplete" || command.type === "invalid") {
+                  submit();
+                  return;
+                }
+                if (showCommands && commands[selectedIndex]) {
+                  applyCommand(commands[selectedIndex]);
+                  return;
+                }
+                if (!disabled) submit();
+              }
+            }}
+            disabled={disabled}
+            placeholder="Ask myAgent..."
+            rows={1}
+          />
+        </div>
+        <div className="composer-actions">
+          <div className="model-badge">
+            <span className="dot connected" />
+            <span>myAgent</span>
+          </div>
+          <button className="send-button" onClick={submit} disabled={disabled}>
+            <svg viewBox="0 0 16 16" fill="none">
+              <path d="M8 2.5v11M4.5 9.5L8 13.5l3.5-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
       </div>
-      <div className="hint">{commandHint}</div>
+      <div className="hint"><span>{commandHint}</span></div>
     </section>
   );
 }

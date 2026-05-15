@@ -41,13 +41,10 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      <div className="brand">
-        <div>
-          <div className="brand-title">myAgent</div>
-          <div className="brand-subtitle">Local coding workspace</div>
-        </div>
-        <button className="primary" onClick={onNewSession}>
-          New
+      <div className="sidebar-actions">
+        <button className="sidebar-action" onClick={onNewSession}>
+          <span className="action-icon">+</span>
+          <span>New chat</span>
         </button>
       </div>
       <div className="session-list" aria-label="Sessions">

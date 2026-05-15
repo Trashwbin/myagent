@@ -271,7 +271,7 @@ describe("HTTP API", () => {
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
     expect(html).toContain("myAgent");
-    expect(html).toContain("--canvas: #f5f6f2");
+    expect(html).toContain("--canvas: #faf8f3");
     expect(html).toContain("/assets/client.js");
     expect(html).toContain('<div id="root"></div>');
     expect(html).not.toContain('id="session-list"');
@@ -292,9 +292,9 @@ describe("HTTP API", () => {
     expect(js).toContain("Gathered context");
     expect(js).toContain("approval-file-list");
     expect(js).toContain("approval-inline-diff");
-    expect(js).toContain("Review changes");
-    expect(js).toContain("review-file");
-    expect(js).toContain("turn-review-toggle");
+    expect(js).toContain("diff-card");
+    expect(js).toContain("diff-card-file");
+    expect(js).toContain("diff-card-action");
     expect(js).toContain("ApprovalDock");
     expect(js).toContain("Submit");
     expect(js).not.toContain("__myAgentMarkdown");

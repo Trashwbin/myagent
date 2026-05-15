@@ -8,7 +8,7 @@ and tool timelines rather than marketing hero sections.
 
 ## Core Atmosphere
 
-- Default canvas: `#fffaf0`, a cream-tinted white.
+- Default canvas: `#faf8f3`, a cream-tinted white.
 - Primary text and CTAs: `#0a0a0a`.
 - Feature/card accents rotate through hot pink, deep teal, lavender, peach,
   ochre, and cream-card.
@@ -32,28 +32,39 @@ and tool timelines rather than marketing hero sections.
 
 ### Surface
 
-- Canvas: `#fffaf0`
-- Surface Soft: `#faf5e8`
-- Surface Card: `#f5f0e0`
-- Surface Strong: `#ebe6d6`
+- Canvas: `#faf8f3`
+- Surface Soft: `#f3efe4`
+- Surface Card: `#fdfcfa`
+- Surface Strong: `#e8e3d5`
 - Surface Dark: `#0a1a1a`
 - Surface Dark Elevated: `#1a2a2a`
-- Hairline: `#e5dcc8`
+- Hairline: `#ddd8c4`
 
 ### Text
 
 - Ink: `#0a0a0a`
-- Body Strong: `#1a1a1a`
-- Body: `#3a3a3a`
-- Muted: `#6a6a6a`
-- Muted Soft: `#9a9a9a`
+- Body Strong: `#1a1a18`
+- Body: `#3a3930`
+- Muted: `#706e5e`
+- Muted Soft: `#9a9785`
 - On Primary / On Dark: `#ffffff`
 
 ### Semantic
 
-- Success: `#22c55e`
-- Warning: `#f59e0b`
-- Error: `#ef4444`
+- Accent: `#1f6b57`
+- Success: `#1f8a55`
+- Warning: `#9a6a12`
+- Error: `#b5453f`
+
+## Motion
+
+- All transitions use `150ms–200ms ease` as default timing.
+- Turn entries animate with `slideUp` (opacity + translateY).
+- User messages use `slideInRight` for chat bubble feel.
+- Running states use `softPulse` animation on status badges and the topbar dot.
+- `prefers-reduced-motion: reduce` disables all animations and transitions.
+- Tool cards subtly lift on hover via enhanced `box-shadow`.
+- Composer inner ring glows with accent tint on focus (`:focus-within`).
 
 ## App Layout
 
@@ -81,22 +92,25 @@ itself should not rely on document scroll.
 - Cream nav-like band pinned to the top of the app shell.
 - Shows provider/model, cwd, full session id, and connection status.
 - Session id is monospace, selectable, and copyable.
+- Running dot pulses.
 
 ### Timeline
 
-- User messages: peach-tinted cards.
-- Assistant messages: cream cards.
+- User messages: cream cards with asymmetric radius (`16px 16px 4px 16px`).
+- Assistant messages: plain text, no card.
 - Tool entries: smaller product-fragment cards with colored status rails.
 - Approval cards: ochre/warning surface, prominent action buttons.
 - Error cards: coral/red-tinted surface.
 - Tool output must be collapsible when verbose.
+- Tool cards lift slightly on hover.
 
 ### Composer
 
 - Fixed bottom band.
-- Rounded 12px textarea on cream/card surface.
+- Rounded 16px textarea on cream/card surface.
 - Primary send button uses dark ink background.
 - Browser-native selection, IME, paste, and scrolling are preserved.
+- `focus-within` adds accent-tinted ring.
 
 ## Do
 
@@ -105,6 +119,8 @@ itself should not rely on document scroll.
 - Preserve dense operational readability.
 - Use product UI fragments/tool summaries inside cards.
 - Keep full session id visible and copyable.
+- Use smooth transitions (150–200ms) for all interactive state changes.
+- Animate entries (turns, approval dock, slash menu) with subtle slide-up.
 
 ## Don't
 
@@ -113,3 +129,4 @@ itself should not rely on document scroll.
 - Do not hide session history behind a non-scrollable sidebar.
 - Do not expose secrets or direct tool execution in the browser UI.
 - Do not introduce Electron/Tauri/Vite just for this embedded first pass.
+- Do not use jarring instant-show/hide — always transition.
