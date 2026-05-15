@@ -12,6 +12,8 @@ import {
   toolDisplayTitle,
   toolTarget,
 } from "../../../session/tool-display.js";
+import { isSensitiveReadPath } from "../../../permission/sensitive-paths.js";
+import { computeDiff } from "../../../tools/file-mutation.js";
 import type {
   AppState,
   MutationDiffFile,
@@ -236,6 +238,7 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
 
 export function buildTimelineFromMessages(messages: Message[]): TimelineTurn[] {
   let timeline: TimelineTurn[] = [];
+  const toolInputs = new Map<string, unknown>();
 
   for (let index = 0; index < messages.length; index++) {
     const message = messages[index];
@@ -245,17 +248,24 @@ export function buildTimelineFromMessages(messages: Message[]): TimelineTurn[] {
     }
 
     if (message.role === "assistant") {
+      for (const call of message.toolCalls ?? []) {
+        toolInputs.set(call.id, call.input);
+      }
       timeline = appendAssistantMessage(timeline, message);
       continue;
     }
 
     if (message.role === "tool_result") {
+      const display = replayDisplayFromToolInput(
+        message,
+        message.toolCallId ? toolInputs.get(message.toolCallId) : undefined,
+      );
       timeline = appendToolResult(
         timeline,
         message.toolCallId,
         message.toolName,
         message.content,
-        message.toolDisplay,
+        display,
       );
       continue;
     }
@@ -266,6 +276,64 @@ export function buildTimelineFromMessages(messages: Message[]): TimelineTurn[] {
   }
 
   return timeline;
+}
+
+function replayDisplayFromToolInput(
+  message: Message,
+  toolInput: unknown,
+): ToolDisplay | undefined {
+  if (message.role !== "tool_result") return message.toolDisplay;
+  if (message.toolDisplay?.files?.length) {
+    return message.toolDisplay;
+  }
+  const toolName = message.toolName ?? "tool";
+  const parsedDisplay = buildToolResultDisplay(
+    toolName,
+    toolInput ?? {},
+    message.content,
+  );
+  if (parsedDisplay.files?.length) {
+    return message.toolDisplay
+      ? {
+          ...message.toolDisplay,
+          kind: "mutation",
+          subtitle: parsedDisplay.subtitle,
+          summary: parsedDisplay.summary,
+          details: parsedDisplay.details ?? message.toolDisplay.details,
+          files: parsedDisplay.files,
+        }
+      : parsedDisplay;
+  }
+  if (toolName !== "write_file") return message.toolDisplay;
+  if (!toolInput || typeof toolInput !== "object") return message.toolDisplay;
+  const input = toolInput as Record<string, unknown>;
+  if (!input || typeof input.path !== "string" || typeof input.content !== "string") {
+    return message.toolDisplay;
+  }
+  if (isSensitiveReadPath(input.path)) {
+    return message.toolDisplay;
+  }
+  const content = stripCheckpointMarker(message.content);
+  if (content !== `Wrote ${input.path}`) {
+    return message.toolDisplay;
+  }
+  const diff = computeDiff("", input.content, input.path);
+  if (!diff.diff) return message.toolDisplay;
+  return {
+    ...(message.toolDisplay ?? buildToolResultDisplay("write_file", input, message.content)),
+    kind: "mutation",
+    title: message.toolDisplay?.title ?? toolDisplayTitle("write_file"),
+    subtitle: input.path,
+    summary: `+${diff.additions} -${diff.deletions}`,
+    files: [
+      {
+        path: input.path,
+        additions: diff.additions,
+        deletions: diff.deletions,
+        diff: diff.diff,
+      },
+    ],
+  };
 }
 
 function createTurn(id: string, text: string): TimelineTurn {

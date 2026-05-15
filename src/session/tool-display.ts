@@ -175,6 +175,20 @@ export function mergeDiffFiles(
   return Array.from(byPath.values());
 }
 
+export function withFallbackDiffFiles(
+  display: ToolDisplay,
+  files: ToolDisplayFile[] | undefined,
+): ToolDisplay {
+  if (!files || files.length === 0 || display.files?.length) return display;
+  return {
+    ...display,
+    kind: "mutation",
+    subtitle: files.length === 1 ? files[0]?.path : `${files.length} files`,
+    summary: summarizeDiffFiles(files),
+    files,
+  };
+}
+
 function summarizePatch(patch: string): string {
   const lines = String(patch || "").split("\n");
   const files: string[] = [];

@@ -889,7 +889,16 @@ describe("TurnEvent ordering", () => {
       kind: "mutation",
       title: "Write file",
       subtitle: "note.txt",
+      summary: "+1 -0",
+      files: [
+        {
+          path: "note.txt",
+          additions: 1,
+          deletions: 0,
+        },
+      ],
     });
+    expect(resultMessage?.toolDisplay?.files?.[0]?.diff).toContain("+hello");
 
     await rm(tmp, { recursive: true });
   });

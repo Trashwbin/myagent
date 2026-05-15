@@ -35,6 +35,84 @@ describe("web timeline reducer", () => {
     expect(turns[0]?.mutationDiffs[0]?.path).toBe("app.ts");
   });
 
+  it("replays write_file create diffs from stored tool input when old display has no files", () => {
+    const messages: Message[] = [
+      { role: "user", content: "create note" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "tc1",
+            name: "write_file",
+            input: { path: "note.txt", content: "hello\nworld\n" },
+            display: {
+              kind: "mutation",
+              title: "Write file",
+              subtitle: "note.txt",
+            },
+          },
+        ],
+      },
+      {
+        role: "tool_result",
+        toolCallId: "tc1",
+        toolName: "write_file",
+        content: "Wrote note.txt",
+        toolDisplay: {
+          kind: "mutation",
+          title: "Write file",
+          subtitle: "note.txt",
+          summary: "completed",
+          details: "Wrote note.txt",
+        },
+      },
+    ];
+
+    const turns = buildTimelineFromMessages(messages);
+
+    expect(turns[0]?.mutationDiffs).toHaveLength(1);
+    expect(turns[0]?.mutationDiffs[0]).toMatchObject({
+      path: "note.txt",
+      additions: 2,
+      deletions: 0,
+    });
+    expect(turns[0]?.mutationDiffs[0]?.diff).toContain("+hello");
+  });
+
+  it("does not replay write_file create diffs for sensitive paths", () => {
+    const messages: Message[] = [
+      { role: "user", content: "create env" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "tc1",
+            name: "write_file",
+            input: { path: ".env", content: "TOKEN=secret\n" },
+          },
+        ],
+      },
+      {
+        role: "tool_result",
+        toolCallId: "tc1",
+        toolName: "write_file",
+        content: "Wrote .env",
+        toolDisplay: {
+          kind: "mutation",
+          title: "Write file",
+          subtitle: ".env",
+          summary: "completed",
+        },
+      },
+    ];
+
+    const turns = buildTimelineFromMessages(messages);
+
+    expect(turns[0]?.mutationDiffs).toHaveLength(0);
+  });
+
   it("turn events collapse streaming text into the final assistant message", () => {
     const initial = buildTimelineFromMessages([{ role: "user", content: "hi" }]);
     const events: TurnEvent[] = [

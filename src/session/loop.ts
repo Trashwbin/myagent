@@ -29,7 +29,11 @@ import { isMutationTool, getCheckpointPaths } from "../tools/mutation-policy.js"
 import type { ApprovalDisplay } from "../permission/display.js";
 import { buildApprovalDisplay } from "../permission/display.js";
 import type { ToolDisplay } from "./tool-display.js";
-import { buildToolInputDisplay, buildToolResultDisplay } from "./tool-display.js";
+import {
+  buildToolInputDisplay,
+  buildToolResultDisplay,
+  withFallbackDiffFiles,
+} from "./tool-display.js";
 
 export type ApprovalRequest = {
   toolName: string;
@@ -154,6 +158,16 @@ function providerRawFromMetadata(metadata: ProviderMetadata | undefined): unknow
   if ("openaiCompatible" in metadata) return metadata.openaiCompatible;
   if ("anthropic" in metadata) return metadata.anthropic;
   return undefined;
+}
+
+function mutationDisplayFiles(
+  toolName: string,
+  input: unknown,
+  decision: ReturnType<typeof checkToolPermission>,
+): ToolDisplay["files"] {
+  if (!isMutationTool(toolName) || decision.metadata?.sensitive) return undefined;
+  const display = buildApprovalDisplay(toolName, input, decision);
+  return display.kind === "mutation" ? display.files : undefined;
 }
 
 async function runAgentLoop(
@@ -348,6 +362,7 @@ async function runAgentLoop(
         cwd,
       );
       const toolInput = decision.resolvedInput ?? tc.input;
+      const plannedDiffFiles = mutationDisplayFiles(tc.name, permissionInput, decision);
 
       let shouldExecute = false;
       let blockReason = "";
@@ -637,7 +652,12 @@ async function runAgentLoop(
         readState,
       });
       const content = result.ok ? result.output : `Error: ${result.output}`;
-      const toolDisplay = buildToolResultDisplay(tc.name, toolInput, content);
+      const toolDisplay = result.ok
+        ? withFallbackDiffFiles(
+            buildToolResultDisplay(tc.name, toolInput, content),
+            plannedDiffFiles,
+          )
+        : buildToolResultDisplay(tc.name, toolInput, content);
 
       const resultMsg: Message = {
         role: "tool_result",
