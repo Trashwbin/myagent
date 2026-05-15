@@ -1486,7 +1486,7 @@ details.tool-details pre {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-4);
-  padding: 10px 14px;
+  padding: 11px 14px;
   border-bottom: 1px solid var(--hairline);
 }
 
@@ -1495,68 +1495,50 @@ details.tool-details pre {
   align-items: center;
   gap: var(--sp-3);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.2;
 }
 
 .diff-card-count {
   color: var(--ink);
-  font-weight: 500;
+  font-weight: 650;
 }
 
 .diff-card-add {
   color: #0f6b31;
+  font-weight: 650;
 }
 
 .diff-card-del {
   color: #9d1f1f;
+  font-weight: 650;
 }
 
-.diff-card-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.diff-card-action {
+.diff-card-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
+  gap: 6px;
+  padding: 5px 11px;
   border-radius: 999px;
   border: 1px solid var(--hairline);
-  background: #ffffff;
+  background: #f8faf7;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.diff-card-toggle:hover {
+  background: #eef4ef;
+  border-color: #cbd8ca;
+}
+
+.diff-card-toggle-mark {
   color: var(--body);
   font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 150ms ease;
-}
-
-.diff-card-action:hover {
-  background: #f5f5f5;
-}
-
-.diff-card-action-arrow {
-  font-size: 11px;
-}
-
-.diff-card-expand {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  border: 1px solid var(--hairline);
-  background: #ffffff;
-  color: var(--muted);
-  cursor: pointer;
-  transition: background 150ms ease, color 150ms ease;
-}
-
-.diff-card-expand:hover {
-  background: #f5f5f5;
-  color: var(--body);
+  line-height: 1;
 }
 
 .diff-card-files {

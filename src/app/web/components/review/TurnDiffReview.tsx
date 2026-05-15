@@ -36,17 +36,10 @@ export function TurnDiffReview({
           <span className="diff-card-add">+{totals.additions}</span>
           <span className="diff-card-del">-{totals.deletions}</span>
         </div>
-        <div className="diff-card-actions">
-          <button className="diff-card-action" onClick={toggleAll}>
-            {allExpanded ? "Collapse" : "Review"}
-            <span className="diff-card-action-arrow">&#8594;</span>
-          </button>
-          <button className="diff-card-expand" onClick={toggleAll} title={allExpanded ? "Collapse all" : "Expand all"}>
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <path d="M1 5L6 1L11 5M1 7L6 11L11 7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        </div>
+        <button className="diff-card-toggle" onClick={toggleAll}>
+          {allExpanded ? "Collapse all" : "Expand all"}
+          <span className="diff-card-toggle-mark">{allExpanded ? "↑" : "↓"}</span>
+        </button>
       </div>
       <div className="diff-card-files">
         {files.map((file) => (

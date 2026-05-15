@@ -294,7 +294,7 @@ describe("HTTP API", () => {
     expect(js).toContain("approval-inline-diff");
     expect(js).toContain("diff-card");
     expect(js).toContain("diff-card-file");
-    expect(js).toContain("diff-card-action");
+    expect(js).toContain("diff-card-toggle");
     expect(js).toContain("ApprovalDock");
     expect(js).toContain("Submit");
     expect(js).not.toContain("__myAgentMarkdown");
