@@ -347,16 +347,24 @@ export function applyTurnEvent(
     case "assistant_message":
       return updateLastTurn(ensureTimelineTurn(timeline), (turn) => {
         let parts = [...turn.assistantParts];
-        const streamIndex = parts.findIndex(
-          (part) => part.kind === "text" && part.streaming,
-        );
+        const streamIndexes = parts
+          .map((part, index) =>
+            part.kind === "text" &&
+            (part.streaming || part.id.startsWith(`${turn.id}:stream`))
+              ? index
+              : -1,
+          )
+          .filter((index) => index >= 0);
         if (event.message.content.trim()) {
-          if (streamIndex >= 0) {
-            parts[streamIndex] = {
-              id: parts[streamIndex]!.id,
+          if (streamIndexes.length > 0) {
+            const firstIndex = streamIndexes[0]!;
+            const streamIndexSet = new Set(streamIndexes);
+            parts = parts.filter((_, index) => !streamIndexSet.has(index));
+            parts.splice(firstIndex, 0, {
+              id: `${turn.id}:assistant:${firstIndex}`,
               kind: "text",
               text: event.message.content,
-            };
+            });
           } else {
             parts.push({
               id: `${turn.id}:assistant:${parts.length}`,
@@ -364,8 +372,9 @@ export function applyTurnEvent(
               text: event.message.content,
             });
           }
-        } else if (streamIndex >= 0) {
-          parts.splice(streamIndex, 1);
+        } else if (streamIndexes.length > 0) {
+          const streamIndexSet = new Set(streamIndexes);
+          parts = parts.filter((_, index) => !streamIndexSet.has(index));
         }
 
         for (const call of event.message.toolCalls ?? []) {

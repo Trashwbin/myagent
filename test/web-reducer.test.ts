@@ -38,8 +38,10 @@ describe("web timeline reducer", () => {
   it("turn events collapse streaming text into the final assistant message", () => {
     const initial = buildTimelineFromMessages([{ role: "user", content: "hi" }]);
     const events: TurnEvent[] = [
+      { type: "assistant_text_started" },
       { type: "assistant_text_delta", text: "Hello" },
       { type: "assistant_text_delta", text: " there" },
+      { type: "assistant_text_finished" },
       {
         type: "assistant_message",
         message: { role: "assistant", content: "Hello there" },
