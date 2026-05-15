@@ -49,36 +49,47 @@ function ShellCommandBatch({
 }) {
   const summary = `Ran ${tools.length} ${tools.length === 1 ? "command" : "commands"}`;
   return (
-    <details className={`shell-command-batch${active ? " live" : ""}`} open={active || !collapsed}>
+    <details
+      className={`shell-command-batch${active ? " live" : ""}`}
+      open={active || !collapsed}
+    >
       <summary className="shell-command-batch-summary">
-        <span className="shell-command-icon" aria-hidden="true">▹</span>
+        <span className="shell-command-icon" aria-hidden="true">
+          ▹
+        </span>
         <span>{summary}</span>
-        <span className="shell-command-caret" aria-hidden="true">⌄</span>
+        <span className="shell-command-caret" aria-hidden="true">
+          ⌄
+        </span>
       </summary>
-      <div className="shell-command-list">
-        {tools.map((tool, index) => {
-          const command = commandText(tool);
-          return (
-            <details key={tool.id} className="shell-command-item" open={index === 0}>
-              <summary className="shell-command-row">
-                <span>Ran {command}</span>
-                <span className="shell-command-caret" aria-hidden="true">⌄</span>
-              </summary>
-              <div className="shell-terminal">
-                <div className="shell-terminal-label">Shell</div>
-                <pre className="shell-terminal-body">
-                  <span className="shell-prompt">$</span>
-                  {` ${command}\n\n${commandOutput(tool)}`}
-                </pre>
-                <div className={`shell-terminal-status ${tool.status}`}>
-                  {tool.status === "ok" ? "✓ " : ""}
-                  {commandStatus(tool)}
+      {active || !collapsed ? (
+        <div className="shell-command-list">
+          {tools.map((tool, index) => {
+            const command = commandText(tool);
+            return (
+              <details key={tool.id} className="shell-command-item" open={index === 0}>
+                <summary className="shell-command-row">
+                  <span>Ran {command}</span>
+                  <span className="shell-command-caret" aria-hidden="true">
+                    ⌄
+                  </span>
+                </summary>
+                <div className="shell-terminal">
+                  <div className="shell-terminal-label">Shell</div>
+                  <pre className="shell-terminal-body">
+                    <span className="shell-prompt">$</span>
+                    {` ${command}\n\n${commandOutput(tool)}`}
+                  </pre>
+                  <div className={`shell-terminal-status ${tool.status}`}>
+                    {tool.status === "ok" ? "✓ " : ""}
+                    {commandStatus(tool)}
+                  </div>
                 </div>
-              </div>
-            </details>
-          );
-        })}
-      </div>
+              </details>
+            );
+          })}
+        </div>
+      ) : null}
     </details>
   );
 }

@@ -46,8 +46,12 @@ describe("web timeline reducer", () => {
       },
     ];
 
-    const result = events.reduce((timeline, event) => applyTurnEvent(timeline, event), initial);
-    const textParts = result[0]?.assistantParts.filter((part) => part.kind === "text") ?? [];
+    const result = events.reduce(
+      (timeline, event) => applyTurnEvent(timeline, event),
+      initial,
+    );
+    const textParts =
+      result[0]?.assistantParts.filter((part) => part.kind === "text") ?? [];
 
     expect(textParts).toHaveLength(1);
     expect(textParts[0]).toMatchObject({ text: "Hello there" });
@@ -67,7 +71,10 @@ describe("web timeline reducer", () => {
       { type: "provider_step_finished" },
     ];
 
-    const result = events.reduce((timeline, event) => applyTurnEvent(timeline, event), initial);
+    const result = events.reduce(
+      (timeline, event) => applyTurnEvent(timeline, event),
+      initial,
+    );
     const parts = result[0]?.assistantParts ?? [];
 
     expect(parts.filter((part) => part.kind === "status")).toHaveLength(0);
@@ -75,12 +82,19 @@ describe("web timeline reducer", () => {
   });
 
   it("keeps context tools as context-kind parts and mutation tools as mutation-kind parts", () => {
-    const initial = buildTimelineFromMessages([{ role: "user", content: "inspect and edit" }]);
+    const initial = buildTimelineFromMessages([
+      { role: "user", content: "inspect and edit" },
+    ]);
     const events: TurnEvent[] = [
       { type: "tool_started", id: "read1", name: "Read", input: { path: "a.ts" } },
       {
         type: "tool_result",
-        message: { role: "tool_result", toolCallId: "read1", toolName: "Read", content: "1: const a = 1;" },
+        message: {
+          role: "tool_result",
+          toolCallId: "read1",
+          toolName: "Read",
+          content: "1: const a = 1;",
+        },
       },
       { type: "tool_started", id: "edit1", name: "edit_file", input: { path: "a.ts" } },
       {
@@ -95,12 +109,91 @@ describe("web timeline reducer", () => {
       },
     ];
 
-    const result = events.reduce((timeline, event) => applyTurnEvent(timeline, event), initial);
+    const result = events.reduce(
+      (timeline, event) => applyTurnEvent(timeline, event),
+      initial,
+    );
     const tools = result[0]?.assistantParts.filter((part) => part.kind === "tool") ?? [];
 
     expect(tools[0]).toMatchObject({ displayKind: "context" });
     expect(tools[1]).toMatchObject({ displayKind: "mutation" });
     expect(result[0]?.mutationDiffs).toHaveLength(1);
+  });
+
+  it("does not duplicate approval dock messages as separate tool parts", () => {
+    const loaded = appReducer(initialAppState, {
+      type: "timeline_loaded",
+      sessionId: "s1",
+      messages: [{ role: "user", content: "run command" }],
+    });
+    const state = appReducer(loaded, {
+      type: "server_message",
+      message: {
+        type: "turn_event",
+        sessionId: "s1",
+        event: {
+          type: "tool_approval_required",
+          id: "tc1",
+          name: "bash",
+          input: { command: "python3 -m http.server 8000" },
+          reason: "This shell command needs approval.",
+        },
+      },
+    });
+
+    const withDock = appReducer(state, {
+      type: "server_message",
+      message: {
+        type: "approval_required",
+        sessionId: "s1",
+        approvalId: "approval-1",
+        request: {
+          toolName: "bash",
+          input: { command: "python3 -m http.server 8000" },
+          reason: "This shell command needs approval.",
+        },
+      },
+    });
+    const afterStarted = appReducer(withDock, {
+      type: "server_message",
+      message: {
+        type: "turn_event",
+        sessionId: "s1",
+        event: {
+          type: "tool_started",
+          id: "tc1",
+          name: "bash",
+          input: { command: "python3 -m http.server 8000" },
+        },
+      },
+    });
+    const done = appReducer(afterStarted, {
+      type: "server_message",
+      message: {
+        type: "turn_event",
+        sessionId: "s1",
+        event: {
+          type: "tool_result",
+          message: {
+            role: "tool_result",
+            toolCallId: "tc1",
+            toolName: "bash",
+            content: "Command completed with no output: python3 -m http.server 8000",
+          },
+        },
+      },
+    });
+
+    const tools =
+      done.timelines.s1?.[0]?.assistantParts.filter((part) => part.kind === "tool") ?? [];
+    expect(withDock.pendingApproval?.approvalId).toBe("approval-1");
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({
+      id: "tc1",
+      displayKind: "shell",
+      status: "ok",
+      subtitle: "python3 -m http.server 8000",
+    });
   });
 
   it("appends a status part when a session is rewound", () => {

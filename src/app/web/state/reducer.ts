@@ -124,21 +124,6 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
           approvalId: message.approvalId,
           request: message.request,
         },
-        timelines: {
-          ...state.timelines,
-          [message.sessionId]: applyTurnEvent(
-            state.timelines[message.sessionId] ?? [],
-            {
-              type: "tool_approval_required",
-              id: message.approvalId,
-              name: message.request.toolName,
-              input: message.request.input,
-              reason: message.request.reason,
-              metadata: message.request.metadata,
-              display: message.request.display,
-            },
-          ),
-        },
       };
     case "turn_event":
       return {
@@ -155,8 +140,12 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
       return {
         ...state,
         pendingApproval:
-          state.pendingApproval?.sessionId === message.sessionId ? null : state.pendingApproval,
-        runningSessionIds: state.runningSessionIds.filter((id) => id !== message.sessionId),
+          state.pendingApproval?.sessionId === message.sessionId
+            ? null
+            : state.pendingApproval,
+        runningSessionIds: state.runningSessionIds.filter(
+          (id) => id !== message.sessionId,
+        ),
         timelines: {
           ...state.timelines,
           [message.sessionId]: finalizeStreamingText(
@@ -167,7 +156,9 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
     case "session_rewound":
       return {
         ...state,
-        runningSessionIds: state.runningSessionIds.filter((id) => id !== message.sessionId),
+        runningSessionIds: state.runningSessionIds.filter(
+          (id) => id !== message.sessionId,
+        ),
         timelines: {
           ...state.timelines,
           [message.sessionId]: appendStatus(
@@ -180,7 +171,9 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
     case "session_compacted":
       return {
         ...state,
-        runningSessionIds: state.runningSessionIds.filter((id) => id !== message.sessionId),
+        runningSessionIds: state.runningSessionIds.filter(
+          (id) => id !== message.sessionId,
+        ),
         timelines: {
           ...state.timelines,
           [message.sessionId]: appendStatus(
@@ -203,7 +196,9 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
               }
             : session,
         ),
-        runningSessionIds: state.runningSessionIds.filter((id) => id !== message.sessionId),
+        runningSessionIds: state.runningSessionIds.filter(
+          (id) => id !== message.sessionId,
+        ),
         timelines: {
           ...state.timelines,
           [message.sessionId]: appendStatus(
@@ -217,7 +212,9 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
       return {
         ...state,
         pendingApproval:
-          state.pendingApproval?.sessionId === message.sessionId ? null : state.pendingApproval,
+          state.pendingApproval?.sessionId === message.sessionId
+            ? null
+            : state.pendingApproval,
         runningSessionIds: message.sessionId
           ? state.runningSessionIds.filter((id) => id !== message.sessionId)
           : state.runningSessionIds,
@@ -284,7 +281,10 @@ function createTurn(id: string, text: string): TimelineTurn {
   };
 }
 
-function appendAssistantMessage(timeline: TimelineTurn[], message: Message): TimelineTurn[] {
+function appendAssistantMessage(
+  timeline: TimelineTurn[],
+  message: Message,
+): TimelineTurn[] {
   return updateLastTurn(timeline, (turn) => {
     const nextParts = [...turn.assistantParts];
     if (message.content.trim()) {
@@ -396,15 +396,19 @@ export function applyTurnEvent(
     case "tool_approval_required":
       return updateLastTurn(ensureTimelineTurn(timeline), (turn) => ({
         ...turn,
-        assistantParts: upsertToolPart(
-          [...turn.assistantParts],
-          {
-            ...createToolPart(event.id, event.name, event.input, "approval", buildToolInputDisplay(event.name, event.input)),
-            summary: event.display?.kind === "mutation"
+        assistantParts: upsertToolPart([...turn.assistantParts], {
+          ...createToolPart(
+            event.id,
+            event.name,
+            event.input,
+            "approval",
+            buildToolInputDisplay(event.name, event.input),
+          ),
+          summary:
+            event.display?.kind === "mutation"
               ? "approval required"
               : event.display?.prompt || event.reason,
-          },
-        ),
+        }),
       }));
     case "tool_approval_decision":
       return updateLastTurn(ensureTimelineTurn(timeline), (turn) => ({
@@ -452,22 +456,19 @@ function appendToolResult(
   const summary = normalizedDisplay.summary ?? summarizeToolResult(name, content);
 
   return updateLastTurn(ensureTimelineTurn(timeline), (turn) => {
-    const parts = upsertToolPart(
-      [...turn.assistantParts],
-      {
-        id: toolCallId || `${turn.id}:${name}:${turn.assistantParts.length}`,
-        kind: "tool",
-        toolName: name,
-        displayKind: normalizedDisplay.kind,
-        status,
-        title: normalizedDisplay.title || toolDisplayTitle(name),
-        subtitle: normalizedDisplay.subtitle,
-        summary,
-        details,
-        diffFiles,
-        display: normalizedDisplay,
-      },
-    );
+    const parts = upsertToolPart([...turn.assistantParts], {
+      id: toolCallId || `${turn.id}:${name}:${turn.assistantParts.length}`,
+      kind: "tool",
+      toolName: name,
+      displayKind: normalizedDisplay.kind,
+      status,
+      title: normalizedDisplay.title || toolDisplayTitle(name),
+      subtitle: normalizedDisplay.subtitle,
+      summary,
+      details,
+      diffFiles,
+      display: normalizedDisplay,
+    });
     const mutationDiffs = mergeDiffFiles(turn.mutationDiffs, diffFiles);
     return { ...turn, assistantParts: parts, mutationDiffs };
   });
@@ -526,9 +527,7 @@ function appendOrReplaceStatus(
   return updateLastTurn(ensureTimelineTurn(timeline), (turn) => {
     const statusId = `${turn.id}:status:${id}`;
     const parts = turn.assistantParts.map((part) =>
-      part.kind === "status" && part.id === statusId
-        ? { ...part, level, text }
-        : part,
+      part.kind === "status" && part.id === statusId ? { ...part, level, text } : part,
     );
     const exists = parts.some((part) => part.kind === "status" && part.id === statusId);
     return {
@@ -557,11 +556,12 @@ function removeStatus(timeline: TimelineTurn[], id: string): TimelineTurn[] {
   }));
 }
 
-function upsertToolPart(parts: TimelinePart[], incoming: TimelineToolPart): TimelinePart[] {
+function upsertToolPart(
+  parts: TimelinePart[],
+  incoming: TimelineToolPart,
+): TimelinePart[] {
   const next = [...parts];
-  const index = next.findIndex(
-    (part) => part.kind === "tool" && part.id === incoming.id,
-  );
+  const index = next.findIndex((part) => part.kind === "tool" && part.id === incoming.id);
   if (index >= 0) {
     const existing = next[index] as TimelineToolPart;
     next[index] = {
@@ -585,9 +585,7 @@ function upsertToolPartDecision(
   status: TimelineToolStatus,
 ): TimelinePart[] {
   const next = [...parts];
-  const index = next.findIndex(
-    (part) => part.kind === "tool" && part.id === id,
-  );
+  const index = next.findIndex((part) => part.kind === "tool" && part.id === id);
   if (index >= 0) {
     next[index] = { ...(next[index] as TimelineToolPart), status };
     return next;
@@ -612,7 +610,8 @@ function createToolPart(
     status,
     title: nextDisplay.title || toolDisplayTitle(toolName),
     subtitle: nextDisplay.subtitle,
-    summary: status === "running" ? "running" : status === "approval" ? "approval required" : "",
+    summary:
+      status === "running" ? "running" : status === "approval" ? "approval required" : "",
     details: nextDisplay.details,
     diffFiles: nextDisplay.files,
     display: nextDisplay,
