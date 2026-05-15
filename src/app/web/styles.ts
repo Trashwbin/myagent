@@ -6,6 +6,7 @@ export const APP_STYLES = String.raw`
   --panel-width: 760px;
   --dock-width: 680px;
   --right-width: 300px;
+  --timeline-bottom-safe: 188px;
   --sp-1: 4px;
   --sp-2: 6px;
   --sp-3: 8px;
@@ -651,7 +652,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 .timeline {
   min-height: 0;
   overflow-y: auto;
-  padding: 28px 32px 120px;
+  padding: 28px 32px var(--timeline-bottom-safe);
   background: linear-gradient(180deg, #fdfcfa 0%, #faf8f3 100%);
 }
 
@@ -2301,7 +2302,7 @@ textarea::placeholder {
   }
 
   .timeline {
-    padding: 16px;
+    padding: 16px 16px calc(var(--timeline-bottom-safe) + 32px);
   }
 
   .topbar {
