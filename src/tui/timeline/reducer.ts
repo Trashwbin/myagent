@@ -1,9 +1,5 @@
 import type { TurnEvent } from "../../session/loop.js";
-import type {
-  TimelineItem,
-  AssistantPart,
-  ToolTimelineItem,
-} from "./types.js";
+import type { TimelineItem, AssistantPart, ToolTimelineItem } from "./types.js";
 import {
   makeToolItem,
   classifyResultStatus,
@@ -14,10 +10,7 @@ import {
 } from "./tool-summary.js";
 import { formatToolInputSummary } from "../../cli/format-tool-input.js";
 
-export function appendUserItem(
-  timeline: TimelineItem[],
-  text: string,
-): TimelineItem[] {
+export function appendUserItem(timeline: TimelineItem[], text: string): TimelineItem[] {
   return [...timeline, { type: "user", text }];
 }
 
@@ -65,13 +58,8 @@ function updateAssistant(
   ];
 }
 
-function findToolPartIndex(
-  parts: AssistantPart[],
-  callId: string,
-): number {
-  return parts.findIndex(
-    (p) => p.type === "tool" && p.tool.callId === callId,
-  );
+function findToolPartIndex(parts: AssistantPart[], callId: string): number {
+  return parts.findIndex((p) => p.type === "tool" && p.tool.callId === callId);
 }
 
 function updateToolPart(
@@ -99,10 +87,7 @@ function ensureQueuedTool(
 ): AssistantPart[] {
   const idx = findToolPartIndex(parts, callId);
   if (idx !== -1) return parts;
-  return [
-    ...parts,
-    { type: "tool", tool: makeToolItem(callId, name, input, options) },
-  ];
+  return [...parts, { type: "tool", tool: makeToolItem(callId, name, input, options) }];
 }
 
 export function reduceTimelineEvent(
@@ -113,9 +98,11 @@ export function reduceTimelineEvent(
   switch (event.type) {
     case "assistant_text_delta": {
       return updateAssistant(timeline, (parts) => {
-        const textParts = parts.filter(
-          (p) => p.type === "text",
-        ) as Array<{ type: "text"; text: string; streaming?: boolean }>;
+        const textParts = parts.filter((p) => p.type === "text") as Array<{
+          type: "text";
+          text: string;
+          streaming?: boolean;
+        }>;
         const lastText = textParts[textParts.length - 1];
         if (lastText && lastText.streaming) {
           return parts.map((p) =>
@@ -124,17 +111,13 @@ export function reduceTimelineEvent(
               : p,
           );
         }
-        return [
-          ...parts,
-          { type: "text", text: event.text, streaming: true },
-        ];
+        return [...parts, { type: "text", text: event.text, streaming: true }];
       });
     }
 
     case "assistant_message": {
       const msg = event.message;
-      const text =
-        typeof msg.content === "string" ? msg.content : "";
+      const text = typeof msg.content === "string" ? msg.content : "";
 
       let result = updateAssistant(timeline, (parts) => {
         const updated = parts.map((p) =>
@@ -143,9 +126,7 @@ export function reduceTimelineEvent(
             : p,
         );
 
-        const hasFinalText = updated.some(
-          (p) => p.type === "text" && !p.streaming,
-        );
+        const hasFinalText = updated.some((p) => p.type === "text" && !p.streaming);
         if (!hasFinalText && text) {
           updated.push({ type: "text", text, streaming: false });
         }
@@ -210,8 +191,7 @@ export function reduceTimelineEvent(
     }
 
     case "tool_started": {
-      const sensitive =
-        options?.sensitiveSet?.has(event.id) ?? false;
+      const sensitive = options?.sensitiveSet?.has(event.id) ?? false;
       return updateAssistant(timeline, (parts) => {
         parts = ensureQueuedTool(parts, event.id, event.name, event.input, {
           sensitive,
@@ -247,12 +227,7 @@ export function reduceTimelineEvent(
 
       return updateAssistant(timeline, (parts) =>
         updateToolPart(parts, callId, (tool) => {
-          const resultSummary = summarizeToolResult(
-            tool.name,
-            msg.content,
-            status,
-            tool,
-          );
+          const resultSummary = summarizeToolResult(tool.name, msg.content, status, tool);
           return {
             ...tool,
             status,
@@ -271,6 +246,16 @@ export function reduceTimelineEvent(
           type: "status",
           level: "warn",
           text: "Turn truncated — model hit output token limit.",
+        },
+      ];
+
+    case "turn_max_turns":
+      return [
+        ...timeline,
+        {
+          type: "status",
+          level: "warn",
+          text: `Turn stopped after ${event.maxTurns} tool steps without a final assistant message.`,
         },
       ];
 

@@ -252,6 +252,20 @@ describe("web timeline reducer", () => {
     expect(next.runningSessionIds).not.toContain("s1");
   });
 
+  it("appends a status part when a turn exhausts tool steps without final text", () => {
+    const initial = buildTimelineFromMessages([
+      { role: "user", content: "keep working" },
+    ]);
+
+    const result = applyTurnEvent(initial, { type: "turn_max_turns", maxTurns: 3 });
+
+    expect(result[0]?.assistantParts.at(-1)).toMatchObject({
+      kind: "status",
+      level: "warning",
+      text: "Turn stopped after 3 tool steps without a final assistant message.",
+    });
+  });
+
   it("updates session metadata when the model changes", () => {
     const state = {
       ...initialAppState,

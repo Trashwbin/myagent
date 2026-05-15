@@ -434,6 +434,12 @@ export function applyTurnEvent(
         "warning",
         "Turn stopped because the model hit its output token limit.",
       );
+    case "turn_max_turns":
+      return appendStatus(
+        ensureTimelineTurn(timeline),
+        "warning",
+        `Turn stopped after ${event.maxTurns} tool steps without a final assistant message.`,
+      );
     case "turn_finished":
       return finalizeStreamingText(timeline);
     default:

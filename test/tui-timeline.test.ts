@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  appendUserItem,
-  reduceTimelineEvent,
-} from "../src/tui/timeline/reducer.js";
+import { appendUserItem, reduceTimelineEvent } from "../src/tui/timeline/reducer.js";
 import type { TimelineItem, ToolTimelineItem } from "../src/tui/timeline/types.js";
 import {
   classifyResultStatus,
@@ -443,7 +440,10 @@ describe("reduceTimelineEvent", () => {
         toolCalls: [{ id: "tc1", name: "bash", input: { command: "ls" } }],
       },
     });
-    const longContent = Array.from({ length: 20 }, (_, i) => `line ${i + 1}: this is a longer line to exceed 200 chars total`).join("\n");
+    const longContent = Array.from(
+      { length: 20 },
+      (_, i) => `line ${i + 1}: this is a longer line to exceed 200 chars total`,
+    ).join("\n");
     tl = reduceTimelineEvent(tl, {
       type: "tool_result",
       message: {
@@ -468,6 +468,18 @@ describe("reduceTimelineEvent", () => {
       type: "status",
       level: "warn",
       text: "Turn truncated — model hit output token limit.",
+    });
+  });
+
+  it("turn_max_turns appends warning status", () => {
+    let tl: TimelineItem[] = [];
+    tl = reduceTimelineEvent(tl, { type: "turn_max_turns", maxTurns: 3 });
+
+    expect(tl).toHaveLength(1);
+    expect(tl[0]).toEqual({
+      type: "status",
+      level: "warn",
+      text: "Turn stopped after 3 tool steps without a final assistant message.",
     });
   });
 
@@ -579,7 +591,12 @@ describe("reduceTimelineEvent", () => {
     });
     tl = reduceTimelineEvent(tl, {
       type: "tool_result",
-      message: { role: "tool_result", toolCallId: "tc1", toolName: "read_file", content: "file A" },
+      message: {
+        role: "tool_result",
+        toolCallId: "tc1",
+        toolName: "read_file",
+        content: "file A",
+      },
     });
     tl = reduceTimelineEvent(tl, { type: "turn_finished" });
 
@@ -600,7 +617,12 @@ describe("reduceTimelineEvent", () => {
     });
     tl = reduceTimelineEvent(tl, {
       type: "tool_result",
-      message: { role: "tool_result", toolCallId: "tc2", toolName: "read_file", content: "file B" },
+      message: {
+        role: "tool_result",
+        toolCallId: "tc2",
+        toolName: "read_file",
+        content: "file B",
+      },
     });
     tl = reduceTimelineEvent(tl, { type: "turn_finished" });
 
@@ -636,7 +658,12 @@ describe("reduceTimelineEvent", () => {
     });
     tl = reduceTimelineEvent(tl, {
       type: "tool_result",
-      message: { role: "tool_result", toolCallId: "tc1", toolName: "read_file", content: "ok" },
+      message: {
+        role: "tool_result",
+        toolCallId: "tc1",
+        toolName: "read_file",
+        content: "ok",
+      },
     });
     tl = reduceTimelineEvent(tl, { type: "turn_finished" });
 
@@ -687,11 +714,15 @@ describe("reduceTimelineEvent", () => {
 
 describe("classifyResultStatus", () => {
   it("detects invalid from patch validation", () => {
-    expect(classifyResultStatus("Patch validation failed before execution: bad hunk")).toBe("invalid");
+    expect(
+      classifyResultStatus("Patch validation failed before execution: bad hunk"),
+    ).toBe("invalid");
   });
 
   it("detects denied", () => {
-    expect(classifyResultStatus("Tool call denied and was not executed: user said no")).toBe("denied");
+    expect(
+      classifyResultStatus("Tool call denied and was not executed: user said no"),
+    ).toBe("denied");
   });
 
   it("detects failed from Error prefix", () => {
@@ -770,7 +801,12 @@ describe("makeToolItem", () => {
   });
 
   it("creates sensitive tool item", () => {
-    const item = makeToolItem("tc1", "write_file", { path: ".env", content: "secret" }, { sensitive: true });
+    const item = makeToolItem(
+      "tc1",
+      "write_file",
+      { path: ".env", content: "secret" },
+      { sensitive: true },
+    );
     expect(item.sensitive).toBe(true);
     expect(item.summary).toContain("[...]");
     expect(item.summary).not.toContain("secret");
@@ -813,14 +849,23 @@ describe("summarizeToolResult", () => {
   });
 
   it("summarizes failed with first line", () => {
-    const result = summarizeToolResult("read_file", "Error: permission denied", "failed", baseTool);
+    const result = summarizeToolResult(
+      "read_file",
+      "Error: permission denied",
+      "failed",
+      baseTool,
+    );
     expect(result).toContain("failed");
     expect(result).toContain("permission denied");
   });
 
   it("summarizes bash with line count for long output", () => {
     const content = Array.from({ length: 5 }, (_, i) => `line ${i}`).join("\n");
-    const result = summarizeToolResult("bash", content, "ok", { ...baseTool, name: "bash", displayName: "bash" });
+    const result = summarizeToolResult("bash", content, "ok", {
+      ...baseTool,
+      name: "bash",
+      displayName: "bash",
+    });
     expect(result).toContain("5 lines");
   });
 });
@@ -830,7 +875,8 @@ describe("summarizeToolApproval", () => {
     const result = summarizeToolApproval(
       "apply_patch",
       {
-        patch: "*** Begin Patch\n--- a/file.ts\n+++ b/file.ts\n@@\n-old line\n+new line\n+another line\n",
+        patch:
+          "*** Begin Patch\n--- a/file.ts\n+++ b/file.ts\n@@\n-old line\n+new line\n+another line\n",
         path: "file.ts",
       },
       "requires approval",

@@ -38,11 +38,7 @@ import { discoverSkills, summarizeSkills } from "./skill/discovery.js";
 import type { SkillInfo, SkillSummary } from "./skill/types.js";
 import { compactSession } from "./session/compact.js";
 import type { CompactResult } from "./session/compact.js";
-import {
-  formatRewindMessage,
-  revertLast,
-  rewindSession,
-} from "./session/revert.js";
+import { formatRewindMessage, revertLast, rewindSession } from "./session/revert.js";
 import {
   formatModelList,
   formatModelSwitch,
@@ -192,6 +188,11 @@ function makeEventRenderer(): (event: TurnEvent) => void {
       case "turn_truncated":
         console.log(
           "\n[truncated] Turn stopped because the model hit its output token limit.",
+        );
+        break;
+      case "turn_max_turns":
+        console.log(
+          `\n[max-turns] Turn stopped after ${event.maxTurns} tool steps without a final assistant message.`,
         );
         break;
     }
@@ -390,7 +391,8 @@ async function chatMode(
           store,
           input,
         )
-      ) continue;
+      )
+        continue;
 
       try {
         const {
@@ -443,10 +445,7 @@ function handleSessions(): void {
   }
 }
 
-async function handleRewind(
-  sessionId: string,
-  checkpointId: string,
-): Promise<void> {
+async function handleRewind(sessionId: string, checkpointId: string): Promise<void> {
   const store = openStore();
   try {
     const session = store.getSession(sessionId);
@@ -714,9 +713,7 @@ inputDebugCmd.action(async () => {
 });
 
 // Subcommand: app
-const appCmd = program
-  .command("app")
-  .description("Launch local web app server");
+const appCmd = program.command("app").description("Launch local web app server");
 
 appCmd.action(async () => {
   await handleApp(program.opts<{ cwd: string }>());

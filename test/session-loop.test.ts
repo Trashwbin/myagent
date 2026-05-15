@@ -147,7 +147,10 @@ describe("Session loop (runSession wrapper)", () => {
         { type: "tool-call", id: "tc1", name: "skill", input: { name: "reviewer" } },
         { type: "finish", reason: "tool-calls" },
       ],
-      [{ type: "text", delta: "Loaded." }, { type: "finish", reason: "stop" }],
+      [
+        { type: "text", delta: "Loaded." },
+        { type: "finish", reason: "stop" },
+      ],
     ]);
 
     const { transcript } = await runSession(
@@ -671,10 +674,16 @@ describe("TurnEvent ordering", () => {
     ]);
 
     const { events, onEvent } = captureEvents();
-    const result = await runTurn(provider, new ToolRegistry(), makeSession(process.cwd()), "hi", {
-      approval: "auto",
-      onEvent,
-    });
+    const result = await runTurn(
+      provider,
+      new ToolRegistry(),
+      makeSession(process.cwd()),
+      "hi",
+      {
+        approval: "auto",
+        onEvent,
+      },
+    );
 
     expect(events.map((event) => event.type)).toEqual([
       "provider_stream_started",
@@ -901,7 +910,10 @@ describe("TurnEvent ordering", () => {
         },
         { type: "finish", reason: "tool-calls" },
       ],
-      [{ type: "text", delta: "done" }, { type: "finish", reason: "stop" }],
+      [
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
+      ],
     ]);
 
     const registry = new ToolRegistry();
@@ -1900,7 +1912,9 @@ describe("Approval memory and abort", () => {
       store,
     });
     expect(handlerCalled).toBe(false);
-    expect(r2.newMessages.find((m) => m.role === "tool_result")?.content).toBe("1: other");
+    expect(r2.newMessages.find((m) => m.role === "tool_result")?.content).toBe(
+      "1: other",
+    );
 
     await rm(ws, { recursive: true, force: true });
     await rm(ext, { recursive: true, force: true });
@@ -2287,7 +2301,9 @@ describe("Approval memory and abort", () => {
       },
     );
 
-    expect(newMessages.find((m) => m.role === "tool_result")?.content).toBe("1: SECRET=abc");
+    expect(newMessages.find((m) => m.role === "tool_result")?.content).toBe(
+      "1: SECRET=abc",
+    );
     expect(sessionRules).toHaveLength(0);
 
     await rm(tmp, { recursive: true, force: true });
@@ -2403,7 +2419,9 @@ describe("Approval memory and abort", () => {
       },
     );
 
-    expect(newMessages.find((m) => m.role === "tool_result")?.content).toBe("1: SECRET=abc");
+    expect(newMessages.find((m) => m.role === "tool_result")?.content).toBe(
+      "1: SECRET=abc",
+    );
     expect(store.listPermissionRules(tmp)).toHaveLength(0);
 
     await rm(tmp, { recursive: true, force: true });
@@ -3429,7 +3447,9 @@ describe("Truncation handling", () => {
     const events: TurnEvent[] = [];
     await runTurn(provider, new ToolRegistry(), makeSession(process.cwd()), "hi", {
       approval: "auto",
-      onEvent: (e) => { events.push(e); },
+      onEvent: (e) => {
+        events.push(e);
+      },
     });
 
     const types = events.map((e) => e.type);
@@ -3452,7 +3472,12 @@ describe("Truncation handling", () => {
       new ToolRegistry(),
       makeSession(process.cwd()),
       "hi",
-      { approval: "auto", onEvent: (e) => { events.push(e); } },
+      {
+        approval: "auto",
+        onEvent: (e) => {
+          events.push(e);
+        },
+      },
     );
 
     expect(stopReason).toBe("end_turn");
@@ -3481,12 +3506,57 @@ describe("Truncation handling", () => {
     const events: TurnEvent[] = [];
     const { stopReason } = await runTurn(provider, registry, makeSession(tmp), "read", {
       approval: "auto",
-      onEvent: (e) => { events.push(e); },
+      onEvent: (e) => {
+        events.push(e);
+      },
     });
 
     expect(stopReason).toBe("end_turn");
     const types = events.map((e) => e.type);
     expect(types).not.toContain("turn_truncated");
+
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it("emits turn_max_turns when tool calls exhaust the turn budget without final text", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
+    await writeFile(join(tmp, "f.txt"), "hi");
+
+    const provider = new FakeProvider([
+      [
+        { type: "tool-call", id: "tc1", name: "Read", input: { path: "f.txt" } },
+        { type: "finish", reason: "tool-calls" },
+      ],
+    ]);
+    const registry = new ToolRegistry();
+    registry.register(readFileTool);
+    const events: TurnEvent[] = [];
+
+    const result = await runTurn(provider, registry, makeSession(tmp), "read", {
+      approval: "auto",
+      maxTurns: 1,
+      onEvent: (e) => {
+        events.push(e);
+      },
+    });
+
+    expect(result.stopReason).toBe("max_turns");
+    expect(result.newMessages).toEqual([
+      { role: "user", content: "read" },
+      expect.objectContaining({
+        role: "assistant",
+        content: "",
+        toolCalls: [expect.objectContaining({ id: "tc1", name: "Read" })],
+      }),
+      expect.objectContaining({
+        role: "tool_result",
+        toolName: "Read",
+        content: "1: hi",
+      }),
+    ]);
+    const types = events.map((event) => event.type);
+    expect(types).toContain("turn_max_turns");
+    expect(types.indexOf("turn_max_turns")).toBeLessThan(types.indexOf("turn_finished"));
 
     await rm(tmp, { recursive: true, force: true });
   });
@@ -3650,20 +3720,16 @@ describe("Patch validation vs permission deny", () => {
 
     let handlerCalled = false;
     const events: TurnEvent[] = [];
-    const { newMessages } = await runTurn(
-      provider,
-      registry,
-      makeSession(tmp),
-      "patch",
-      {
-        approval: "auto",
-        approvalHandler: async () => {
-          handlerCalled = true;
-          return "allow_once";
-        },
-        onEvent: (e) => { events.push(e); },
+    const { newMessages } = await runTurn(provider, registry, makeSession(tmp), "patch", {
+      approval: "auto",
+      approvalHandler: async () => {
+        handlerCalled = true;
+        return "allow_once";
       },
-    );
+      onEvent: (e) => {
+        events.push(e);
+      },
+    });
 
     expect(handlerCalled).toBe(false);
     expect(events.some((e) => e.type === "tool_approval_required")).toBe(false);

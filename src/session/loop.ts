@@ -29,10 +29,7 @@ import { isMutationTool, getCheckpointPaths } from "../tools/mutation-policy.js"
 import type { ApprovalDisplay } from "../permission/display.js";
 import { buildApprovalDisplay } from "../permission/display.js";
 import type { ToolDisplay } from "./tool-display.js";
-import {
-  buildToolInputDisplay,
-  buildToolResultDisplay,
-} from "./tool-display.js";
+import { buildToolInputDisplay, buildToolResultDisplay } from "./tool-display.js";
 
 export type ApprovalRequest = {
   toolName: string;
@@ -57,7 +54,7 @@ export type TurnResult = {
   session: SessionState;
   newMessages: Message[];
   aborted?: boolean;
-  stopReason?: "end_turn" | "tool_use" | "length";
+  stopReason?: "end_turn" | "tool_use" | "length" | "max_turns";
 };
 
 export type SessionOptions = {
@@ -86,7 +83,7 @@ export type TurnOptions = {
 export type SessionResult = {
   transcript: Message[];
   aborted?: boolean;
-  stopReason?: "end_turn" | "tool_use" | "length";
+  stopReason?: "end_turn" | "tool_use" | "length" | "max_turns";
 };
 
 export type TurnEvent =
@@ -115,9 +112,16 @@ export type TurnEvent =
       name: string;
       decision: "allow" | "deny";
     }
-  | { type: "tool_started"; id: string; name: string; input: unknown; display?: ToolDisplay }
+  | {
+      type: "tool_started";
+      id: string;
+      name: string;
+      input: unknown;
+      display?: ToolDisplay;
+    }
   | { type: "tool_result"; message: Message; display?: ToolDisplay }
   | { type: "turn_truncated" }
+  | { type: "turn_max_turns"; maxTurns: number }
   | { type: "turn_finished" };
 
 function buildToolSchemas(registry: ToolRegistry): ToolSchema[] {
@@ -162,7 +166,10 @@ async function runAgentLoop(
   newMessages: Message[],
   cwd: string,
   options: TurnOptions,
-): Promise<{ aborted: boolean; stopReason?: "end_turn" | "tool_use" | "length" }> {
+): Promise<{
+  aborted: boolean;
+  stopReason?: "end_turn" | "tool_use" | "length" | "max_turns";
+}> {
   const maxTurns = options.maxTurns ?? 10;
   const toolSchemas = buildToolSchemas(registry);
   const systemPrompt = buildSystemPrompt(cwd, {
@@ -174,8 +181,10 @@ async function runAgentLoop(
   const readState = options.readState ?? new ReadStateTracker();
 
   let lastStopReason: "end_turn" | "tool_use" | "length" | undefined;
+  let exhaustedTurns = false;
 
   for (let turn = 0; turn < maxTurns; turn++) {
+    exhaustedTurns = turn === maxTurns - 1;
     let assistantText = "";
     let reasoningText = "";
     let reasoningMetadata: ProviderMetadata | undefined;
@@ -214,7 +223,8 @@ async function runAgentLoop(
           break;
         case "text":
           assistantText += canonical.delta;
-          if (onEvent) await onEvent({ type: "assistant_text_delta", text: canonical.delta });
+          if (onEvent)
+            await onEvent({ type: "assistant_text_delta", text: canonical.delta });
           break;
         case "text-end":
           if (onEvent) await onEvent({ type: "assistant_text_finished" });
@@ -228,7 +238,8 @@ async function runAgentLoop(
             ...(reasoningMetadata ?? {}),
             ...(canonical.providerMetadata ?? {}),
           };
-          if (!assistantRaw) assistantRaw = providerRawFromMetadata(canonical.providerMetadata);
+          if (!assistantRaw)
+            assistantRaw = providerRawFromMetadata(canonical.providerMetadata);
           break;
         case "reasoning-end":
           if (onEvent) await onEvent({ type: "assistant_reasoning_finished" });
@@ -301,6 +312,7 @@ async function runAgentLoop(
     if (onEvent) await onEvent({ type: "assistant_message", message: assistantMsg });
 
     if (toolCalls.length === 0) {
+      exhaustedTurns = false;
       if (lastStopReason === "length" && onEvent) {
         await onEvent({ type: "turn_truncated" });
       }
@@ -465,7 +477,11 @@ async function runAgentLoop(
             });
 
           if (response === "abort") {
-            const toolDisplay = buildToolResultDisplay(tc.name, tc.input, `Tool call denied and was not executed: ${decision.reason}`);
+            const toolDisplay = buildToolResultDisplay(
+              tc.name,
+              tc.input,
+              `Tool call denied and was not executed: ${decision.reason}`,
+            );
             const msg = blockedMsg(tc, decision.reason);
             msg.toolDisplay = toolDisplay;
             messages.push(msg);
@@ -563,7 +579,11 @@ async function runAgentLoop(
       }
 
       if (!shouldExecute) {
-        const toolDisplay = buildToolResultDisplay(tc.name, tc.input, `Tool call denied and was not executed: ${blockReason}`);
+        const toolDisplay = buildToolResultDisplay(
+          tc.name,
+          tc.input,
+          `Tool call denied and was not executed: ${blockReason}`,
+        );
         const msg = blockedMsg(tc, blockReason);
         msg.toolDisplay = toolDisplay;
         messages.push(msg);
@@ -646,8 +666,13 @@ async function runAgentLoop(
     }
   }
 
+  const stopReason =
+    exhaustedTurns && lastStopReason === "tool_use" ? "max_turns" : lastStopReason;
+  if (stopReason === "max_turns" && onEvent) {
+    await onEvent({ type: "turn_max_turns", maxTurns });
+  }
   if (onEvent) await onEvent({ type: "turn_finished" });
-  return { aborted: false, stopReason: lastStopReason };
+  return { aborted: false, stopReason };
 }
 
 export async function runTurn(
