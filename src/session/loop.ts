@@ -170,7 +170,7 @@ async function runAgentLoop(
   aborted: boolean;
   stopReason?: "end_turn" | "tool_use" | "length" | "max_turns";
 }> {
-  const maxTurns = options.maxTurns ?? 10;
+  const maxTurns = options.maxTurns ?? 30;
   const toolSchemas = buildToolSchemas(registry);
   const systemPrompt = buildSystemPrompt(cwd, {
     availableSkills: options.availableSkills,

@@ -162,7 +162,7 @@ export async function runScenario(
       {
         cwd: ws,
         approval: "auto",
-        maxTurns: effectiveConfig.maxTurns ?? scenario.expect.maxTurns ?? 10,
+        maxTurns: effectiveConfig.maxTurns ?? scenario.expect.maxTurns ?? 30,
         approvalHandler,
         onEvent: capture.handler,
         sessionApprovalRules: [],
