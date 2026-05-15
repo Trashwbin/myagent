@@ -3518,45 +3518,44 @@ describe("Truncation handling", () => {
     await rm(tmp, { recursive: true, force: true });
   });
 
-  it("emits turn_max_turns when tool calls exhaust the turn budget without final text", async () => {
+  it("does not impose a tool turn budget", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
     await writeFile(join(tmp, "f.txt"), "hi");
 
-    const provider = new FakeProvider([
-      [
-        { type: "tool-call", id: "tc1", name: "Read", input: { path: "f.txt" } },
-        { type: "finish", reason: "tool-calls" },
-      ],
+    const turns: ModelEvent[][] = Array.from({ length: 12 }, (_, index) => [
+      {
+        type: "tool-call",
+        id: `tc${index}`,
+        name: "Read",
+        input: { path: "f.txt" },
+      },
+      { type: "finish", reason: "tool-calls" },
     ]);
+    turns.push([
+      { type: "text", delta: "done" },
+      { type: "finish", reason: "stop" },
+    ]);
+
+    const provider = new FakeProvider(turns);
     const registry = new ToolRegistry();
     registry.register(readFileTool);
     const events: TurnEvent[] = [];
 
     const result = await runTurn(provider, registry, makeSession(tmp), "read", {
       approval: "auto",
-      maxTurns: 1,
       onEvent: (e) => {
         events.push(e);
       },
     });
 
-    expect(result.stopReason).toBe("max_turns");
-    expect(result.newMessages).toEqual([
-      { role: "user", content: "read" },
-      expect.objectContaining({
-        role: "assistant",
-        content: "",
-        toolCalls: [expect.objectContaining({ id: "tc1", name: "Read" })],
-      }),
-      expect.objectContaining({
-        role: "tool_result",
-        toolName: "Read",
-        content: "1: hi",
-      }),
-    ]);
-    const types = events.map((event) => event.type);
-    expect(types).toContain("turn_max_turns");
-    expect(types.indexOf("turn_max_turns")).toBeLessThan(types.indexOf("turn_finished"));
+    expect(result.stopReason).toBe("end_turn");
+    expect(
+      result.newMessages.filter((message) => message.role === "tool_result"),
+    ).toHaveLength(12);
+    expect(result.newMessages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: "done",
+    });
 
     await rm(tmp, { recursive: true, force: true });
   });

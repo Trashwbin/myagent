@@ -249,16 +249,6 @@ export function reduceTimelineEvent(
         },
       ];
 
-    case "turn_max_turns":
-      return [
-        ...timeline,
-        {
-          type: "status",
-          level: "warn",
-          text: `Turn stopped after ${event.maxTurns} tool steps without a final assistant message.`,
-        },
-      ];
-
     case "turn_finished": {
       return updateAssistant(timeline, (parts) =>
         parts.map((p) =>

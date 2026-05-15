@@ -14,7 +14,6 @@ export type ScenarioDefinition = {
   setup?: ScenarioWorkspaceSetup;
   expect: ScenarioExpectation;
   run?: {
-    maxTurns?: number;
     maxOutputTokens?: number;
     autoApprove?: boolean;
   };
@@ -125,7 +124,6 @@ export type LiveScenarioConfig = {
   authToken?: string;
   mode?: "chat" | "responses" | "messages";
   cwd: string;
-  maxTurns?: number;
   maxOutputTokens?: number;
   /** Auto-approve all non-sensitive tool requests */
   autoApprove?: boolean;

@@ -54,8 +54,8 @@ Secrets now live in layered config files, typically:
 <workspace>/.myagent/config.local.json
 ```
 
-`maxTurns` and `maxOutputTokens` come from config and can still be overridden per
-scenario through the scenario definition itself.
+`maxOutputTokens` comes from config and can still be overridden per scenario
+through the scenario definition itself.
 
 ## Current scenarios
 

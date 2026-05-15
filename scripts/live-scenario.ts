@@ -22,7 +22,7 @@ Options:
   --all                  Run all scenarios
 
 Configuration:
-  Runtime provider, model, API keys, base URL, and turn limits come from
+  Runtime provider, model, API keys, and base URL come from
   .myagent/config.json / config.local.json.
 `);
   process.exit(0);
@@ -70,7 +70,6 @@ function resolveConfig(values: ReturnType<typeof parseCliValues>): LiveScenarioC
     authToken: providerConfig.authToken,
     mode: providerConfig.mode,
     cwd: process.cwd(),
-    maxTurns: config.maxTurns,
     maxOutputTokens: providerConfig.maxOutputTokens,
     autoApprove: true,
     outputDir: values["output-dir"] ?? undefined,

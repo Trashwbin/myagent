@@ -26,7 +26,6 @@ describe("ConfigSchema", () => {
       $schema: "https://myagent.dev/config.json",
       provider: "openai" as const,
       approval: "on-request" as const,
-      maxTurns: 12,
       providers: {
         openai: {
           adapter: "@ai-sdk/openai" as const,
@@ -54,6 +53,10 @@ describe("ConfigSchema", () => {
 
   it("rejects invalid approval", () => {
     expect(() => ConfigSchema.parse({ approval: "invalid-mode" })).toThrow();
+  });
+
+  it("rejects maxTurns because tool turn limits are not user config", () => {
+    expect(() => ConfigSchema.parse({ maxTurns: 12 })).toThrow();
   });
 
   it("rejects unknown keys", () => {

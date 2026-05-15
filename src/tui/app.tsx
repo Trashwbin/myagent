@@ -50,7 +50,6 @@ type AppProps = {
   approval: ApprovalMode;
   store: TranscriptStore;
   availableSkills?: SkillSummary[];
-  maxTurns?: number;
   onExit: () => void;
 };
 
@@ -281,7 +280,6 @@ export function TuiApp(props: AppProps): React.ReactElement {
             aborted,
           } = await runTurn(activeProvider, props.registry, props.session, expanded, {
             approval: props.approval,
-            maxTurns: props.maxTurns,
             approvalHandler,
             onEvent: handleEvent,
             sessionApprovalRules: sessionApprovalRulesRef.current,

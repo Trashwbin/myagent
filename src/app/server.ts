@@ -24,7 +24,6 @@ type AppServerDeps = {
   approval: ApprovalMode;
   store: TranscriptStore;
   availableSkills?: SkillSummary[];
-  maxTurns?: number;
   cwd: string;
 };
 
@@ -50,7 +49,6 @@ export function createAppServer(deps: AppServerDeps): Server {
     approval: deps.approval,
     store: deps.store,
     availableSkills: deps.availableSkills,
-    maxTurns: deps.maxTurns,
     sendEvent,
   });
 

@@ -49,7 +49,6 @@ export class SessionManager {
   private approval: ApprovalMode;
   private store: TranscriptStore;
   private availableSkills: SkillSummary[] | undefined;
-  private maxTurns: number | undefined;
   private sendEvent: (sessionId: string, msg: ServerMessage) => void;
 
   constructor(deps: {
@@ -60,7 +59,6 @@ export class SessionManager {
     approval: ApprovalMode;
     store: TranscriptStore;
     availableSkills?: SkillSummary[];
-    maxTurns?: number;
     sendEvent: (sessionId: string, msg: ServerMessage) => void;
   }) {
     this.defaultProvider = deps.provider;
@@ -70,7 +68,6 @@ export class SessionManager {
     this.approval = deps.approval;
     this.store = deps.store;
     this.availableSkills = deps.availableSkills;
-    this.maxTurns = deps.maxTurns;
     this.sendEvent = deps.sendEvent;
   }
 
@@ -162,7 +159,6 @@ export class SessionManager {
           text,
           {
             approval: this.approval,
-            maxTurns: this.maxTurns,
             approvalHandler,
             onEvent,
             sessionApprovalRules: active.approvalRules,

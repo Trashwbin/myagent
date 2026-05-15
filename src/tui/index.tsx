@@ -33,7 +33,6 @@ export type LaunchTuiOptions = {
   approval: ApprovalMode;
   store: TranscriptStore;
   availableSkills?: SkillSummary[];
-  maxTurns?: number;
 };
 
 export async function launchTui(options: LaunchTuiOptions): Promise<void> {

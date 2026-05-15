@@ -138,17 +138,6 @@ describe("eventToRows", () => {
     });
   });
 
-  it("maps turn_max_turns to a status row", () => {
-    const event: TurnEvent = { type: "turn_max_turns", maxTurns: 3 };
-    const rows = eventToRows(event);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toEqual({
-      type: "status",
-      kind: "truncated",
-      text: "Turn stopped after 3 tool steps without a final assistant message.",
-    });
-  });
-
   it("maps turn_finished to no rows", () => {
     const event: TurnEvent = { type: "turn_finished" };
     expect(eventToRows(event)).toEqual([]);

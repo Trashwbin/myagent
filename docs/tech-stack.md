@@ -70,7 +70,6 @@ Supported fields:
 {
   "$schema": "https://myagent.dev/config.json",
   "model": "mimo/fast",
-  "maxTurns": 30,
   "approval": "auto" | "on-request",
   "providers": {
     "mimo": {

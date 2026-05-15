@@ -54,13 +54,12 @@ export type TurnResult = {
   session: SessionState;
   newMessages: Message[];
   aborted?: boolean;
-  stopReason?: "end_turn" | "tool_use" | "length" | "max_turns";
+  stopReason?: "end_turn" | "tool_use" | "length";
 };
 
 export type SessionOptions = {
   cwd: string;
   approval: ApprovalMode;
-  maxTurns?: number;
   approvalHandler?: (request: ApprovalRequest) => Promise<ApprovalResponse>;
   onEvent?: (event: TurnEvent) => void | Promise<void>;
   sessionApprovalRules?: ApprovalRule[];
@@ -71,7 +70,6 @@ export type SessionOptions = {
 
 export type TurnOptions = {
   approval: ApprovalMode;
-  maxTurns?: number;
   approvalHandler?: (request: ApprovalRequest) => Promise<ApprovalResponse>;
   onEvent?: (event: TurnEvent) => void | Promise<void>;
   sessionApprovalRules?: ApprovalRule[];
@@ -83,7 +81,7 @@ export type TurnOptions = {
 export type SessionResult = {
   transcript: Message[];
   aborted?: boolean;
-  stopReason?: "end_turn" | "tool_use" | "length" | "max_turns";
+  stopReason?: "end_turn" | "tool_use" | "length";
 };
 
 export type TurnEvent =
@@ -121,7 +119,6 @@ export type TurnEvent =
     }
   | { type: "tool_result"; message: Message; display?: ToolDisplay }
   | { type: "turn_truncated" }
-  | { type: "turn_max_turns"; maxTurns: number }
   | { type: "turn_finished" };
 
 function buildToolSchemas(registry: ToolRegistry): ToolSchema[] {
@@ -168,9 +165,8 @@ async function runAgentLoop(
   options: TurnOptions,
 ): Promise<{
   aborted: boolean;
-  stopReason?: "end_turn" | "tool_use" | "length" | "max_turns";
+  stopReason?: "end_turn" | "tool_use" | "length";
 }> {
-  const maxTurns = options.maxTurns ?? 30;
   const toolSchemas = buildToolSchemas(registry);
   const systemPrompt = buildSystemPrompt(cwd, {
     availableSkills: options.availableSkills,
@@ -181,10 +177,8 @@ async function runAgentLoop(
   const readState = options.readState ?? new ReadStateTracker();
 
   let lastStopReason: "end_turn" | "tool_use" | "length" | undefined;
-  let exhaustedTurns = false;
-
-  for (let turn = 0; turn < maxTurns; turn++) {
-    exhaustedTurns = turn === maxTurns - 1;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
     let assistantText = "";
     let reasoningText = "";
     let reasoningMetadata: ProviderMetadata | undefined;
@@ -312,7 +306,6 @@ async function runAgentLoop(
     if (onEvent) await onEvent({ type: "assistant_message", message: assistantMsg });
 
     if (toolCalls.length === 0) {
-      exhaustedTurns = false;
       if (lastStopReason === "length" && onEvent) {
         await onEvent({ type: "turn_truncated" });
       }
@@ -666,13 +659,8 @@ async function runAgentLoop(
     }
   }
 
-  const stopReason =
-    exhaustedTurns && lastStopReason === "tool_use" ? "max_turns" : lastStopReason;
-  if (stopReason === "max_turns" && onEvent) {
-    await onEvent({ type: "turn_max_turns", maxTurns });
-  }
   if (onEvent) await onEvent({ type: "turn_finished" });
-  return { aborted: false, stopReason };
+  return { aborted: false, stopReason: lastStopReason };
 }
 
 export async function runTurn(

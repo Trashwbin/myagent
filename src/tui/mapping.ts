@@ -98,14 +98,6 @@ export function eventToRows(
           text: "Turn truncated — model hit output token limit.",
         },
       ];
-    case "turn_max_turns":
-      return [
-        {
-          type: "status",
-          kind: "truncated",
-          text: `Turn stopped after ${event.maxTurns} tool steps without a final assistant message.`,
-        },
-      ];
     case "turn_finished":
       return [];
   }

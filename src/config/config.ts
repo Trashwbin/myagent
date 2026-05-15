@@ -31,7 +31,6 @@ export const ConfigSchema = z.strictObject({
   provider: ProviderIdSchema.optional(),
   model: z.string().optional(),
   approval: z.enum(["auto", "on-request", "never"]).optional(),
-  maxTurns: z.number().int().positive().optional(),
   // Flat compatibility keys. New configs should prefer the nested `providers` map.
   baseUrl: z.string().optional(),
   apiKey: z.string().optional(),

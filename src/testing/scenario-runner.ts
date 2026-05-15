@@ -138,7 +138,6 @@ export async function runScenario(
 
   const effectiveConfig: LiveScenarioConfig = {
     ...config,
-    maxTurns: scenario.run?.maxTurns ?? config.maxTurns,
     maxOutputTokens: scenario.run?.maxOutputTokens ?? config.maxOutputTokens,
     autoApprove: scenario.run?.autoApprove ?? config.autoApprove,
   };
@@ -162,7 +161,6 @@ export async function runScenario(
       {
         cwd: ws,
         approval: "auto",
-        maxTurns: effectiveConfig.maxTurns ?? scenario.expect.maxTurns ?? 30,
         approvalHandler,
         onEvent: capture.handler,
         sessionApprovalRules: [],

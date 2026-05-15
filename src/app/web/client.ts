@@ -1176,12 +1176,6 @@ function handleTurnEvent(ev) {
     case "turn_truncated":
       statusBlock("Turn stopped because the model hit its output token limit.", "warning");
       break;
-    case "turn_max_turns":
-      statusBlock(
-        "Turn stopped after " + ev.maxTurns + " tool steps without a final assistant message.",
-        "warning",
-      );
-      break;
   }
 }
 

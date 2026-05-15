@@ -471,18 +471,6 @@ describe("reduceTimelineEvent", () => {
     });
   });
 
-  it("turn_max_turns appends warning status", () => {
-    let tl: TimelineItem[] = [];
-    tl = reduceTimelineEvent(tl, { type: "turn_max_turns", maxTurns: 3 });
-
-    expect(tl).toHaveLength(1);
-    expect(tl[0]).toEqual({
-      type: "status",
-      level: "warn",
-      text: "Turn stopped after 3 tool steps without a final assistant message.",
-    });
-  });
-
   it("turn_finished clears streaming flags", () => {
     let tl: TimelineItem[] = [];
     tl = reduceTimelineEvent(tl, { type: "assistant_text_delta", text: "hello" });

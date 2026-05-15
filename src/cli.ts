@@ -190,11 +190,6 @@ function makeEventRenderer(): (event: TurnEvent) => void {
           "\n[truncated] Turn stopped because the model hit its output token limit.",
         );
         break;
-      case "turn_max_turns":
-        console.log(
-          `\n[max-turns] Turn stopped after ${event.maxTurns} tool steps without a final assistant message.`,
-        );
-        break;
     }
   };
 }
@@ -358,7 +353,6 @@ async function chatMode(
   approval: ApprovalMode,
   store: TranscriptStore,
   availableSkills: SkillSummary[] = [],
-  maxTurns?: number,
 ) {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -401,7 +395,6 @@ async function chatMode(
           aborted,
         } = await runTurn(activeProvider, registry, session, input, {
           approval,
-          maxTurns,
           approvalHandler,
           onEvent,
           sessionApprovalRules,
@@ -531,7 +524,6 @@ async function handleResume(sessionId: string, options: { cwd: string }): Promis
       resolveApprovalMode(config),
       store,
       summarizeSkills(skills),
-      config.maxTurns,
     );
   } finally {
     store.close();
@@ -563,7 +555,6 @@ async function handleMainRun(options: { cwd: string }): Promise<void> {
       resolveApprovalMode(config),
       store,
       summarizeSkills(skills),
-      config.maxTurns,
     );
   } finally {
     store.close();
@@ -599,7 +590,6 @@ async function handleTui(options: { cwd: string }): Promise<void> {
       approval: resolveApprovalMode(config),
       store,
       availableSkills: summarizeSkills(skills),
-      maxTurns: config.maxTurns,
     });
   } finally {
     store.close();
@@ -633,7 +623,6 @@ async function handleApp(options: { cwd: string }): Promise<void> {
     approval: resolveApprovalMode(config),
     store,
     availableSkills: summarizeSkills(skills),
-    maxTurns: config.maxTurns,
     cwd,
   });
   server.listen(port, "127.0.0.1", () => {
