@@ -26,6 +26,17 @@ export type SessionSummary = {
   updatedAt: number;
 };
 
+export type ProjectSummary = {
+  path: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  sessionCount: number;
+  lastSessionId?: string;
+  lastSessionUpdatedAt?: number;
+  current?: boolean;
+};
+
 export type MutationDiffFile = {
   path: string;
   additions: number;
@@ -99,6 +110,8 @@ export type PendingApproval = {
 
 export type AppState = {
   config: ClientConfig | null;
+  projects: ProjectSummary[];
+  activeProjectPath: string | null;
   sessions: SessionSummary[];
   activeSessionId: string | null;
   timelines: Record<string, TimelineTurn[]>;

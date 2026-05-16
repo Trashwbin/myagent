@@ -9,6 +9,43 @@ import type { Message } from "../src/model/types.js";
 import type { TurnEvent } from "../src/session/loop.js";
 
 describe("web timeline reducer", () => {
+  it("tracks loaded projects and the active project", () => {
+    const loaded = appReducer(initialAppState, {
+      type: "projects_loaded",
+      projects: [
+        {
+          path: "/tmp/a",
+          name: "a",
+          createdAt: 1,
+          updatedAt: 1,
+          sessionCount: 0,
+        },
+        {
+          path: "/tmp/b",
+          name: "b",
+          createdAt: 2,
+          updatedAt: 2,
+          sessionCount: 1,
+          current: true,
+        },
+      ],
+      currentProjectPath: "/tmp/b",
+    });
+
+    expect(loaded.activeProjectPath).toBe("/tmp/b");
+
+    const selected = appReducer(loaded, {
+      type: "set_active_project",
+      projectPath: "/tmp/a",
+    });
+
+    expect(selected.activeProjectPath).toBe("/tmp/a");
+    expect(selected.projects).toEqual([
+      expect.objectContaining({ path: "/tmp/a", current: true }),
+      expect.objectContaining({ path: "/tmp/b", current: false }),
+    ]);
+  });
+
   it("rebuilds a turn from stored messages", () => {
     const messages: Message[] = [
       { role: "user", content: "edit app.ts" },

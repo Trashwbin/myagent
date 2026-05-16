@@ -9,12 +9,15 @@ import { Topbar } from "./components/layout/Topbar.js";
 import { MessageTimeline } from "./components/session/MessageTimeline.js";
 import { parseSlashCommand } from "./slash-commands.js";
 import { appReducer, initialAppState } from "./state/reducer.js";
-import type { AppState, ClientConfig, SessionSummary } from "./state/types.js";
+import type {
+  AppState,
+  ClientConfig,
+  ProjectSummary,
+  SessionSummary,
+} from "./state/types.js";
 
-function activeSessionKey(config: ClientConfig | null) {
-  const cwd = config?.cwd || "default";
-  return `myagent.activeSession.${cwd}`;
-}
+const ACTIVE_SESSION_KEY = "myagent.activeSession";
+const ACTIVE_PROJECT_KEY = "myagent.activeProjectPath";
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
@@ -48,6 +51,15 @@ export function App() {
     () => state.sessions.find((session) => session.id === state.activeSessionId) || null,
     [state.sessions, state.activeSessionId],
   );
+  const activeProject = useMemo(
+    () =>
+      state.projects.find((project) => project.path === state.activeProjectPath) ||
+      (activeSession
+        ? state.projects.find((project) => project.path === activeSession.workspaceRoot)
+        : null) ||
+      null,
+    [state.projects, state.activeProjectPath, activeSession],
+  );
   const activeTimeline = state.activeSessionId
     ? state.timelines[state.activeSessionId] ?? []
     : [];
@@ -79,11 +91,21 @@ export function App() {
       if (cancelled) return;
       dispatch({ type: "config_loaded", config });
 
-      const sessions = await fetchJson<SessionSummary[]>("/api/sessions");
+      const [projects, currentProject, sessions] = await Promise.all([
+        fetchJson<ProjectSummary[]>("/project"),
+        fetchJson<ProjectSummary | null>("/project/current"),
+        fetchJson<SessionSummary[]>("/api/sessions"),
+      ]);
       if (cancelled) return;
+      dispatch({
+        type: "projects_loaded",
+        projects,
+        currentProjectPath: currentProject?.path ?? null,
+      });
       dispatch({ type: "sessions_loaded", sessions });
 
-      const remembered = localStorage.getItem(activeSessionKey(config));
+      const remembered = localStorage.getItem(ACTIVE_SESSION_KEY);
+      const rememberedProject = localStorage.getItem(ACTIVE_PROJECT_KEY);
       const fromUrl = new URL(location.href).searchParams.get("session");
       const ids = new Set(sessions.map((session) => session.id));
       const nextSessionId =
@@ -93,11 +115,21 @@ export function App() {
         null;
 
       if (nextSessionId) {
-        await selectSession(nextSessionId, config);
+        await selectSession(nextSessionId, sessions);
         return;
       }
 
-      await createSession(config);
+      const nextProjectPath =
+        (rememberedProject &&
+          projects.some((project) => project.path === rememberedProject) &&
+          rememberedProject) ||
+        currentProject?.path ||
+        projects[0]?.path ||
+        null;
+      if (nextProjectPath) {
+        dispatch({ type: "set_active_project", projectPath: nextProjectPath });
+        localStorage.setItem(ACTIVE_PROJECT_KEY, nextProjectPath);
+      }
     };
 
     const connect = () => {
@@ -201,6 +233,18 @@ export function App() {
     dispatch({ type: "sessions_loaded", sessions });
   }
 
+  async function loadProjects() {
+    const [projects, currentProject] = await Promise.all([
+      fetchJson<ProjectSummary[]>("/project"),
+      fetchJson<ProjectSummary | null>("/project/current"),
+    ]);
+    dispatch({
+      type: "projects_loaded",
+      projects,
+      currentProjectPath: currentProject?.path ?? null,
+    });
+  }
+
   async function loadTimeline(sessionId: string) {
     const messages = await fetchJson<Message[]>(
       `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
@@ -208,9 +252,17 @@ export function App() {
     dispatch({ type: "timeline_loaded", sessionId, messages });
   }
 
-  async function selectSession(sessionId: string, config = state.config) {
+  async function selectSession(
+    sessionId: string,
+    sessionList: SessionSummary[] = state.sessions,
+  ) {
+    const session = sessionList.find((item) => item.id === sessionId);
     dispatch({ type: "set_active_session", sessionId });
-    localStorage.setItem(activeSessionKey(config), sessionId);
+    if (session) {
+      dispatch({ type: "set_active_project", projectPath: session.workspaceRoot });
+      localStorage.setItem(ACTIVE_PROJECT_KEY, session.workspaceRoot);
+    }
+    localStorage.setItem(ACTIVE_SESSION_KEY, sessionId);
     const url = new URL(location.href);
     url.searchParams.set("session", sessionId);
     history.replaceState(null, "", url);
@@ -222,13 +274,16 @@ export function App() {
   }
 
   async function createSession(config = state.config) {
+    const projectPath = state.activeProjectPath || state.projects[0]?.path || config?.cwd;
     const session = await fetchJson<{ id: string; cwd: string }>("/api/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: "{}",
+      body: JSON.stringify(projectPath ? { projectPath } : {}),
     });
-    await loadSessions();
-    await selectSession(session.id, config);
+    await loadProjects();
+    const sessions = await fetchJson<SessionSummary[]>("/api/sessions");
+    dispatch({ type: "sessions_loaded", sessions });
+    await selectSession(session.id, sessions);
   }
 
   function subscribe(sessionId: string) {
@@ -339,11 +394,27 @@ export function App() {
   return (
     <div className="app">
       <Sidebar
+        projects={state.projects}
         sessions={state.sessions}
         activeSessionId={state.activeSessionId}
-        currentWorkspace={state.config?.cwd || state.sessions[0]?.workspaceRoot || ""}
+        currentProject={activeProject}
         onSelect={(sessionId) => {
           void selectSession(sessionId);
+        }}
+        onSelectProject={(projectPath) => {
+          dispatch({ type: "set_active_project", projectPath });
+          if (activeSession?.workspaceRoot !== projectPath) {
+            dispatch({ type: "set_active_session", sessionId: null });
+            const url = new URL(location.href);
+            url.searchParams.delete("session");
+            history.replaceState(null, "", url);
+          }
+          localStorage.setItem(ACTIVE_PROJECT_KEY, projectPath);
+          void fetchJson<ProjectSummary>("/project/current", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: projectPath }),
+          }).then(() => loadProjects());
         }}
         onNewSession={() => {
           void createSession();
@@ -354,7 +425,7 @@ export function App() {
         <Topbar
           sessionTitle={activeSession?.title || "No session"}
           sessionId={state.activeSessionId}
-          workspace={state.config?.cwd || activeSession?.workspaceRoot || ""}
+          workspace={activeProject?.path || activeSession?.workspaceRoot || ""}
           modelLabel={modelLabel}
           status={status}
           onCopySession={() => {

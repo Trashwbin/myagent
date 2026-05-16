@@ -1,36 +1,78 @@
-import React, { useState } from "react";
-import type { SessionSummary } from "../../state/types.js";
+import React, { useMemo, useState } from "react";
+import type { ProjectSummary, SessionSummary } from "../../state/types.js";
 import {
   CURRENT_WORKSPACE_VISIBLE,
-  OTHER_WORKSPACE_VISIBLE,
-  filterSessions,
-  groupSessions,
-  SessionScope,
   sessionMeta,
   sessionTitle,
   visibleSessions,
+  workspaceName,
 } from "./session-list.js";
 
 export function Sidebar({
+  projects,
   sessions,
   activeSessionId,
-  currentWorkspace,
+  currentProject,
   onSelect,
+  onSelectProject,
   onNewSession,
 }: {
+  projects: ProjectSummary[];
   sessions: SessionSummary[];
   activeSessionId: string | null;
-  currentWorkspace: string;
+  currentProject: ProjectSummary | null;
   onSelect: (sessionId: string) => void;
+  onSelectProject: (projectPath: string) => void;
   onNewSession: () => void;
 }) {
-  const [scope, setScope] = useState<SessionScope>("current");
   const [query, setQuery] = useState("");
   const [expandedWorkspaces, setExpandedWorkspaces] = useState<Record<string, boolean>>({});
-  const filtered = filterSessions(sessions, currentWorkspace, scope, query);
-  const groups = groupSessions(filtered);
-  const current = groups.find((group) => group.path === currentWorkspace) ?? groups[0];
-  const others = groups.filter((group) => group !== current);
+  const groups = useMemo(() => {
+    const projectPaths = new Set(projects.map((project) => project.path));
+    const implicitProjects = sessions
+      .filter((session) => !projectPaths.has(session.workspaceRoot))
+      .map((session) => ({
+        path: session.workspaceRoot,
+        name: workspaceName(session.workspaceRoot),
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        sessionCount: 0,
+      }));
+    const allProjects = [...projects, ...implicitProjects];
+    const needle = query.trim().toLowerCase();
+
+    return allProjects
+      .map((project) => {
+        const projectSessions = sessions.filter(
+          (session) => session.workspaceRoot === project.path,
+        );
+        const matchingSessions = needle
+          ? projectSessions.filter((session) =>
+              sessionTitle(session).toLowerCase().includes(needle),
+            )
+          : projectSessions;
+        const matchesProject =
+          !needle ||
+          project.name.toLowerCase().includes(needle) ||
+          project.path.toLowerCase().includes(needle);
+
+        if (!matchesProject && matchingSessions.length === 0) return null;
+
+        return {
+          path: project.path,
+          name: project.name,
+          sessions: matchesProject ? projectSessions : matchingSessions,
+          sessionCount: project.sessionCount || projectSessions.length,
+          updatedAt: project.updatedAt,
+        };
+      })
+      .filter((group): group is NonNullable<typeof group> => group !== null)
+      .sort((a, b) => {
+        if (a.path === currentProject?.path) return -1;
+        if (b.path === currentProject?.path) return 1;
+        return b.updatedAt - a.updatedAt || a.name.localeCompare(b.name);
+      });
+  }, [currentProject?.path, projects, query, sessions]);
 
   const toggleWorkspace = (path: string) => {
     setExpandedWorkspaces((value) => ({
@@ -49,129 +91,88 @@ export function Sidebar({
       </div>
       <div className="session-list" aria-label="Sessions">
         <div className="session-controls">
-          <div className="session-scope" role="tablist" aria-label="Session scope">
-            <button
-              className={`scope-pill${scope === "current" ? " active" : ""}`}
-              onClick={() => setScope("current")}
-            >
-              Current
-            </button>
-            <button
-              className={`scope-pill${scope === "all" ? " active" : ""}`}
-              onClick={() => setScope("all")}
-            >
-              All
-            </button>
-          </div>
           <input
             className="session-search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search sessions"
+            placeholder="Search projects or sessions"
             aria-label="Search sessions"
           />
         </div>
-        {filtered.length === 0 ? (
-          <div className="empty-list">No sessions yet</div>
+        {groups.length === 0 ? (
+          <div className="empty-list">No projects yet</div>
         ) : (
           <>
-            {current ? (
-              <>
-                <div className="section-heading">Current workspace</div>
-                <div className="workspace-stack">
-                  <div className="workspace-row current" title={current.path}>
-                    <span className="workspace-icon" aria-hidden="true" />
-                    <span className="workspace-name">{current.name}</span>
-                    <span className="workspace-count">{current.sessions.length}</span>
-                  </div>
-                  <div className="session-sublist">
-                    {visibleSessions(
-                      current,
-                      activeSessionId,
-                      CURRENT_WORKSPACE_VISIBLE,
-                      !!expandedWorkspaces[current.path],
-                    ).sessions.map((session) => (
-                      <button
-                        key={session.id}
-                        className={`session-item nested${session.id === activeSessionId ? " active" : ""}`}
-                        title={session.id}
-                        onClick={() => onSelect(session.id)}
-                      >
-                        <div className="session-title">{sessionTitle(session)}</div>
-                        <div className="session-meta">{sessionMeta(session)}</div>
-                      </button>
-                    ))}
-                  </div>
-                  {visibleSessions(
-                    current,
-                    activeSessionId,
-                    CURRENT_WORKSPACE_VISIBLE,
-                    !!expandedWorkspaces[current.path],
-                  ).hiddenCount > 0 ? (
+            <div className="section-heading">Projects</div>
+            {groups.map((group) => {
+              const active = group.path === currentProject?.path;
+              const expanded = active || !!expandedWorkspaces[group.path] || !!query.trim();
+              const visible = visibleSessions(
+                group,
+                activeSessionId,
+                CURRENT_WORKSPACE_VISIBLE,
+                expanded,
+              );
+              return (
+                <React.Fragment key={group.path}>
+                  <div className="workspace-stack">
                     <button
-                      className="session-more"
-                      onClick={() => toggleWorkspace(current.path)}
+                      className={`workspace-row workspace-toggle${expanded ? " expanded" : ""}${active ? " current" : ""}`}
+                      title={group.path}
+                      onClick={() => {
+                        onSelectProject(group.path);
+                        toggleWorkspace(group.path);
+                      }}
                     >
-                      Show{" "}
-                      {visibleSessions(
-                        current,
-                        activeSessionId,
-                        CURRENT_WORKSPACE_VISIBLE,
-                        !!expandedWorkspaces[current.path],
-                      ).hiddenCount}{" "}
-                      more
+                      <span className="workspace-chevron" aria-hidden="true">
+                        {expanded ? "▾" : "▸"}
+                      </span>
+                      <span className="workspace-icon" aria-hidden="true" />
+                      <span className="workspace-name">{group.name}</span>
+                      <span className="workspace-count">{group.sessionCount}</span>
                     </button>
-                  ) : current.sessions.length > CURRENT_WORKSPACE_VISIBLE ? (
-                    <button className="session-more" onClick={() => toggleWorkspace(current.path)}>
-                      Show less
-                    </button>
-                  ) : null}
-                </div>
-              </>
-            ) : null}
-            {others.length > 0 ? (
-              <>
-                <div className="section-heading">Other workspaces</div>
-                {others.map((group) => (
-                  <React.Fragment key={group.path}>
-                    <div className="workspace-stack">
-                      <button
-                        className={`workspace-row workspace-toggle${expandedWorkspaces[group.path] ? " expanded" : ""}`}
-                        title={group.path}
-                        onClick={() => toggleWorkspace(group.path)}
-                      >
-                        <span className="workspace-chevron" aria-hidden="true">
-                          {expandedWorkspaces[group.path] ? "▾" : "▸"}
-                        </span>
-                        <span className="workspace-icon" aria-hidden="true" />
-                        <span className="workspace-name">{group.name}</span>
-                        <span className="workspace-count">{group.sessions.length}</span>
-                      </button>
-                      {expandedWorkspaces[group.path] ? (
-                        <div className="session-sublist">
-                          {visibleSessions(
-                            group,
-                            activeSessionId,
-                            OTHER_WORKSPACE_VISIBLE,
-                            !!expandedWorkspaces[group.path],
-                          ).sessions.map((session) => (
-                            <button
-                              key={session.id}
-                              className={`session-item nested${session.id === activeSessionId ? " active" : ""}`}
-                              title={session.id}
-                              onClick={() => onSelect(session.id)}
-                            >
-                              <div className="session-title">{sessionTitle(session)}</div>
-                              <div className="session-meta">{sessionMeta(session)}</div>
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  </React.Fragment>
-                ))}
-              </>
-            ) : null}
+                    {expanded ? (
+                      <>
+                        {visible.sessions.length > 0 ? (
+                          <div className="session-sublist">
+                            {visible.sessions.map((session) => (
+                              <button
+                                key={session.id}
+                                className={`session-item nested${session.id === activeSessionId ? " active" : ""}`}
+                                title={session.id}
+                                onClick={() => onSelect(session.id)}
+                              >
+                                <div className="session-title">{sessionTitle(session)}</div>
+                                <div className="session-meta">{sessionMeta(session)}</div>
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="empty-list nested">No sessions</div>
+                        )}
+                        {visible.hiddenCount > 0 ? (
+                          <button
+                            className="session-more"
+                            onClick={() => toggleWorkspace(group.path)}
+                          >
+                            Show {visible.hiddenCount} more
+                          </button>
+                        ) : expanded &&
+                          group.sessions.length > CURRENT_WORKSPACE_VISIBLE &&
+                          !query.trim() ? (
+                          <button
+                            className="session-more"
+                            onClick={() => toggleWorkspace(group.path)}
+                          >
+                            Show less
+                          </button>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
+                </React.Fragment>
+              );
+            })}
           </>
         )}
       </div>

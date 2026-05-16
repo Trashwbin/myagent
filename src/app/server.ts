@@ -174,7 +174,12 @@ export function createAppServer(deps: AppServerDeps): Server {
       if (path === "/api/sessions" && req.method === "POST") {
         const body = await readBody(req);
         const parsed = body ? JSON.parse(body) : {};
-        const cwd = typeof parsed.cwd === "string" ? parsed.cwd : deps.cwd;
+        const cwd =
+          typeof parsed.projectPath === "string"
+            ? canonicalProjectPath(parsed.projectPath)
+            : typeof parsed.cwd === "string"
+              ? canonicalProjectPath(parsed.cwd)
+              : deps.store.getCurrentProject()?.path ?? deps.cwd;
         const session = deps.store.createSession({
           workspaceRoot: cwd,
           modelProfileId: deps.modelProfileId,

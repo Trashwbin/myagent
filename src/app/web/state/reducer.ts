@@ -17,6 +17,7 @@ import { computeDiff } from "../../../tools/file-mutation.js";
 import type {
   AppState,
   MutationDiffFile,
+  ProjectSummary,
   SessionSummary,
   TimelinePart,
   TimelineToolPart,
@@ -26,6 +27,8 @@ import type {
 
 export type AppAction =
   | { type: "config_loaded"; config: AppState["config"] }
+  | { type: "projects_loaded"; projects: ProjectSummary[]; currentProjectPath?: string | null }
+  | { type: "set_active_project"; projectPath: string | null }
   | { type: "sessions_loaded"; sessions: SessionSummary[] }
   | { type: "set_active_session"; sessionId: string | null }
   | { type: "timeline_loaded"; sessionId: string; messages: Message[] }
@@ -43,6 +46,8 @@ export type AppAction =
 
 export const initialAppState: AppState = {
   config: null,
+  projects: [],
+  activeProjectPath: null,
   sessions: [],
   activeSessionId: null,
   timelines: {},
@@ -56,6 +61,24 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "config_loaded":
       return { ...state, config: action.config };
+    case "projects_loaded":
+      return {
+        ...state,
+        projects: action.projects,
+        activeProjectPath:
+          action.currentProjectPath ??
+          action.projects.find((project) => project.current)?.path ??
+          state.activeProjectPath,
+      };
+    case "set_active_project":
+      return {
+        ...state,
+        activeProjectPath: action.projectPath,
+        projects: state.projects.map((project) => ({
+          ...project,
+          current: project.path === action.projectPath,
+        })),
+      };
     case "sessions_loaded":
       return { ...state, sessions: action.sessions };
     case "set_active_session":

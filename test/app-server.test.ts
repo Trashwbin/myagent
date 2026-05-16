@@ -305,6 +305,28 @@ describe("HTTP API", () => {
     expect(data.cwd).toBeTruthy();
   });
 
+  it("POST /api/sessions accepts projectPath", async () => {
+    const base = await tmpBaseDir();
+    const workspace = await mkdtemp(join(tmpdir(), "myagent-session-project-"));
+    const canonicalWorkspace = await realpath(workspace);
+    activeTmpDirs.push(workspace);
+    const store = openTestStore(base);
+    const { port } = await startTestServer(store);
+
+    const data = await fetchJson(port, "/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath: workspace }),
+    });
+
+    expect(data.cwd).toBe(canonicalWorkspace);
+    expect(store.getSession(data.id)?.cwd).toBe(canonicalWorkspace);
+    expect(store.getProject(canonicalWorkspace)).toMatchObject({
+      path: canonicalWorkspace,
+      sessionCount: 1,
+    });
+  });
+
   it("GET /api/sessions lists sessions", async () => {
     const base = await tmpBaseDir();
     const store = openTestStore(base);
