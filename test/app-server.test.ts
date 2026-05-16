@@ -7,11 +7,15 @@ import type { Provider } from "../src/model/provider.js";
 import type { TranscriptStore } from "../src/storage/store.js";
 import { openStore } from "../src/storage/store.js";
 import { ToolRegistry } from "../src/tools/registry.js";
+import { execFile } from "node:child_process";
 import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { createCheckpoint } from "../src/workspace/checkpoint.js";
+
+const execFileAsync = promisify(execFile);
 
 let activeServers: import("node:http").Server[] = [];
 let activeStores: TranscriptStore[] = [];
@@ -39,6 +43,10 @@ function openTestStore(baseDir: string): TranscriptStore {
   const store = openStore({ baseDir });
   activeStores.push(store);
   return store;
+}
+
+async function runGit(cwd: string, args: string[]): Promise<void> {
+  await execFileAsync("git", args, { cwd });
 }
 
 function noopProvider(): Provider {
@@ -338,6 +346,129 @@ describe("HTTP API", () => {
     });
     const list = await fetchJson(port, "/api/sessions");
     expect(list).toHaveLength(1);
+  });
+
+  it("GET /session lists sessions with OpenCode-style path", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/test" });
+    const { port } = await startTestServer(store);
+
+    const list = await fetchJson(port, "/session");
+
+    expect(list).toEqual([
+      expect.objectContaining({
+        id: session.id,
+        workspaceRoot: "/test",
+      }),
+    ]);
+  });
+
+  it("POST /session creates a project-bound session", async () => {
+    const base = await tmpBaseDir();
+    const workspace = await mkdtemp(join(tmpdir(), "myagent-session-api-"));
+    const canonicalWorkspace = await realpath(workspace);
+    activeTmpDirs.push(workspace);
+    const store = openTestStore(base);
+    const { port } = await startTestServer(store);
+
+    const data = await fetchJson(port, "/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath: workspace }),
+    });
+
+    expect(data).toMatchObject({
+      id: expect.any(String),
+      workspaceRoot: canonicalWorkspace,
+      cwd: canonicalWorkspace,
+      provider: "openai",
+      model: "test-model",
+    });
+    expect(store.getSession(data.id)?.cwd).toBe(canonicalWorkspace);
+  });
+
+  it("GET /session/status reports idle and busy sessions", async () => {
+    let release!: () => void;
+    const blocker = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/test" });
+    const port = await findAvailablePort(43200);
+    const server = createAppServer({
+      provider: delayedProvider(blocker),
+      providerName: "openai",
+      modelName: "test-model",
+      registry: new ToolRegistry(),
+      approval: "auto",
+      store,
+      cwd: "/test",
+    });
+    activeServers.push(server);
+    await new Promise<void>((resolve) => {
+      server.listen(port, "127.0.0.1", () => resolve());
+    });
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    activeWs.push(ws);
+    await new Promise<void>((resolve) => ws.once("open", resolve));
+    ws.send(JSON.stringify({ type: "user_message", sessionId: session.id, text: "hello" }));
+    await waitForCondition(
+      () => store.getSession(session.id)!.messages.length > 0,
+      "turn did not start",
+    );
+
+    expect(await fetchJson(port, "/session/status")).toEqual([
+      { id: session.id, status: "busy" },
+    ]);
+
+    release();
+    await waitForCondition(
+      () => store.getSession(session.id)!.messages.some((message) => message.role === "assistant"),
+      "turn did not finish",
+    );
+  });
+
+  it("GET /session/:id/message returns messages", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/test" });
+    store.appendMessages(session.id, [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "hi" },
+    ]);
+    const { port } = await startTestServer(store);
+
+    const msgs = await fetchJson(port, `/session/${session.id}/message`);
+
+    expect(msgs).toHaveLength(2);
+  });
+
+  it("GET /session/:id/diff returns unified diff files", async () => {
+    const base = await tmpBaseDir();
+    const workspace = await mkdtemp(join(tmpdir(), "myagent-session-diff-"));
+    activeTmpDirs.push(workspace);
+    await runGit(workspace, ["init"]);
+    await runGit(workspace, ["config", "user.email", "test@example.com"]);
+    await runGit(workspace, ["config", "user.name", "Test"]);
+    await writeFile(join(workspace, "file.txt"), "old\n");
+    await runGit(workspace, ["add", "file.txt"]);
+    await runGit(workspace, ["commit", "-m", "init"]);
+    await writeFile(join(workspace, "file.txt"), "old\nnew\n");
+
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: workspace });
+    const { port } = await startTestServer(store);
+
+    const data = await fetchJson(port, `/session/${session.id}/diff`);
+
+    expect(data).toMatchObject({
+      sessionId: session.id,
+      files: [expect.objectContaining({ path: "file.txt", additions: 1 })],
+    });
+    expect(data.diff).toContain("+new");
   });
 
   it("GET /api/sessions/:id/messages returns messages", async () => {

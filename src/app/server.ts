@@ -14,6 +14,8 @@ import { SessionManager } from "./session-api.js";
 import { EMBEDDED_HTML } from "./html.js";
 import { getAppClientAsset } from "./web/bundle.js";
 import { publicModelProfile } from "../model/provider-factory.js";
+import { getGitDiff } from "../workspace/diff.js";
+import { parseUnifiedDiffFiles } from "../diff/unified.js";
 
 type AppServerDeps = {
   provider: Provider;
@@ -71,6 +73,25 @@ export function createAppServer(deps: AppServerDeps): Server {
       req.on("end", () => resolve(body));
       req.on("error", reject);
     });
+  };
+
+  const createSessionFromBody = async (req: IncomingMessage) => {
+    const body = await readBody(req);
+    const parsed = body ? JSON.parse(body) : {};
+    const cwd =
+      typeof parsed.projectPath === "string"
+        ? canonicalProjectPath(parsed.projectPath)
+        : typeof parsed.cwd === "string"
+          ? canonicalProjectPath(parsed.cwd)
+          : deps.store.getCurrentProject()?.path ?? deps.cwd;
+    const session = deps.store.createSession({
+      workspaceRoot: cwd,
+      modelProfileId: deps.modelProfileId,
+      provider: deps.providerName,
+      model: deps.modelName,
+    });
+    manager.registerSession(session);
+    return session;
   };
 
   const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
@@ -165,6 +186,88 @@ export function createAppServer(deps: AppServerDeps): Server {
         return;
       }
 
+      if (path === "/session" && req.method === "GET") {
+        json(res, deps.store.listSessions());
+        return;
+      }
+
+      if (path === "/session" && req.method === "POST") {
+        const session = await createSessionFromBody(req);
+        json(res, {
+          id: session.id,
+          workspaceRoot: session.cwd,
+          cwd: session.cwd,
+          modelProfileId: session.modelProfileId,
+          provider: session.provider,
+          model: session.model,
+        }, 201);
+        return;
+      }
+
+      if (path === "/session/status" && req.method === "GET") {
+        json(
+          res,
+          deps.store.listSessions().map((session) => ({
+            id: session.id,
+            status: manager.hasActiveTurn(session.id) ? "busy" : "idle",
+          })),
+        );
+        return;
+      }
+
+      if (path.startsWith("/session/")) {
+        const parts = path.split("/");
+        const sessionId = parts[2];
+        const leaf = parts[3];
+        if (!sessionId) {
+          json(res, { error: "Missing session id" }, 400);
+          return;
+        }
+
+        if (!leaf && req.method === "GET") {
+          const summary = deps.store.listSessions().find((session) => session.id === sessionId);
+          if (!summary) {
+            json(res, { error: "Session not found" }, 404);
+            return;
+          }
+          json(res, {
+            ...summary,
+            status: manager.hasActiveTurn(sessionId) ? "busy" : "idle",
+          });
+          return;
+        }
+
+        if (leaf === "message" && req.method === "GET") {
+          const session = deps.store.getSession(sessionId);
+          if (!session) {
+            json(res, { error: "Session not found" }, 404);
+            return;
+          }
+          json(res, session.messages);
+          return;
+        }
+
+        if (leaf === "diff" && req.method === "GET") {
+          const session = deps.store.getSession(sessionId);
+          if (!session) {
+            json(res, { error: "Session not found" }, 404);
+            return;
+          }
+          const diff = await getGitDiff(session.cwd);
+          json(res, {
+            sessionId,
+            files: diff ? parseUnifiedDiffFiles(diff) : [],
+            diff,
+          });
+          return;
+        }
+
+        if (leaf === "abort" && req.method === "POST") {
+          json(res, { error: "Abort not supported yet" }, 501);
+          return;
+        }
+      }
+
       if (path === "/api/sessions" && req.method === "GET") {
         const sessions = deps.store.listSessions();
         json(res, sessions);
@@ -172,21 +275,7 @@ export function createAppServer(deps: AppServerDeps): Server {
       }
 
       if (path === "/api/sessions" && req.method === "POST") {
-        const body = await readBody(req);
-        const parsed = body ? JSON.parse(body) : {};
-        const cwd =
-          typeof parsed.projectPath === "string"
-            ? canonicalProjectPath(parsed.projectPath)
-            : typeof parsed.cwd === "string"
-              ? canonicalProjectPath(parsed.cwd)
-              : deps.store.getCurrentProject()?.path ?? deps.cwd;
-        const session = deps.store.createSession({
-          workspaceRoot: cwd,
-          modelProfileId: deps.modelProfileId,
-          provider: deps.providerName,
-          model: deps.modelName,
-        });
-        manager.registerSession(session);
+        const session = await createSessionFromBody(req);
         json(res, { id: session.id, cwd: session.cwd }, 201);
         return;
       }
