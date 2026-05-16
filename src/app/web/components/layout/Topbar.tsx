@@ -3,14 +3,14 @@ import React from "react";
 export function Topbar({
   sessionTitle,
   sessionId,
-  workspace,
+  projectPath,
   modelLabel,
   status,
   onCopySession,
 }: {
   sessionTitle: string;
   sessionId: string | null;
-  workspace: string;
+  projectPath: string;
   modelLabel: string;
   status: "connecting" | "connected" | "running";
   onCopySession: () => void;
@@ -44,8 +44,8 @@ export function Topbar({
             <span className="topbar-action-value mono">{sessionId || "session"}</span>
           </div>
           <div className="topbar-action-row">
-            <span className="topbar-action-label">Workspace</span>
-            <span className="topbar-action-value mono">{workspace || "workspace"}</span>
+            <span className="topbar-action-label">Project</span>
+            <span className="topbar-action-value mono">{projectPath || "project"}</span>
           </div>
           <button className="topbar-copy-button" onClick={onCopySession} disabled={!sessionId}>
             Copy session ID

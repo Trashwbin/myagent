@@ -77,6 +77,8 @@ describe("createSession", () => {
     });
     const listed = store.listSessions();
     expect(listed).toHaveLength(1);
+    expect(listed[0].projectPath).toBe("/tmp/ws");
+    expect(listed[0].workspaceRoot).toBe("/tmp/ws");
     expect(listed[0].modelProfileId).toBe("openai/gpt-4o");
     expect(listed[0].provider).toBe("openai");
     expect(listed[0].model).toBe("gpt-4o");

@@ -26,7 +26,7 @@ import type {
 } from "./types.js";
 
 export type AppAction =
-  | { type: "config_loaded"; config: AppState["config"] }
+  | { type: "provider_config_loaded"; config: AppState["providerConfig"] }
   | { type: "projects_loaded"; projects: ProjectSummary[]; currentProjectPath?: string | null }
   | { type: "set_active_project"; projectPath: string | null }
   | { type: "sessions_loaded"; sessions: SessionSummary[] }
@@ -45,7 +45,7 @@ export type AppAction =
   | { type: "approval_cleared" };
 
 export const initialAppState: AppState = {
-  config: null,
+  providerConfig: null,
   projects: [],
   activeProjectPath: null,
   sessions: [],
@@ -59,8 +59,8 @@ export const initialAppState: AppState = {
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
-    case "config_loaded":
-      return { ...state, config: action.config };
+    case "provider_config_loaded":
+      return { ...state, providerConfig: action.config };
     case "projects_loaded":
       return {
         ...state,

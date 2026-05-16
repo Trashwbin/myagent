@@ -19,6 +19,7 @@ export type ProjectRow = {
 
 export type SessionRow = {
   id: string;
+  projectPath: string;
   workspaceRoot: string;
   modelProfileId?: string;
   provider?: string;
@@ -508,6 +509,7 @@ export function openStore(options?: StoreOptions): TranscriptStore {
         .all() as Record<string, unknown>[];
       return rows.map((r) => ({
         id: r.id as string,
+        projectPath: r.workspace_root as string,
         workspaceRoot: r.workspace_root as string,
         modelProfileId: (r.model_profile_id as string) ?? undefined,
         provider: (r.provider as string) ?? undefined,

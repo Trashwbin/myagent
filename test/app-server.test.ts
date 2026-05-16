@@ -439,6 +439,7 @@ describe("HTTP API", () => {
     expect(list).toEqual([
       expect.objectContaining({
         id: session.id,
+        projectPath: "/test",
         workspaceRoot: "/test",
       }),
     ]);
@@ -460,6 +461,7 @@ describe("HTTP API", () => {
 
     expect(data).toMatchObject({
       id: expect.any(String),
+      projectPath: canonicalWorkspace,
       workspaceRoot: canonicalWorkspace,
       cwd: canonicalWorkspace,
       provider: "openai",

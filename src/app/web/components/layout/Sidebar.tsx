@@ -3,6 +3,7 @@ import type { ProjectSummary, SessionSummary } from "../../state/types.js";
 import {
   CURRENT_WORKSPACE_VISIBLE,
   sessionMeta,
+  sessionProjectPath,
   sessionTitle,
   visibleSessions,
   workspaceName,
@@ -30,10 +31,10 @@ export function Sidebar({
   const groups = useMemo(() => {
     const projectPaths = new Set(projects.map((project) => project.path));
     const implicitProjects = sessions
-      .filter((session) => !projectPaths.has(session.workspaceRoot))
+      .filter((session) => !projectPaths.has(sessionProjectPath(session)))
       .map((session) => ({
-        path: session.workspaceRoot,
-        name: workspaceName(session.workspaceRoot),
+        path: sessionProjectPath(session),
+        name: workspaceName(sessionProjectPath(session)),
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
         sessionCount: 0,
@@ -44,7 +45,7 @@ export function Sidebar({
     return allProjects
       .map((project) => {
         const projectSessions = sessions.filter(
-          (session) => session.workspaceRoot === project.path,
+          (session) => sessionProjectPath(session) === project.path,
         );
         const matchingSessions = needle
           ? projectSessions.filter((session) =>

@@ -17,10 +17,14 @@ export function workspaceName(path: string) {
   return parts[parts.length - 1] || path || "Workspace";
 }
 
+export function sessionProjectPath(session: SessionSummary) {
+  return session.projectPath || session.workspaceRoot || "";
+}
+
 export function groupSessions(sessions: SessionSummary[]): SessionGroup[] {
   const groups = new Map<string, SessionGroup>();
   for (const session of sessions) {
-    const path = session.workspaceRoot;
+    const path = sessionProjectPath(session);
     const group = groups.get(path) ?? {
       path,
       name: workspaceName(path),
@@ -92,7 +96,7 @@ export function filterSessions(
 ) {
   const needle = query.trim().toLowerCase();
   return sessions.filter((session) => {
-    if (scope === "current" && session.workspaceRoot !== currentWorkspace) return false;
+    if (scope === "current" && sessionProjectPath(session) !== currentWorkspace) return false;
     if (!needle) return true;
     const title = sessionTitle(session).toLowerCase();
     return title.includes(needle);

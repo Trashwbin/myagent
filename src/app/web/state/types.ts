@@ -1,23 +1,31 @@
 import type { ApprovalRequest } from "../../../session/loop.js";
 import type { ToolDisplay } from "../../../session/tool-display.js";
 
-export type ClientConfig = {
-  cwd: string;
+export type ProviderModelSummary = {
+  id: string;
   provider: string;
+  adapter: string;
   model: string;
-  approval: string;
-  models?: Array<{
-    id: string;
-    provider: string;
-    adapter: string;
-    model: string;
-    name?: string;
-  }>;
+  name?: string;
+};
+
+export type ProviderSummary = {
+  id: string;
+  name: string;
+  adapters: string[];
+  models: ProviderModelSummary[];
+};
+
+export type ProviderConfig = {
+  current: string;
+  providers: ProviderSummary[];
+  models: ProviderModelSummary[];
 };
 
 export type SessionSummary = {
   id: string;
-  workspaceRoot: string;
+  projectPath: string;
+  workspaceRoot?: string;
   modelProfileId?: string;
   provider?: string;
   model?: string;
@@ -109,7 +117,7 @@ export type PendingApproval = {
 };
 
 export type AppState = {
-  config: ClientConfig | null;
+  providerConfig: ProviderConfig | null;
   projects: ProjectSummary[];
   activeProjectPath: string | null;
   sessions: SessionSummary[];

@@ -375,7 +375,7 @@ describe("web timeline reducer", () => {
       sessions: [
         {
           id: "s1",
-          workspaceRoot: "/tmp/ws",
+          projectPath: "/tmp/ws",
           modelProfileId: "mimo/first",
           provider: "mimo",
           model: "first",

@@ -327,6 +327,7 @@ export function createAppServer(deps: AppServerDeps): Server {
         const session = await createSessionFromBody(req);
         json(res, {
           id: session.id,
+          projectPath: session.cwd,
           workspaceRoot: session.cwd,
           cwd: session.cwd,
           modelProfileId: session.modelProfileId,
@@ -364,6 +365,7 @@ export function createAppServer(deps: AppServerDeps): Server {
           }
           json(res, {
             ...summary,
+            projectPath: summary.projectPath,
             status: manager.hasActiveTurn(sessionId) ? "busy" : "idle",
           });
           return;
@@ -408,7 +410,7 @@ export function createAppServer(deps: AppServerDeps): Server {
 
       if (path === "/api/sessions" && req.method === "POST") {
         const session = await createSessionFromBody(req);
-        json(res, { id: session.id, cwd: session.cwd }, 201);
+        json(res, { id: session.id, projectPath: session.cwd, cwd: session.cwd }, 201);
         return;
       }
 

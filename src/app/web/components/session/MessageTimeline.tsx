@@ -16,7 +16,7 @@ export function MessageTimeline({
       {turns.length === 0 ? (
         empty || (
           <div className="empty">
-            <h1>Start working in this workspace</h1>
+            <h1>Start working in this project</h1>
             <p>Pick an existing session from the left, or create a new one.</p>
           </div>
         )
