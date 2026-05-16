@@ -7,7 +7,7 @@ import type { Provider } from "../src/model/provider.js";
 import type { TranscriptStore } from "../src/storage/store.js";
 import { openStore } from "../src/storage/store.js";
 import { ToolRegistry } from "../src/tools/registry.js";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WebSocket } from "ws";
@@ -222,6 +222,74 @@ describe("HTTP API", () => {
     ]);
     expect(Object.keys(data)).not.toContain("apiKey");
     expect(Object.keys(data)).not.toContain("authToken");
+  });
+
+  it("GET /project lists project summaries", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/test" });
+    const { port } = await startTestServer(store);
+
+    const data = await fetchJson(port, "/project");
+
+    expect(data).toEqual([
+      expect.objectContaining({
+        path: "/test",
+        name: "test",
+        sessionCount: 1,
+        lastSessionId: session.id,
+      }),
+    ]);
+  });
+
+  it("POST /project creates an explicit project", async () => {
+    const base = await tmpBaseDir();
+    const workspace = await mkdtemp(join(tmpdir(), "myagent-project-api-"));
+    const canonicalWorkspace = await realpath(workspace);
+    activeTmpDirs.push(workspace);
+    const store = openTestStore(base);
+    const { port } = await startTestServer(store);
+
+    const data = await fetchJson(port, "/project", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: workspace, name: "API Project", current: true }),
+    });
+
+    expect(data).toMatchObject({
+      path: canonicalWorkspace,
+      name: "API Project",
+      sessionCount: 0,
+      current: true,
+    });
+    expect(await fetchJson(port, "/project/current")).toMatchObject({
+      path: canonicalWorkspace,
+      name: "API Project",
+      current: true,
+    });
+  });
+
+  it("PUT /project/current selects an existing or implicit project", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    store.createSession({ workspaceRoot: "/test" });
+    const { port } = await startTestServer(store);
+
+    const data = await fetchJson(port, "/project/current", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "/test" }),
+    });
+
+    expect(data).toMatchObject({
+      path: "/test",
+      name: "test",
+      current: true,
+    });
+    expect(await fetchJson(port, "/project/current")).toMatchObject({
+      path: "/test",
+      current: true,
+    });
   });
 
   it("POST /api/sessions creates session", async () => {

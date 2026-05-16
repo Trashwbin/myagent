@@ -1,4 +1,6 @@
+import { existsSync, realpathSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import { resolve } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { Provider } from "../model/provider.js";
 import type { ModelProfile } from "../config/config.js";
@@ -26,6 +28,11 @@ type AppServerDeps = {
   availableSkills?: SkillSummary[];
   cwd: string;
 };
+
+function canonicalProjectPath(input: string): string {
+  const resolved = resolve(input);
+  return existsSync(resolved) ? realpathSync.native(resolved) : resolved;
+}
 
 export function createAppServer(deps: AppServerDeps): Server {
   const subscribers = new Map<string, Set<WebSocket>>();
@@ -93,6 +100,56 @@ export function createAppServer(deps: AppServerDeps): Server {
       }
 
       if (path === "/api/health" && req.method === "GET") {
+        json(res, { ok: true });
+        return;
+      }
+
+      if (path === "/project" && req.method === "GET") {
+        json(res, deps.store.listProjects());
+        return;
+      }
+
+      if (path === "/project" && req.method === "POST") {
+        const body = await readBody(req);
+        const parsed = body ? JSON.parse(body) : {};
+        if (typeof parsed.path !== "string" || parsed.path.trim() === "") {
+          json(res, { error: "Project path is required" }, 400);
+          return;
+        }
+        const project = deps.store.upsertProject({
+          path: canonicalProjectPath(parsed.path),
+          name: typeof parsed.name === "string" ? parsed.name : undefined,
+          setCurrent: parsed.current === true,
+        });
+        json(res, project, 201);
+        return;
+      }
+
+      if (path === "/project/current" && req.method === "GET") {
+        const current = deps.store.getCurrentProject();
+        json(res, current ?? null);
+        return;
+      }
+
+      if (path === "/project/current" && req.method === "PUT") {
+        const body = await readBody(req);
+        const parsed = body ? JSON.parse(body) : {};
+        if (typeof parsed.path !== "string" || parsed.path.trim() === "") {
+          json(res, { error: "Project path is required" }, 400);
+          return;
+        }
+        const project = deps.store.setCurrentProject(canonicalProjectPath(parsed.path));
+        json(res, project);
+        return;
+      }
+
+      if (path.startsWith("/project/") && req.method === "DELETE") {
+        const encodedPath = decodeURIComponent(path.slice("/project/".length));
+        if (!encodedPath) {
+          json(res, { error: "Project path is required" }, 400);
+          return;
+        }
+        deps.store.deleteProject(canonicalProjectPath(encodedPath));
         json(res, { ok: true });
         return;
       }

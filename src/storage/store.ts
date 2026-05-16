@@ -6,6 +6,17 @@ import { randomUUID } from "node:crypto";
 import type { Message } from "../model/types.js";
 import type { SessionState } from "../session/loop.js";
 
+export type ProjectRow = {
+  path: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  sessionCount: number;
+  lastSessionId?: string;
+  lastSessionUpdatedAt?: number;
+  current?: boolean;
+};
+
 export type SessionRow = {
   id: string;
   workspaceRoot: string;
@@ -18,6 +29,16 @@ export type SessionRow = {
 };
 
 export type TranscriptStore = {
+  upsertProject(input: {
+    path: string;
+    name?: string;
+    setCurrent?: boolean;
+  }): ProjectRow;
+  getProject(path: string): ProjectRow | undefined;
+  listProjects(): ProjectRow[];
+  getCurrentProject(): ProjectRow | undefined;
+  setCurrentProject(path: string): ProjectRow;
+  deleteProject(path: string): void;
   createSession(input: {
     workspaceRoot: string;
     modelProfileId?: string;
@@ -116,6 +137,13 @@ function deserializeMessage(row: Record<string, unknown>): Message {
   return msg;
 }
 
+function projectName(path: string): string {
+  const parts = String(path || "")
+    .split(/[\\/]/)
+    .filter(Boolean);
+  return parts[parts.length - 1] || path || "Project";
+}
+
 export function openStore(options?: StoreOptions): TranscriptStore {
   const baseDir =
     options?.baseDir ?? process.env.MYAGENT_HOME ?? join(homedir(), ".myagent");
@@ -124,6 +152,18 @@ export function openStore(options?: StoreOptions): TranscriptStore {
   const db = openSqliteDatabase(dbPath);
 
   db.exec("PRAGMA journal_mode = WAL");
+
+  db.exec(`CREATE TABLE IF NOT EXISTS projects (
+    path TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS app_state (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  )`);
 
   db.exec(`CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
@@ -210,6 +250,104 @@ export function openStore(options?: StoreOptions): TranscriptStore {
     db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(now(), sessionId);
   }
 
+  function currentProjectPath(): string | undefined {
+    const row = db.prepare("SELECT value FROM app_state WHERE key = 'current_project_path'").get() as
+      | Record<string, unknown>
+      | undefined;
+    return (row?.value as string | null) ?? undefined;
+  }
+
+  function writeCurrentProjectPath(path: string | null) {
+    if (path === null) {
+      db.prepare("DELETE FROM app_state WHERE key = 'current_project_path'").run();
+      return;
+    }
+    db.prepare(
+      "INSERT INTO app_state (key, value) VALUES ('current_project_path', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    ).run(path);
+  }
+
+  function projectRows(): ProjectRow[] {
+    const explicitRows = db
+      .prepare("SELECT * FROM projects")
+      .all() as Record<string, unknown>[];
+    const sessionRows = db
+      .prepare(
+        `SELECT
+          workspace_root,
+          COUNT(*) AS session_count,
+          MAX(updated_at) AS last_session_updated_at
+        FROM sessions
+        GROUP BY workspace_root`,
+      )
+      .all() as Record<string, unknown>[];
+
+    const currentPath = currentProjectPath();
+    const rows = new Map<string, ProjectRow>();
+
+    for (const row of explicitRows) {
+      const path = row.path as string;
+      rows.set(path, {
+        path,
+        name: row.name as string,
+        createdAt: row.created_at as number,
+        updatedAt: row.updated_at as number,
+        sessionCount: 0,
+        current: path === currentPath,
+      });
+    }
+
+    for (const row of sessionRows) {
+      const path = row.workspace_root as string;
+      const lastSession = db
+        .prepare(
+          "SELECT id, updated_at FROM sessions WHERE workspace_root = ? ORDER BY updated_at DESC LIMIT 1",
+        )
+        .get(path) as Record<string, unknown> | undefined;
+      const existing = rows.get(path);
+      const lastSessionUpdatedAt = row.last_session_updated_at as number;
+      rows.set(path, {
+        path,
+        name: existing?.name ?? projectName(path),
+        createdAt: existing?.createdAt ?? lastSessionUpdatedAt,
+        updatedAt: Math.max(existing?.updatedAt ?? 0, lastSessionUpdatedAt),
+        sessionCount: row.session_count as number,
+        lastSessionId: (lastSession?.id as string) ?? undefined,
+        lastSessionUpdatedAt,
+        current: path === currentPath,
+      });
+    }
+
+    return [...rows.values()].sort((a, b) => {
+      if (a.current && !b.current) return -1;
+      if (!a.current && b.current) return 1;
+      return b.updatedAt - a.updatedAt || a.name.localeCompare(b.name);
+    });
+  }
+
+  function getProjectRow(path: string): ProjectRow | undefined {
+    return projectRows().find((project) => project.path === path);
+  }
+
+  function upsertProject(input: {
+    path: string;
+    name?: string;
+    setCurrent?: boolean;
+  }): ProjectRow {
+    const ts = now();
+    const requestedName = input.name?.trim() || null;
+    const name = requestedName ?? projectName(input.path);
+    db.prepare(
+      `INSERT INTO projects (path, name, created_at, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(path) DO UPDATE SET
+         name = COALESCE(?, projects.name),
+         updated_at = ?`,
+    ).run(input.path, name, ts, ts, requestedName, ts);
+    if (input.setCurrent) writeCurrentProjectPath(input.path);
+    return getProjectRow(input.path)!;
+  }
+
   function updateSessionModel(
     sessionId: string,
     input: { modelProfileId?: string; provider?: string; model?: string },
@@ -266,9 +404,37 @@ export function openStore(options?: StoreOptions): TranscriptStore {
   }
 
   return {
+    upsertProject,
+
+    getProject(path) {
+      return getProjectRow(path);
+    },
+
+    listProjects() {
+      return projectRows();
+    },
+
+    getCurrentProject() {
+      const current = currentProjectPath();
+      if (current) return getProjectRow(current);
+      return projectRows()[0];
+    },
+
+    setCurrentProject(path) {
+      const project = getProjectRow(path) ?? upsertProject({ path });
+      writeCurrentProjectPath(path);
+      return { ...project, current: true };
+    },
+
+    deleteProject(path) {
+      db.prepare("DELETE FROM projects WHERE path = ?").run(path);
+      if (currentProjectPath() === path) writeCurrentProjectPath(null);
+    },
+
     createSession(input) {
       const id = randomUUID();
       const ts = now();
+      upsertProject({ path: input.workspaceRoot });
       db.prepare(
         "INSERT INTO sessions (id, workspace_root, model_profile_id, provider, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
       ).run(

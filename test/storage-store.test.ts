@@ -118,6 +118,64 @@ describe("createSession", () => {
   });
 });
 
+describe("projects", () => {
+  it("persists explicit projects and current selection", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+
+    const project = store.upsertProject({
+      path: "/tmp/project-a",
+      name: "Project A",
+      setCurrent: true,
+    });
+
+    expect(project).toMatchObject({
+      path: "/tmp/project-a",
+      name: "Project A",
+      sessionCount: 0,
+      current: true,
+    });
+    expect(store.getCurrentProject()).toMatchObject({
+      path: "/tmp/project-a",
+      name: "Project A",
+      current: true,
+    });
+
+    await cleanup();
+  });
+
+  it("derives projects from historical sessions", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/project-b" });
+
+    expect(store.listProjects()).toEqual([
+      expect.objectContaining({
+        path: "/tmp/project-b",
+        name: "project-b",
+        sessionCount: 1,
+        lastSessionId: session.id,
+      }),
+    ]);
+
+    await cleanup();
+  });
+
+  it("does not overwrite an explicit project name when sessions are created", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    store.upsertProject({ path: "/tmp/project-c", name: "Custom" });
+    store.createSession({ workspaceRoot: "/tmp/project-c" });
+
+    expect(store.getProject("/tmp/project-c")).toMatchObject({
+      name: "Custom",
+      sessionCount: 1,
+    });
+
+    await cleanup();
+  });
+});
+
 describe("appendMessages + getSession", () => {
   it("stores and restores user and assistant messages", async () => {
     const base = await tmpBaseDir();
