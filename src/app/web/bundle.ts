@@ -1,5 +1,4 @@
 import { build } from "esbuild";
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 type ClientAsset = {
@@ -62,23 +61,8 @@ async function buildClientAssets(): Promise<Map<string, BundledAsset>> {
     if (!assets.has("/assets/client.js")) throw new Error("esbuild produced no client bundle");
     return assets;
   } catch (err) {
-    if (process.env.NODE_ENV !== "test") throw err;
-    return fallbackClientAssets();
+    throw err;
   }
-}
-
-async function fallbackClientAssets(): Promise<Map<string, BundledAsset>> {
-  const client = await readFile(new URL("./client.js", import.meta.url), "utf8");
-  const contents = client.replace(/^export const APP_CLIENT_SCRIPT = String.raw`/, "").replace(/`;\s*$/, "");
-  return new Map([
-    [
-      "/assets/client.js",
-      {
-        content: contents,
-        contentType: "text/javascript; charset=utf-8",
-      },
-    ],
-  ]);
 }
 
 function contentTypeFor(pathname: string): string {
