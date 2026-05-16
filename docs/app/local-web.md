@@ -3,17 +3,23 @@
 ## Quick Start
 
 ```bash
-myagent app --cwd /path/to/workspace
+myagent app
 ```
 
 This starts a local HTTP + WebSocket server on `127.0.0.1` (default port 43110).
 
 Open the printed URL in a browser to use the local web UI.
 
-The browser remembers the active session per workspace in `localStorage`. Opening
-the page again restores the last selected session when it still exists; it does
-not create a fresh session on every refresh. Use the `New` button to explicitly
-start another session.
+The web app starts on the default project page. Projects are first-class objects
+in the sidebar; sessions belong to projects, and runtime config, skills,
+permissions, checkpoints, and diffs are resolved from each session's project
+path. `--cwd` is only a fallback used to seed the first current project when no
+project exists yet.
+
+The browser remembers the active session and active project in `localStorage`.
+Opening the page again restores the last selected session when it still exists;
+it does not create a fresh session on every refresh. Use `New chat` to explicitly
+start another session under the selected project.
 
 The embedded page follows the design guide in [DESIGN.md](DESIGN.md). The shell
 is still served by the Node app server, but the browser client is bundled from
@@ -30,10 +36,11 @@ Assistant answers render through a small React markdown island:
 
 - **Server** binds to `127.0.0.1` only — no remote access.
 - **Browser** never executes tools directly. All tool execution happens in the Node.js server process via the existing `runTurn()` loop.
+- **Project API** owns the current project and project list; the browser does not infer execution cwd from the launch command.
 - **Approval** flows through WebSocket: the server sends `approval_required`, the browser shows buttons, and the user's choice is sent back as `approval_decision`.
-- **Session shell** is browser-side: the sidebar lists persisted sessions, the
-  header shows the full session id, and the active session can be selected
-  without restarting the server.
+- **Session shell** is browser-side: the sidebar lists projects with nested
+  sessions, the header exposes session actions in a compact menu, and the active
+  session can be selected without restarting the server.
 - **Markdown rendering** is browser-side: the app server exposes the bundled
   client at `/assets/client.js`; the runtime loop still only exchanges plain
   text and structured tool events over WebSocket.
@@ -43,11 +50,16 @@ Assistant answers render through a small React markdown island:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/health` | Returns `{ ok: true }` |
-| GET | `/api/config` | Returns cwd, provider, model, approval mode (no secrets) |
 | GET | `/assets/client.js` | Bundled browser client |
-| GET | `/api/sessions` | List all sessions |
-| POST | `/api/sessions` | Create new session (body: `{ cwd?: string }`) |
-| GET | `/api/sessions/:id/messages` | Get session message history |
+| GET | `/project` | List known projects |
+| POST | `/project` | Create or update a project |
+| GET | `/project/current` | Return the current project |
+| PUT | `/project/current` | Select the current project |
+| GET | `/config/providers` | Return public provider/model config (no secrets) |
+| GET | `/session` | List all sessions |
+| POST | `/session` | Create new session (body: `{ projectPath?: string }`) |
+| GET | `/session/:id/message` | Get session message history |
+| GET | `/session/:id/diff` | Get aggregated git diff for a session project |
 
 ## WebSocket Protocol
 

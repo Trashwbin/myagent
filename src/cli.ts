@@ -20,6 +20,7 @@ import { formatToolInputSummary } from "./cli/format-tool-input.js";
 import type { ApprovalResponse, ApprovalRule } from "./permission/approval.js";
 import {
   loadConfig,
+  loadGlobalConfig,
   resolveApprovalMode,
   resolveModelProfile,
   resolveModelProfiles,
@@ -297,6 +298,15 @@ async function handleSessionCommand(
 
 function createProvider(config: Config): Provider {
   return createProviderForProfile(resolveModelProfile(config));
+}
+
+function createAppBootstrapProvider(): Provider {
+  return {
+    name: "app-bootstrap",
+    async *stream() {
+      throw new Error("No project session runtime is available for this request.");
+    },
+  };
 }
 
 function createProviderForProfile(profile: ModelProfile): Provider {
@@ -578,14 +588,16 @@ async function handleInputDebug(): Promise<void> {
 }
 
 async function handleApp(options: { cwd: string }): Promise<void> {
-  const cwd = canonicalWorkspaceRoot(options.cwd);
-  const config = loadConfig({ workspaceRoot: cwd });
+  const fallbackProjectPath = canonicalWorkspaceRoot(options.cwd);
+  const config = loadGlobalConfig();
   const resolved = resolveSessionProvider(config);
   const modelProfiles = resolveModelProfiles(config);
-  const provider = createProvider(config);
-  const skills = await discoverSkills({ cwd });
-  const registry = buildDefaultRegistry(skills);
+  const provider = createAppBootstrapProvider();
+  const registry = buildDefaultRegistry();
   const store = openStore();
+  if (!store.getCurrentProject()) {
+    store.upsertProject({ path: fallbackProjectPath, setCurrent: true });
+  }
   const { createAppServer, findAvailablePort } = await import("./app/server.js");
   const port = await findAvailablePort(43110);
   const server = createAppServer({
@@ -598,8 +610,7 @@ async function handleApp(options: { cwd: string }): Promise<void> {
     registry,
     approval: resolveApprovalMode(config),
     store,
-    availableSkills: summarizeSkills(skills),
-    cwd,
+    cwd: fallbackProjectPath,
   });
   server.listen(port, "127.0.0.1", () => {
     console.log(`myAgent app listening on http://127.0.0.1:${port}`);

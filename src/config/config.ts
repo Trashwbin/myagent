@@ -150,7 +150,7 @@ function mergeLayer(primaryPath: string, legacyPath: string): Config {
 }
 
 export type LoadConfigOptions = {
-  workspaceRoot: string;
+  workspaceRoot?: string;
 };
 
 /**
@@ -164,9 +164,14 @@ export type LoadConfigOptions = {
  */
 export function loadConfig(options: LoadConfigOptions): Config {
   const global = mergeLayer(globalConfigPath(), globalLegacySettingsPath());
+  if (!options.workspaceRoot) return global;
   const project = mergeLayer(projectConfigPath(options.workspaceRoot), projectLegacySettingsPath(options.workspaceRoot));
   const local = mergeLayer(localConfigPath(options.workspaceRoot), localLegacySettingsPath(options.workspaceRoot));
   return mergeConfig(mergeConfig(global, project), local);
+}
+
+export function loadGlobalConfig(): Config {
+  return loadConfig({});
 }
 
 export function resolveConfigValue<T>(...values: Array<T | undefined>): T | undefined {

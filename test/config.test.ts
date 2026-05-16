@@ -4,6 +4,7 @@ import {
   globalConfigPath,
   localConfigPath,
   loadConfig,
+  loadGlobalConfig,
   projectConfigPath,
   resolveApprovalMode,
   resolveModelProfile,
@@ -116,6 +117,29 @@ describe("loadConfig", () => {
       const config = loadConfig({ workspaceRoot: tmp });
       expect(config.provider).toBe("openai");
       expect(config.providers?.openai?.model).toBe("gpt-4o");
+    } finally {
+      process.env.MYAGENT_HOME = original;
+    }
+  });
+
+  it("can load only global config without project overrides", async () => {
+    const homeDir = join(tmp, "home-global-only");
+    const projectDir = join(tmp, "project");
+    await mkdir(homeDir, { recursive: true });
+    await mkdir(join(projectDir, ".myagent"), { recursive: true });
+    await writeFile(join(homeDir, "config.json"), JSON.stringify({ provider: "openai" }));
+    await writeFile(
+      join(projectDir, ".myagent", "config.json"),
+      JSON.stringify({ provider: "anthropic" }),
+    );
+
+    const original = process.env.MYAGENT_HOME;
+    process.env.MYAGENT_HOME = homeDir;
+    try {
+      expect(loadGlobalConfig()).toEqual({ provider: "openai" });
+      expect(loadConfig({ workspaceRoot: projectDir })).toMatchObject({
+        provider: "anthropic",
+      });
     } finally {
       process.env.MYAGENT_HOME = original;
     }
