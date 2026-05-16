@@ -231,26 +231,6 @@ describe("HTTP API", () => {
     expect(data).toEqual({ ok: true });
   });
 
-  it("GET /api/config does not expose secrets", async () => {
-    const base = await tmpBaseDir();
-    const store = openTestStore(base);
-    const { port } = await startTestServer(store);
-    const data = await fetchJson(port, "/api/config");
-    expect(data.cwd).toBe("/test");
-    expect(data.provider).toBe("openai");
-    expect(data.model).toBe("test-model");
-    expect(data.models).toEqual([
-      {
-        id: "openai/test-model",
-        provider: "openai",
-        adapter: "@ai-sdk/openai",
-        model: "test-model",
-      },
-    ]);
-    expect(Object.keys(data)).not.toContain("apiKey");
-    expect(Object.keys(data)).not.toContain("authToken");
-  });
-
   it("GET /provider returns public provider groups", async () => {
     const base = await tmpBaseDir();
     const store = openTestStore(base);
@@ -380,54 +360,6 @@ describe("HTTP API", () => {
     });
   });
 
-  it("POST /api/sessions creates session", async () => {
-    const base = await tmpBaseDir();
-    const store = openTestStore(base);
-    const { port } = await startTestServer(store);
-    const data = await fetchJson(port, "/api/sessions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    expect(data.id).toBeTruthy();
-    expect(data.cwd).toBeTruthy();
-  });
-
-  it("POST /api/sessions accepts projectPath", async () => {
-    const base = await tmpBaseDir();
-    const workspace = await mkdtemp(join(tmpdir(), "myagent-session-project-"));
-    const canonicalWorkspace = await realpath(workspace);
-    activeTmpDirs.push(workspace);
-    const store = openTestStore(base);
-    const { port } = await startTestServer(store);
-
-    const data = await fetchJson(port, "/api/sessions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectPath: workspace }),
-    });
-
-    expect(data.cwd).toBe(canonicalWorkspace);
-    expect(store.getSession(data.id)?.cwd).toBe(canonicalWorkspace);
-    expect(store.getProject(canonicalWorkspace)).toMatchObject({
-      path: canonicalWorkspace,
-      sessionCount: 1,
-    });
-  });
-
-  it("GET /api/sessions lists sessions", async () => {
-    const base = await tmpBaseDir();
-    const store = openTestStore(base);
-    const { port } = await startTestServer(store);
-    await fetchJson(port, "/api/sessions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    const list = await fetchJson(port, "/api/sessions");
-    expect(list).toHaveLength(1);
-  });
-
   it("GET /session lists sessions with OpenCode-style path", async () => {
     const base = await tmpBaseDir();
     const store = openTestStore(base);
@@ -553,19 +485,6 @@ describe("HTTP API", () => {
       files: [expect.objectContaining({ path: "file.txt", additions: 1 })],
     });
     expect(data.diff).toContain("+new");
-  });
-
-  it("GET /api/sessions/:id/messages returns messages", async () => {
-    const base = await tmpBaseDir();
-    const store = openTestStore(base);
-    const session = store.createSession({ workspaceRoot: "/test" });
-    store.appendMessages(session.id, [
-      { role: "user", content: "hello" },
-      { role: "assistant", content: "hi" },
-    ]);
-    const { port } = await startTestServer(store);
-    const msgs = await fetchJson(port, `/api/sessions/${session.id}/messages`);
-    expect(msgs).toHaveLength(2);
   });
 
   it("GET / returns HTML", async () => {

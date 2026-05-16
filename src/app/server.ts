@@ -282,17 +282,6 @@ export function createAppServer(deps: AppServerDeps): Server {
         return;
       }
 
-      if (path === "/api/config" && req.method === "GET") {
-        json(res, {
-          cwd: deps.cwd,
-          provider: deps.providerName,
-          model: deps.modelName,
-          models: (deps.modelProfiles ?? []).map(publicModelProfile),
-          approval: deps.approval,
-        });
-        return;
-      }
-
       if (path === "/provider" && req.method === "GET") {
         json(res, publicProviders(deps.modelProfiles ?? []));
         return;
@@ -400,28 +389,6 @@ export function createAppServer(deps: AppServerDeps): Server {
           json(res, { error: "Abort not supported yet" }, 501);
           return;
         }
-      }
-
-      if (path === "/api/sessions" && req.method === "GET") {
-        const sessions = deps.store.listSessions();
-        json(res, sessions);
-        return;
-      }
-
-      if (path === "/api/sessions" && req.method === "POST") {
-        const session = await createSessionFromBody(req);
-        json(res, { id: session.id, projectPath: session.cwd, cwd: session.cwd }, 201);
-        return;
-      }
-
-      if (path.startsWith("/api/sessions/") && path.endsWith("/messages") && req.method === "GET") {
-        const parts = path.split("/");
-        const sessionId = parts[3];
-        if (!sessionId) { json(res, { error: "Missing session id" }, 400); return; }
-        const session = deps.store.getSession(sessionId);
-        if (!session) { json(res, { error: "Session not found" }, 404); return; }
-        json(res, session.messages);
-        return;
       }
 
       res.writeHead(404, { "Content-Type": "application/json" });
