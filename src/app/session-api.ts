@@ -34,10 +34,27 @@ type PendingApproval = {
 type ActiveSession = {
   session: SessionState;
   provider: Provider;
+  modelProfiles: ModelProfile[];
+  createProvider: (profile: ModelProfile) => Provider;
+  registry: ToolRegistry;
+  approval: ApprovalMode;
+  availableSkills: SkillSummary[] | undefined;
   activeTurn: Promise<void> | null;
   pendingApprovals: Map<string, PendingApproval>;
   approvalRules: ApprovalRule[];
   readState: ReadStateTracker;
+};
+
+export type SessionRuntime = {
+  provider: Provider;
+  modelProfiles: ModelProfile[];
+  createProvider: (profile: ModelProfile) => Provider;
+  registry: ToolRegistry;
+  approval: ApprovalMode;
+  availableSkills?: SkillSummary[];
+  modelProfileId?: string;
+  providerName?: string;
+  modelName?: string;
 };
 
 export class SessionManager {
@@ -49,6 +66,9 @@ export class SessionManager {
   private approval: ApprovalMode;
   private store: TranscriptStore;
   private availableSkills: SkillSummary[] | undefined;
+  private resolveRuntime:
+    | ((session: SessionState) => SessionRuntime | Promise<SessionRuntime>)
+    | undefined;
   private sendEvent: (sessionId: string, msg: ServerMessage) => void;
 
   constructor(deps: {
@@ -59,6 +79,7 @@ export class SessionManager {
     approval: ApprovalMode;
     store: TranscriptStore;
     availableSkills?: SkillSummary[];
+    resolveRuntime?: (session: SessionState) => SessionRuntime | Promise<SessionRuntime>;
     sendEvent: (sessionId: string, msg: ServerMessage) => void;
   }) {
     this.defaultProvider = deps.provider;
@@ -68,14 +89,21 @@ export class SessionManager {
     this.approval = deps.approval;
     this.store = deps.store;
     this.availableSkills = deps.availableSkills;
+    this.resolveRuntime = deps.resolveRuntime;
     this.sendEvent = deps.sendEvent;
   }
 
   registerSession(session: SessionState): void {
-    const profile = this.resolveSessionProfile(session);
+    const runtime = this.defaultRuntime();
+    const profile = this.resolveSessionProfile(session, runtime.modelProfiles);
     this.sessions.set(session.id, {
       session,
-      provider: profile ? this.createProvider(profile) : this.defaultProvider,
+      provider: profile ? runtime.createProvider(profile) : runtime.provider,
+      modelProfiles: runtime.modelProfiles,
+      createProvider: runtime.createProvider,
+      registry: runtime.registry,
+      approval: runtime.approval,
+      availableSkills: runtime.availableSkills,
       activeTurn: null,
       pendingApprovals: new Map(),
       approvalRules: [],
@@ -118,16 +146,18 @@ export class SessionManager {
     if (!active) return { ok: false, error: "Session not found" };
     if (active.activeTurn) return { ok: false, error: "Turn already active for this session" };
 
-    const modelCommand = this.handleModelCommand(active, text);
-    if (modelCommand) return modelCommand;
-
+    const isModelCommand = isModelSwitchCommand(text);
     const persistedUserMessage: Message = { role: "user", content: text };
-    const sessionForRun: SessionState = {
-      ...active.session,
-      messages: [...active.session.messages],
-    };
-    this.store.appendMessages(sessionId, [persistedUserMessage]);
-    active.session.messages.push(persistedUserMessage);
+    const sessionForRun: SessionState | null = isModelCommand
+      ? null
+      : {
+          ...active.session,
+          messages: [...active.session.messages],
+        };
+    if (!isModelCommand) {
+      this.store.appendMessages(sessionId, [persistedUserMessage]);
+      active.session.messages.push(persistedUserMessage);
+    }
 
     const approvalHandler = (request: ApprovalRequest): Promise<ApprovalResponse> => {
       return new Promise((resolve) => {
@@ -152,19 +182,24 @@ export class SessionManager {
 
     active.activeTurn = (async () => {
       try {
+        await this.refreshRuntime(active);
+
+        const modelCommand = await this.handleModelCommand(active, text);
+        if (modelCommand) return;
+
         const { session: updated, newMessages } = await runTurn(
           active.provider,
-          this.registry,
-          sessionForRun,
+          active.registry,
+          sessionForRun!,
           text,
           {
-            approval: this.approval,
+            approval: active.approval,
             approvalHandler,
             onEvent,
             sessionApprovalRules: active.approvalRules,
             store: this.store,
             readState: active.readState,
-            availableSkills: this.availableSkills,
+            availableSkills: active.availableSkills,
           },
         );
         Object.assign(active.session, updated);
@@ -237,6 +272,7 @@ export class SessionManager {
     if (!active) return { ok: false, error: "Session not found" };
     if (active.activeTurn) return { ok: false, error: "Turn already active for this session" };
 
+    await this.refreshRuntime(active);
     const result = await compactSession(active.provider, active.session);
     active.session.messages = result.messages;
     this.store.replaceMessages(sessionId, result.messages);
@@ -258,7 +294,7 @@ export class SessionManager {
     const trimmed = text.trim();
     if (trimmed !== "/model" && !trimmed.startsWith("/model ")) return undefined;
 
-    if (this.modelProfiles.length === 0) {
+    if (active.modelProfiles.length === 0) {
       const message = "No model profiles configured.";
       this.sendEvent(active.session.id, {
         type: "error",
@@ -266,37 +302,34 @@ export class SessionManager {
         message,
         code: "MODEL_NOT_CONFIGURED",
       });
-      this.sendEvent(active.session.id, { type: "turn_finished", sessionId: active.session.id });
       return { ok: true };
     }
 
     const requestedId = trimmed.slice("/model".length).trim();
     if (!requestedId) {
-      const message = formatModelList(this.modelProfiles, active.session.modelProfileId);
+      const message = formatModelList(active.modelProfiles, active.session.modelProfileId);
       this.appendAssistantStatus(active, message);
       this.sendEvent(active.session.id, {
         type: "turn_event",
         sessionId: active.session.id,
         event: { type: "assistant_message", message: { role: "assistant", content: message } },
       });
-      this.sendEvent(active.session.id, { type: "turn_finished", sessionId: active.session.id });
       return { ok: true };
     }
 
-    const profile = findModelProfile(this.modelProfiles, requestedId);
+    const profile = findModelProfile(active.modelProfiles, requestedId);
     if (!profile) {
-      const message = formatUnknownModel(requestedId, this.modelProfiles);
+      const message = formatUnknownModel(requestedId, active.modelProfiles);
       this.appendAssistantStatus(active, message);
       this.sendEvent(active.session.id, {
         type: "turn_event",
         sessionId: active.session.id,
         event: { type: "assistant_message", message: { role: "assistant", content: message } },
       });
-      this.sendEvent(active.session.id, { type: "turn_finished", sessionId: active.session.id });
       return { ok: true };
     }
 
-    active.provider = this.createProvider(profile);
+    active.provider = active.createProvider(profile);
     Object.assign(active.session, {
       modelProfileId: profile.id,
       provider: profile.provider,
@@ -318,7 +351,6 @@ export class SessionManager {
       model: profile.model,
       message,
     });
-    this.sendEvent(active.session.id, { type: "turn_finished", sessionId: active.session.id });
     return { ok: true };
   }
 
@@ -328,14 +360,40 @@ export class SessionManager {
     this.store.appendMessages(active.session.id, [message]);
   }
 
-  private resolveSessionProfile(session: SessionState): ModelProfile | undefined {
+  private defaultRuntime(): SessionRuntime {
+    return {
+      provider: this.defaultProvider,
+      modelProfiles: this.modelProfiles,
+      createProvider: this.createProvider,
+      registry: this.registry,
+      approval: this.approval,
+      availableSkills: this.availableSkills,
+    };
+  }
+
+  private async refreshRuntime(active: ActiveSession): Promise<void> {
+    if (!this.resolveRuntime) return;
+    const runtime = await this.resolveRuntime(active.session);
+    const profile = this.resolveSessionProfile(active.session, runtime.modelProfiles);
+    active.modelProfiles = runtime.modelProfiles;
+    active.createProvider = runtime.createProvider;
+    active.registry = runtime.registry;
+    active.approval = runtime.approval;
+    active.availableSkills = runtime.availableSkills;
+    active.provider = profile ? runtime.createProvider(profile) : runtime.provider;
+  }
+
+  private resolveSessionProfile(
+    session: SessionState,
+    modelProfiles: ModelProfile[],
+  ): ModelProfile | undefined {
     return (
-      findModelProfile(this.modelProfiles, session.modelProfileId) ??
+      findModelProfile(modelProfiles, session.modelProfileId) ??
       findModelProfile(
-        this.modelProfiles,
+        modelProfiles,
         session.provider && session.model ? `${session.provider}/${session.model}` : undefined,
       ) ??
-      this.modelProfiles[0]
+      modelProfiles[0]
     );
   }
 }
@@ -351,4 +409,9 @@ function formatCompactMessage(result: {
   retainedCount: number;
 }): string {
   return `Compacted ${result.compactedCount} messages; retained ${result.retainedCount} messages.`;
+}
+
+function isModelSwitchCommand(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed === "/model" || trimmed.startsWith("/model ");
 }

@@ -49,6 +49,24 @@ async function runGit(cwd: string, args: string[]): Promise<void> {
   await execFileAsync("git", args, { cwd });
 }
 
+function testRuntime(provider: Provider = noopProvider()) {
+  return {
+    provider,
+    modelProfiles: [
+      {
+        id: "openai/test-model",
+        provider: "openai",
+        adapter: "@ai-sdk/openai" as const,
+        model: "test-model",
+        apiKey: "sk-test",
+      },
+    ],
+    createProvider: () => provider,
+    registry: new ToolRegistry(),
+    approval: "on-request" as const,
+  };
+}
+
 function noopProvider(): Provider {
   return {
     name: "test",
@@ -125,6 +143,7 @@ async function startTestServer(store: TranscriptStore) {
     ],
     registry: new ToolRegistry(),
     approval: "on-request",
+    resolveRuntime: () => testRuntime(),
     store,
     cwd: "/test",
   });
@@ -458,12 +477,14 @@ describe("HTTP API", () => {
     const store = openTestStore(base);
     const session = store.createSession({ workspaceRoot: "/test" });
     const port = await findAvailablePort(43200);
+    const provider = delayedProvider(blocker);
     const server = createAppServer({
-      provider: delayedProvider(blocker),
+      provider,
       providerName: "openai",
       modelName: "test-model",
       registry: new ToolRegistry(),
       approval: "auto",
+      resolveRuntime: () => ({ ...testRuntime(provider), approval: "auto" }),
       store,
       cwd: "/test",
     });
@@ -720,6 +741,28 @@ describe("WebSocket", () => {
       createProvider: (profile) => providers[profile.id as keyof typeof providers],
       registry: new ToolRegistry(),
       approval: "auto",
+      resolveRuntime: () => ({
+        provider: providers["openai/first"],
+        modelProfiles: [
+          {
+            id: "openai/first",
+            provider: "openai",
+            adapter: "@ai-sdk/openai",
+            model: "first",
+            apiKey: "sk-test",
+          },
+          {
+            id: "mimo-claude/second",
+            provider: "mimo-claude",
+            adapter: "@ai-sdk/anthropic",
+            model: "second",
+            authToken: "sk-test",
+          },
+        ],
+        createProvider: (profile) => providers[profile.id as keyof typeof providers],
+        registry: new ToolRegistry(),
+        approval: "auto",
+      }),
       store,
       cwd: "/test",
     });
@@ -803,12 +846,14 @@ describe("WebSocket", () => {
       release = resolve;
     });
     const port = await findAvailablePort(43200);
+    const provider = delayedProvider(blocker);
     const server = createAppServer({
-      provider: delayedProvider(blocker),
+      provider,
       providerName: "openai",
       modelName: "test-model",
       registry: new ToolRegistry(),
       approval: "auto",
+      resolveRuntime: () => ({ ...testRuntime(provider), approval: "auto" }),
       store,
       cwd: "/test",
     });
@@ -841,12 +886,14 @@ describe("WebSocket", () => {
       { role: "user", content: "third" },
     ]);
     const port = await findAvailablePort(43200);
+    const provider = summaryProvider("Summary of first turn");
     const server = createAppServer({
-      provider: summaryProvider("Summary of first turn"),
+      provider,
       providerName: "openai",
       modelName: "test-model",
       registry: new ToolRegistry(),
       approval: "auto",
+      resolveRuntime: () => ({ ...testRuntime(provider), approval: "auto" }),
       store,
       cwd: "/test",
     });

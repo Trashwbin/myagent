@@ -4,17 +4,8 @@ import { resolve } from "node:path";
 import { realpathSync } from "node:fs";
 import * as readline from "node:readline";
 import { createProviderFromProfile } from "./model/provider-factory.js";
-import { ToolRegistry } from "./tools/registry.js";
-import { readFileTool } from "./tools/read.js";
-import { searchTool } from "./tools/search.js";
-import { editFileTool } from "./tools/edit.js";
-import { writeFileTool } from "./tools/write.js";
-import { bashTool } from "./tools/bash.js";
-import { listDirTool } from "./tools/list-dir.js";
-import { applyPatchTool } from "./tools/apply-patch.js";
-import { globTool } from "./tools/glob.js";
-import { findUpTool } from "./tools/find-up.js";
-import { createSkillTool } from "./tools/skill.js";
+import { buildDefaultRegistry } from "./tools/default-registry.js";
+import type { ToolRegistry } from "./tools/registry.js";
 import { ReadStateTracker } from "./tools/file-mutation.js";
 import { runTurn } from "./session/loop.js";
 import type { ApprovalRequest, SessionState, TurnEvent } from "./session/loop.js";
@@ -35,7 +26,7 @@ import {
 } from "./config/config.js";
 import type { Config, ModelProfile, ProviderName } from "./config/config.js";
 import { discoverSkills, summarizeSkills } from "./skill/discovery.js";
-import type { SkillInfo, SkillSummary } from "./skill/types.js";
+import type { SkillSummary } from "./skill/types.js";
 import { compactSession } from "./session/compact.js";
 import type { CompactResult } from "./session/compact.js";
 import { formatRewindMessage, revertLast, rewindSession } from "./session/revert.js";
@@ -330,21 +321,6 @@ function resolveSessionProvider(config: Config): {
   };
 }
 
-function buildRegistry(skills: SkillInfo[] = []): ToolRegistry {
-  const registry = new ToolRegistry();
-  registry.register(readFileTool);
-  registry.register(searchTool);
-  registry.register(editFileTool);
-  registry.register(writeFileTool);
-  registry.register(bashTool);
-  registry.register(listDirTool);
-  registry.register(applyPatchTool);
-  registry.register(globTool);
-  registry.register(findUpTool);
-  if (skills.length > 0) registry.register(createSkillTool(skills));
-  return registry;
-}
-
 async function chatMode(
   provider: Provider,
   modelProfiles: ModelProfile[],
@@ -515,7 +491,7 @@ async function handleResume(sessionId: string, options: { cwd: string }): Promis
     const activeProfile = resolveModelProfile(config, session.modelProfileId);
     const provider = createProviderForProfile(activeProfile);
     const skills = await discoverSkills({ cwd });
-    const registry = buildRegistry(skills);
+    const registry = buildDefaultRegistry(skills);
     await chatMode(
       provider,
       modelProfiles,
@@ -546,7 +522,7 @@ async function handleMainRun(options: { cwd: string }): Promise<void> {
     const provider = createProvider(config);
     const modelProfiles = resolveModelProfiles(config);
     const skills = await discoverSkills({ cwd });
-    const registry = buildRegistry(skills);
+    const registry = buildDefaultRegistry(skills);
     await chatMode(
       provider,
       modelProfiles,
@@ -576,7 +552,7 @@ async function handleTui(options: { cwd: string }): Promise<void> {
     });
     const provider = createProvider(config);
     const skills = await discoverSkills({ cwd });
-    const registry = buildRegistry(skills);
+    const registry = buildDefaultRegistry(skills);
 
     const { launchTui } = await import("./tui/index.js");
     await launchTui({
@@ -608,7 +584,7 @@ async function handleApp(options: { cwd: string }): Promise<void> {
   const modelProfiles = resolveModelProfiles(config);
   const provider = createProvider(config);
   const skills = await discoverSkills({ cwd });
-  const registry = buildRegistry(skills);
+  const registry = buildDefaultRegistry(skills);
   const store = openStore();
   const { createAppServer, findAvailablePort } = await import("./app/server.js");
   const port = await findAvailablePort(43110);

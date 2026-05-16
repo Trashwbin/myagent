@@ -3,7 +3,13 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import { resolve } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { Provider } from "../model/provider.js";
-import type { ModelProfile } from "../config/config.js";
+import {
+  loadConfig,
+  resolveApprovalMode,
+  resolveModelProfile,
+  resolveModelProfiles,
+  type ModelProfile,
+} from "../config/config.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { TranscriptStore } from "../storage/store.js";
 import type { ApprovalMode } from "../permission/policy.js";
@@ -11,11 +17,15 @@ import type { ServerMessage } from "./protocol.js";
 import type { SkillSummary } from "../skill/types.js";
 import { parseClientMessage } from "./protocol.js";
 import { SessionManager } from "./session-api.js";
+import type { SessionRuntime } from "./session-api.js";
 import { EMBEDDED_HTML } from "./html.js";
 import { getAppClientAsset } from "./web/bundle.js";
 import { publicModelProfile } from "../model/provider-factory.js";
 import { getGitDiff } from "../workspace/diff.js";
 import { parseUnifiedDiffFiles } from "../diff/unified.js";
+import { discoverSkills, summarizeSkills } from "../skill/discovery.js";
+import { buildDefaultRegistry } from "../tools/default-registry.js";
+import type { SessionState } from "../session/loop.js";
 
 type AppServerDeps = {
   provider: Provider;
@@ -28,7 +38,20 @@ type AppServerDeps = {
   approval: ApprovalMode;
   store: TranscriptStore;
   availableSkills?: SkillSummary[];
+  resolveRuntime?: (session: SessionState) => SessionRuntime | Promise<SessionRuntime>;
   cwd: string;
+};
+
+type ResolvedAppRuntime = {
+  provider: Provider;
+  providerName: string;
+  modelName: string;
+  modelProfileId: string;
+  modelProfiles: ModelProfile[];
+  createProvider: (profile: ModelProfile) => Provider;
+  registry: ToolRegistry;
+  approval: ApprovalMode;
+  availableSkills: SkillSummary[];
 };
 
 function canonicalProjectPath(input: string): string {
@@ -66,6 +89,7 @@ function publicProviders(profiles: ModelProfile[]) {
 
 export function createAppServer(deps: AppServerDeps): Server {
   const subscribers = new Map<string, Set<WebSocket>>();
+  const runtimeCache = new Map<string, Promise<ResolvedAppRuntime>>();
 
   const sendEvent = (sessionId: string, msg: ServerMessage) => {
     const subs = subscribers.get(sessionId);
@@ -78,14 +102,67 @@ export function createAppServer(deps: AppServerDeps): Server {
     }
   };
 
+  const createProvider = deps.createProvider ?? (() => deps.provider);
+
+  const resolveRuntime = async (session: SessionState): Promise<ResolvedAppRuntime> => {
+    if (deps.resolveRuntime) {
+      const runtime = await deps.resolveRuntime(session);
+      const profile = resolveSessionProfileFromRuntime(session, runtime);
+      return {
+        provider: runtime.provider,
+        providerName: profile?.provider ?? session.provider ?? deps.providerName,
+        modelName: profile?.model ?? session.model ?? deps.modelName,
+        modelProfileId: profile?.id ?? session.modelProfileId ?? deps.modelProfileId ?? `${deps.providerName}/${deps.modelName}`,
+        modelProfiles: runtime.modelProfiles,
+        createProvider: runtime.createProvider,
+        registry: runtime.registry,
+        approval: runtime.approval,
+        availableSkills: runtime.availableSkills ?? [],
+      };
+    }
+    const key = session.cwd;
+    const existing = runtimeCache.get(key);
+    if (existing) return existing;
+    const pending = (async () => {
+      const config = loadConfig({ workspaceRoot: session.cwd });
+      const modelProfiles = resolveModelProfiles(config);
+      const profile = resolveModelProfile(config, session.modelProfileId);
+      const skills = await discoverSkills({ cwd: session.cwd });
+      return {
+        provider: createProvider(profile),
+        providerName: profile.provider,
+        modelName: profile.model,
+        modelProfileId: profile.id,
+        modelProfiles,
+        createProvider,
+        registry: buildDefaultRegistry(skills),
+        approval: resolveApprovalMode(config),
+        availableSkills: summarizeSkills(skills),
+      };
+    })();
+    runtimeCache.set(key, pending);
+    return pending;
+  };
+
   const manager = new SessionManager({
     provider: deps.provider,
     modelProfiles: deps.modelProfiles,
-    createProvider: deps.createProvider,
+    createProvider,
     registry: deps.registry,
     approval: deps.approval,
     store: deps.store,
     availableSkills: deps.availableSkills,
+    resolveRuntime: async (session) => {
+      const runtime = await resolveRuntime(session);
+      return {
+        provider: runtime.provider,
+        modelProfiles: runtime.modelProfiles,
+        createProvider: runtime.createProvider,
+        registry: runtime.registry,
+        approval: runtime.approval,
+        availableSkills: runtime.availableSkills,
+      };
+    },
     sendEvent,
   });
 
@@ -112,11 +189,13 @@ export function createAppServer(deps: AppServerDeps): Server {
         : typeof parsed.cwd === "string"
           ? canonicalProjectPath(parsed.cwd)
           : deps.store.getCurrentProject()?.path ?? deps.cwd;
+    const projectSession: SessionState = { id: "", cwd, messages: [] };
+    const runtime = await resolveRuntime(projectSession);
     const session = deps.store.createSession({
       workspaceRoot: cwd,
-      modelProfileId: deps.modelProfileId,
-      provider: deps.providerName,
-      model: deps.modelName,
+      modelProfileId: runtime.modelProfileId,
+      provider: runtime.providerName,
+      model: runtime.modelName,
     });
     manager.registerSession(session);
     return session;
@@ -475,6 +554,19 @@ export function createAppServer(deps: AppServerDeps): Server {
   });
 
   return server;
+}
+
+function resolveSessionProfileFromRuntime(
+  session: SessionState,
+  runtime: SessionRuntime,
+): ModelProfile | undefined {
+  const normalized = [session.modelProfileId, session.provider && session.model ? `${session.provider}/${session.model}` : undefined]
+    .filter((value): value is string => typeof value === "string");
+  for (const candidate of normalized) {
+    const exact = runtime.modelProfiles.find((profile) => profile.id === candidate);
+    if (exact) return exact;
+  }
+  return runtime.modelProfiles[0];
 }
 
 export function findAvailablePort(startPort: number): Promise<number> {
