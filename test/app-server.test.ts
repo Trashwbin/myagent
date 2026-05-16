@@ -232,6 +232,67 @@ describe("HTTP API", () => {
     expect(Object.keys(data)).not.toContain("authToken");
   });
 
+  it("GET /provider returns public provider groups", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const { port } = await startTestServer(store);
+
+    const data = await fetchJson(port, "/provider");
+
+    expect(data).toEqual([
+      {
+        id: "openai",
+        name: "openai",
+        adapters: ["@ai-sdk/openai"],
+        models: [
+          {
+            id: "openai/test-model",
+            provider: "openai",
+            adapter: "@ai-sdk/openai",
+            model: "test-model",
+          },
+        ],
+      },
+    ]);
+    expect(JSON.stringify(data)).not.toContain("sk-test");
+  });
+
+  it("GET /config/providers returns public model config", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const { port } = await startTestServer(store);
+
+    const data = await fetchJson(port, "/config/providers");
+
+    expect(data).toEqual({
+      current: "openai/test-model",
+      providers: [
+        {
+          id: "openai",
+          name: "openai",
+          adapters: ["@ai-sdk/openai"],
+          models: [
+            {
+              id: "openai/test-model",
+              provider: "openai",
+              adapter: "@ai-sdk/openai",
+              model: "test-model",
+            },
+          ],
+        },
+      ],
+      models: [
+        {
+          id: "openai/test-model",
+          provider: "openai",
+          adapter: "@ai-sdk/openai",
+          model: "test-model",
+        },
+      ],
+    });
+    expect(JSON.stringify(data)).not.toContain("sk-test");
+  });
+
   it("GET /project lists project summaries", async () => {
     const base = await tmpBaseDir();
     const store = openTestStore(base);

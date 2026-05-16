@@ -36,6 +36,34 @@ function canonicalProjectPath(input: string): string {
   return existsSync(resolved) ? realpathSync.native(resolved) : resolved;
 }
 
+function publicProviders(profiles: ModelProfile[]) {
+  const providers = new Map<
+    string,
+    {
+      id: string;
+      name: string;
+      adapters: string[];
+      models: ReturnType<typeof publicModelProfile>[];
+    }
+  >();
+
+  for (const profile of profiles) {
+    const provider = providers.get(profile.provider) ?? {
+      id: profile.provider,
+      name: profile.provider,
+      adapters: [],
+      models: [],
+    };
+    if (!provider.adapters.includes(profile.adapter)) {
+      provider.adapters.push(profile.adapter);
+    }
+    provider.models.push(publicModelProfile(profile));
+    providers.set(profile.provider, provider);
+  }
+
+  return [...providers.values()];
+}
+
 export function createAppServer(deps: AppServerDeps): Server {
   const subscribers = new Map<string, Set<WebSocket>>();
 
@@ -182,6 +210,31 @@ export function createAppServer(deps: AppServerDeps): Server {
           model: deps.modelName,
           models: (deps.modelProfiles ?? []).map(publicModelProfile),
           approval: deps.approval,
+        });
+        return;
+      }
+
+      if (path === "/provider" && req.method === "GET") {
+        json(res, publicProviders(deps.modelProfiles ?? []));
+        return;
+      }
+
+      if (path === "/provider/auth" && req.method === "GET") {
+        json(
+          res,
+          publicProviders(deps.modelProfiles ?? []).map((provider) => ({
+            id: provider.id,
+            authenticated: true,
+          })),
+        );
+        return;
+      }
+
+      if (path === "/config/providers" && req.method === "GET") {
+        json(res, {
+          current: deps.modelProfileId ?? `${deps.providerName}/${deps.modelName}`,
+          providers: publicProviders(deps.modelProfiles ?? []),
+          models: (deps.modelProfiles ?? []).map(publicModelProfile),
         });
         return;
       }
