@@ -107,7 +107,13 @@ export function Sidebar({
             <div className="section-heading">Projects</div>
             {groups.map((group) => {
               const active = group.path === currentProject?.path;
-              const expanded = active || !!expandedWorkspaces[group.path] || !!query.trim();
+              const hasExplicitExpandedState = Object.prototype.hasOwnProperty.call(
+                expandedWorkspaces,
+                group.path,
+              );
+              const expanded =
+                !!query.trim() ||
+                (hasExplicitExpandedState ? !!expandedWorkspaces[group.path] : active);
               const visible = visibleSessions(
                 group,
                 activeSessionId,
@@ -122,7 +128,10 @@ export function Sidebar({
                       title={group.path}
                       onClick={() => {
                         onSelectProject(group.path);
-                        toggleWorkspace(group.path);
+                        setExpandedWorkspaces((value) => ({
+                          ...value,
+                          [group.path]: hasExplicitExpandedState ? !value[group.path] : !active,
+                        }));
                       }}
                     >
                       <span className="workspace-chevron" aria-hidden="true">
