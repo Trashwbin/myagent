@@ -2323,41 +2323,6 @@ textarea::placeholder {
   display: block;
 }
 
-.right-panel-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink);
-  margin-bottom: 12px;
-}
-
-.right-panel-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 4px;
-  font-size: 13px;
-  color: var(--body);
-  border-radius: 6px;
-  cursor: default;
-}
-
-.right-panel-item:hover {
-  background: rgba(0, 0, 0, 0.03);
-}
-
-.right-panel-item .item-icon {
-  width: 16px;
-  text-align: center;
-  color: var(--muted-soft);
-  font-size: 13px;
-}
-
-.right-panel-empty {
-  color: var(--muted-soft);
-  font-size: 13px;
-  padding: 8px 0;
-}
-
 .sidebar-footer {
   flex: 0 0 auto;
   padding: 10px 12px 14px;
