@@ -22,24 +22,25 @@ describe("ConfigSchema", () => {
     expect(ConfigSchema.parse({})).toEqual({});
   });
 
-  it("accepts nested provider config and secrets", () => {
+  it("accepts OpenCode-style provider config and secrets", () => {
     const input = {
       $schema: "https://myagent.dev/config.json",
-      provider: "openai" as const,
       approval: "on-request" as const,
-      providers: {
+      model: "openai/gpt-4o",
+      provider: {
         openai: {
-          adapter: "@ai-sdk/openai" as const,
-          model: "gpt-4o",
-          baseUrl: "https://api.example.com/v1",
-          apiKey: "sk-test",
-          maxOutputTokens: 4096,
-          mode: "responses",
+          npm: "@ai-sdk/openai" as const,
+          options: {
+            baseURL: "https://api.example.com/v1",
+            apiKey: "sk-test",
+            maxOutputTokens: 4096,
+            mode: "responses",
+          },
           models: {
-            fast: {
-              name: "Fast model",
-              model: "gpt-4o-mini",
-              maxOutputTokens: 2048,
+            "gpt-4o": {
+              name: "GPT-4o",
+              limit: { context: 128000, output: 4096 },
+              options: { store: false },
             },
           },
         },
@@ -108,15 +109,15 @@ describe("loadConfig", () => {
     await mkdir(homeDir, { recursive: true });
     await writeFile(
       join(homeDir, "config.json"),
-      JSON.stringify({ provider: "openai", providers: { openai: { model: "gpt-4o" } } }),
+      JSON.stringify({ provider: { openai: { models: { "gpt-4o": {} } } }, model: "openai/gpt-4o" }),
     );
 
     const original = process.env.MYAGENT_HOME;
     process.env.MYAGENT_HOME = homeDir;
     try {
       const config = loadConfig({ workspaceRoot: tmp });
-      expect(config.provider).toBe("openai");
-      expect(config.providers?.openai?.model).toBe("gpt-4o");
+      expect(config.model).toBe("openai/gpt-4o");
+      expect(config.provider).toEqual({ openai: { models: { "gpt-4o": {} } } });
     } finally {
       process.env.MYAGENT_HOME = original;
     }
@@ -194,11 +195,15 @@ describe("loadConfig", () => {
     await mkdir(myagentDir, { recursive: true });
     await writeFile(
       join(myagentDir, "config.json"),
-      JSON.stringify({ approval: "auto", providers: { openai: { model: "gpt-4o" } } }),
+      JSON.stringify({ approval: "auto", provider: { openai: { models: { "gpt-4o": {} } } } }),
     );
     await writeFile(
       join(myagentDir, "config.local.json"),
-      JSON.stringify({ approval: "on-request", providers: { openai: { model: "gpt-4o-mini" } } }),
+      JSON.stringify({
+        approval: "on-request",
+        provider: { openai: { models: { "gpt-4o-mini": {} } } },
+        model: "openai/gpt-4o-mini",
+      }),
     );
 
     const original = process.env.MYAGENT_HOME;
@@ -207,7 +212,15 @@ describe("loadConfig", () => {
     try {
       const config = loadConfig({ workspaceRoot: tmp });
       expect(config.approval).toBe("on-request");
-      expect(config.providers?.openai?.model).toBe("gpt-4o-mini");
+      expect(config.model).toBe("openai/gpt-4o-mini");
+      expect(config.provider).toEqual({
+        openai: {
+          models: {
+            "gpt-4o": {},
+            "gpt-4o-mini": {},
+          },
+        },
+      });
     } finally {
       process.env.MYAGENT_HOME = original;
     }
@@ -236,18 +249,22 @@ describe("config resolution helpers", () => {
 
   it("resolves provider-specific config before flat compatibility keys", () => {
     const config = {
-      provider: "openai" as const,
-      model: "gpt-4o",
+      model: "openai/gpt-4o-mini",
       apiKey: "sk-flat",
       baseUrl: "https://flat.example",
       maxOutputTokens: 1024,
-      providers: {
+      provider: {
         openai: {
-          model: "gpt-4o-mini",
-          apiKey: "sk-openai",
-          baseUrl: "https://openai.example",
-          maxOutputTokens: 2048,
-          mode: "responses" as const,
+          npm: "@ai-sdk/openai" as const,
+          options: {
+            apiKey: "sk-openai",
+            baseURL: "https://openai.example",
+            maxOutputTokens: 2048,
+            mode: "responses" as const,
+          },
+          models: {
+            "gpt-4o-mini": {},
+          },
         },
       },
     };
@@ -260,7 +277,7 @@ describe("config resolution helpers", () => {
       baseUrl: "https://openai.example",
       maxOutputTokens: 2048,
       mode: "responses",
-      models: undefined,
+      models: { "gpt-4o-mini": {} },
     });
   });
 
@@ -277,32 +294,34 @@ describe("config resolution helpers", () => {
 
   it("resolves configured provider model profiles", () => {
     const config = {
-      model: "mimo/fast",
-      providers: {
+      model: "mimo/mimo-v2.5-pro",
+      provider: {
         mimo: {
-          adapter: "@ai-sdk/openai-compatible" as const,
-          baseUrl: "https://openai.example/v1",
-          apiKey: "sk-openai",
-          mode: "chat" as const,
+          npm: "@ai-sdk/openai-compatible" as const,
+          options: {
+            baseURL: "https://openai.example/v1",
+            apiKey: "sk-openai",
+            mode: "chat" as const,
+          },
           models: {
-            fast: {
-              name: "Fast",
-              model: "mimo-v2.5-pro",
-              maxOutputTokens: 2048,
+            "mimo-v2.5-pro": {
+              name: "mimo-v2.5-pro",
+              limit: { output: 2048 },
             },
-            accurate: {
-              adapter: "@ai-sdk/openai" as const,
-              model: "gpt-4o",
-              mode: "responses" as const,
+            "gpt-4o": {
+              npm: "@ai-sdk/openai" as const,
+              options: { mode: "responses" as const },
             },
           },
         },
         "mimo-claude": {
-          adapter: "@ai-sdk/anthropic" as const,
-          baseUrl: "https://anthropic.example",
-          authToken: "sk-ant",
+          npm: "@ai-sdk/anthropic" as const,
+          options: {
+            baseURL: "https://anthropic.example",
+            authToken: "sk-ant",
+          },
           models: {
-            sonnet: { model: "claude-sonnet-4-5" },
+            "claude-sonnet-4-5": {},
           },
         },
       },
@@ -310,11 +329,11 @@ describe("config resolution helpers", () => {
 
     expect(resolveModelProfiles(config)).toEqual([
       {
-        id: "mimo/fast",
+        id: "mimo/mimo-v2.5-pro",
         provider: "mimo",
         adapter: "@ai-sdk/openai-compatible",
         model: "mimo-v2.5-pro",
-        name: "Fast",
+        name: "mimo-v2.5-pro",
         baseUrl: "https://openai.example/v1",
         apiKey: "sk-openai",
         authToken: undefined,
@@ -322,7 +341,7 @@ describe("config resolution helpers", () => {
         mode: "chat",
       },
       {
-        id: "mimo/accurate",
+        id: "mimo/gpt-4o",
         provider: "mimo",
         adapter: "@ai-sdk/openai",
         model: "gpt-4o",
@@ -334,7 +353,7 @@ describe("config resolution helpers", () => {
         mode: "responses",
       },
       {
-        id: "mimo-claude/sonnet",
+        id: "mimo-claude/claude-sonnet-4-5",
         provider: "mimo-claude",
         adapter: "@ai-sdk/anthropic",
         model: "claude-sonnet-4-5",
@@ -347,11 +366,11 @@ describe("config resolution helpers", () => {
       },
     ]);
     expect(resolveModelProfile(config)).toMatchObject({
-      id: "mimo/fast",
+      id: "mimo/mimo-v2.5-pro",
       model: "mimo-v2.5-pro",
     });
-    expect(resolveModelProfile(config, "sonnet")).toMatchObject({
-      id: "mimo-claude/sonnet",
+    expect(resolveModelProfile(config, "claude-sonnet-4-5")).toMatchObject({
+      id: "mimo-claude/claude-sonnet-4-5",
       provider: "mimo-claude",
       adapter: "@ai-sdk/anthropic",
     });
@@ -359,31 +378,35 @@ describe("config resolution helpers", () => {
 
   it("normalizes adapter-specific model modes", () => {
     const config = {
-      providers: {
+      provider: {
         mimo: {
-          adapter: "@ai-sdk/openai-compatible" as const,
-          mode: "responses" as const,
-          apiKey: "sk-test",
+          npm: "@ai-sdk/openai-compatible" as const,
+          options: {
+            mode: "responses" as const,
+            apiKey: "sk-test",
+          },
           models: {
-            fast: { model: "mimo-v2.5-pro" },
+            "mimo-v2.5-pro": {},
           },
         },
         claude: {
-          adapter: "@ai-sdk/anthropic" as const,
-          mode: "chat" as const,
-          authToken: "sk-test",
+          npm: "@ai-sdk/anthropic" as const,
+          options: {
+            mode: "chat" as const,
+            authToken: "sk-test",
+          },
           models: {
-            sonnet: { model: "claude-test" },
+            "claude-test": {},
           },
         },
       },
     };
 
-    expect(resolveModelProfile(config, "mimo/fast")).toMatchObject({
+    expect(resolveModelProfile(config, "mimo/mimo-v2.5-pro")).toMatchObject({
       adapter: "@ai-sdk/openai-compatible",
       mode: "chat",
     });
-    expect(resolveModelProfile(config, "claude/sonnet")).toMatchObject({
+    expect(resolveModelProfile(config, "claude/claude-test")).toMatchObject({
       adapter: "@ai-sdk/anthropic",
       mode: "messages",
     });

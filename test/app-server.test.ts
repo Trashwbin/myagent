@@ -238,21 +238,29 @@ describe("HTTP API", () => {
 
     const data = await fetchJson(port, "/provider");
 
-    expect(data).toEqual([
-      {
-        id: "openai",
-        name: "openai",
-        adapters: ["@ai-sdk/openai"],
-        models: [
-          {
-            id: "openai/test-model",
-            provider: "openai",
-            adapter: "@ai-sdk/openai",
-            model: "test-model",
-          },
-        ],
-      },
-    ]);
+    expect(data).toEqual({
+      all: [
+        {
+          id: "openai",
+          name: "openai",
+          adapters: ["@ai-sdk/openai"],
+          defaultModel: "test-model",
+          models: [
+            {
+              id: "openai/test-model",
+              provider: "openai",
+              providerID: "openai",
+              modelID: "test-model",
+              adapter: "@ai-sdk/openai",
+              model: "test-model",
+              name: "test-model",
+            },
+          ],
+        },
+      ],
+      connected: ["openai"],
+      default: { openai: "test-model" },
+    });
     expect(JSON.stringify(data)).not.toContain("sk-test");
   });
 
@@ -270,22 +278,31 @@ describe("HTTP API", () => {
           id: "openai",
           name: "openai",
           adapters: ["@ai-sdk/openai"],
+          defaultModel: "test-model",
           models: [
             {
               id: "openai/test-model",
               provider: "openai",
+              providerID: "openai",
+              modelID: "test-model",
               adapter: "@ai-sdk/openai",
               model: "test-model",
+              name: "test-model",
             },
           ],
         },
       ],
+      connected: ["openai"],
+      default: { openai: "test-model" },
       models: [
         {
           id: "openai/test-model",
           provider: "openai",
+          providerID: "openai",
+          modelID: "test-model",
           adapter: "@ai-sdk/openai",
           model: "test-model",
+          name: "test-model",
         },
       ],
     });

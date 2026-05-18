@@ -66,6 +66,7 @@ function publicProviders(profiles: ModelProfile[]) {
       id: string;
       name: string;
       adapters: string[];
+      defaultModel?: string;
       models: ReturnType<typeof publicModelProfile>[];
     }
   >();
@@ -75,16 +76,31 @@ function publicProviders(profiles: ModelProfile[]) {
       id: profile.provider,
       name: profile.provider,
       adapters: [],
+      defaultModel: undefined,
       models: [],
     };
     if (!provider.adapters.includes(profile.adapter)) {
       provider.adapters.push(profile.adapter);
     }
+    provider.defaultModel ??= publicModelProfile(profile).modelID;
     provider.models.push(publicModelProfile(profile));
     providers.set(profile.provider, provider);
   }
 
   return [...providers.values()];
+}
+
+function publicProviderList(profiles: ModelProfile[]) {
+  const providers = publicProviders(profiles);
+  return {
+    all: providers,
+    connected: providers.map((provider) => provider.id),
+    default: Object.fromEntries(
+      providers
+        .filter((provider) => provider.defaultModel)
+        .map((provider) => [provider.id, provider.defaultModel]),
+    ),
+  };
 }
 
 export function createAppServer(deps: AppServerDeps): Server {
@@ -264,7 +280,7 @@ export function createAppServer(deps: AppServerDeps): Server {
       }
 
       if (path === "/provider" && req.method === "GET") {
-        json(res, publicProviders(deps.modelProfiles ?? []));
+        json(res, publicProviderList(deps.modelProfiles ?? []));
         return;
       }
 
@@ -280,9 +296,16 @@ export function createAppServer(deps: AppServerDeps): Server {
       }
 
       if (path === "/config/providers" && req.method === "GET") {
+        const providers = publicProviders(deps.modelProfiles ?? []);
         json(res, {
           current: deps.modelProfileId ?? `${deps.providerName}/${deps.modelName}`,
-          providers: publicProviders(deps.modelProfiles ?? []),
+          providers,
+          default: Object.fromEntries(
+            providers
+              .filter((provider) => provider.defaultModel)
+              .map((provider) => [provider.id, provider.defaultModel]),
+          ),
+          connected: providers.map((provider) => provider.id),
           models: (deps.modelProfiles ?? []).map(publicModelProfile),
         });
         return;

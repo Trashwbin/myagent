@@ -4,21 +4,27 @@ import type { ToolDisplay } from "../../../session/tool-display.js";
 export type ProviderModelSummary = {
   id: string;
   provider: string;
+  providerID: string;
+  modelID: string;
   adapter: string;
   model: string;
   name?: string;
+  mode?: string;
 };
 
 export type ProviderSummary = {
   id: string;
   name: string;
   adapters: string[];
+  defaultModel?: string;
   models: ProviderModelSummary[];
 };
 
 export type ProviderConfig = {
   current: string;
   providers: ProviderSummary[];
+  connected?: string[];
+  default?: Record<string, string>;
   models: ProviderModelSummary[];
 };
 

@@ -11,6 +11,16 @@ const ProviderAdapterSchema = z.enum([
 const ModelModeSchema = z.enum(["chat", "responses", "messages"]);
 const ProviderIdSchema = z.string().min(1);
 
+const ProviderOptionsSchema = z.object({
+  baseURL: z.string().optional(),
+  baseUrl: z.string().optional(),
+  apiKey: z.string().optional(),
+  authToken: z.string().optional(),
+  maxOutputTokens: z.number().int().positive().optional(),
+  mode: ModelModeSchema.optional(),
+  store: z.boolean().optional(),
+}).passthrough();
+
 const ProviderModelConfigSchema = z.strictObject({
   name: z.string().optional(),
   model: z.string().optional(),
@@ -26,9 +36,47 @@ const ProviderConfigSchema = ProviderModelConfigSchema.extend({
   models: z.record(ProviderModelConfigSchema).optional(),
 });
 
+const OpenCodeModelConfigSchema = z.object({
+  name: z.string().optional(),
+  model: z.string().optional(),
+  adapter: ProviderAdapterSchema.optional(),
+  npm: ProviderAdapterSchema.optional(),
+  options: ProviderOptionsSchema.optional(),
+  limit: z
+    .strictObject({
+      context: z.number().int().positive().optional(),
+      output: z.number().int().positive().optional(),
+    })
+    .optional(),
+  variants: z.record(z.unknown()).optional(),
+  attachment: z.boolean().optional(),
+  tool_call: z.boolean().optional(),
+  family: z.string().optional(),
+  cost: z
+    .strictObject({
+      input: z.number().optional(),
+      output: z.number().optional(),
+    })
+    .optional(),
+  modalities: z
+    .strictObject({
+      input: z.array(z.string()).optional(),
+      output: z.array(z.string()).optional(),
+    })
+    .optional(),
+}).passthrough();
+
+const OpenCodeProviderConfigSchema = z.object({
+  name: z.string().optional(),
+  npm: ProviderAdapterSchema.optional(),
+  adapter: ProviderAdapterSchema.optional(),
+  options: ProviderOptionsSchema.optional(),
+  models: z.record(OpenCodeModelConfigSchema).optional(),
+}).passthrough();
+
 export const ConfigSchema = z.strictObject({
   $schema: z.string().optional(),
-  provider: ProviderIdSchema.optional(),
+  provider: z.union([ProviderIdSchema, z.record(OpenCodeProviderConfigSchema)]).optional(),
   model: z.string().optional(),
   approval: z.enum(["auto", "on-request", "never"]).optional(),
   // Flat compatibility keys. New configs should prefer the nested `providers` map.
@@ -44,6 +92,8 @@ export type ProviderAdapter = z.infer<typeof ProviderAdapterSchema>;
 export type ModelMode = z.infer<typeof ModelModeSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 export type ProviderModelConfig = z.infer<typeof ProviderModelConfigSchema>;
+export type OpenCodeProviderConfig = z.infer<typeof OpenCodeProviderConfigSchema>;
+export type OpenCodeModelConfig = z.infer<typeof OpenCodeModelConfigSchema>;
 export type Config = z.infer<typeof ConfigSchema>;
 
 export type ModelProfile = {
@@ -121,26 +171,78 @@ function mergeConfig(base: Config, override: Config): Config {
   const result: Config = { ...base };
   for (const [key, value] of Object.entries(override) as [keyof Config, Config[keyof Config]][]) {
     if (value === undefined) continue;
+    if (key === "provider" && isProviderMap(value)) {
+      result.provider = isProviderMap(result.provider)
+        ? mergeProviderMap(result.provider, value)
+        : value;
+      continue;
+    }
     if (key === "providers") {
       const providers = value as Config["providers"];
-      const merged = { ...(result.providers ?? {}) };
-      for (const [provider, incoming] of Object.entries(providers ?? {})) {
-        const existing = merged[provider];
-        merged[provider] = {
-          ...(existing ?? {}),
-          ...incoming,
-          models:
-            existing?.models || incoming.models
-              ? { ...(existing?.models ?? {}), ...(incoming.models ?? {}) }
-              : undefined,
-        };
-      }
-      result.providers = merged;
+      result.providers = mergeProviderMap(result.providers ?? {}, providers ?? {}) as Config["providers"];
       continue;
     }
     (result as Record<string, unknown>)[key] = value;
   }
   return result;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isProviderMap(value: unknown): value is Record<string, OpenCodeProviderConfig> {
+  return isRecord(value);
+}
+
+function mergeProviderMap<T extends Record<string, unknown>>(
+  base: T,
+  override: T,
+): T {
+  const merged = { ...base };
+  for (const [provider, incoming] of Object.entries(override)) {
+    const existing = merged[provider];
+    if (!isRecord(existing) || !isRecord(incoming)) {
+      (merged as Record<string, unknown>)[provider] = incoming;
+      continue;
+    }
+    const next: Record<string, unknown> = { ...existing, ...incoming };
+    if (isRecord(existing.options) || isRecord(incoming.options)) {
+      next.options = {
+        ...(isRecord(existing.options) ? existing.options : {}),
+        ...(isRecord(incoming.options) ? incoming.options : {}),
+      };
+    }
+    if (isRecord(existing.models) || isRecord(incoming.models)) {
+      const models: Record<string, unknown> = { ...(isRecord(existing.models) ? existing.models : {}) };
+      for (const [model, modelConfig] of Object.entries(
+        isRecord(incoming.models) ? incoming.models : {},
+      )) {
+        const current = models[model];
+        if (isRecord(current) && isRecord(modelConfig)) {
+          models[model] = {
+            ...current,
+            ...modelConfig,
+            options:
+              isRecord(current.options) || isRecord(modelConfig.options)
+                ? {
+                    ...(isRecord(current.options) ? current.options : {}),
+                    ...(isRecord(modelConfig.options) ? modelConfig.options : {}),
+                  }
+                : undefined,
+          };
+          if ((models[model] as Record<string, unknown>).options === undefined) {
+            delete (models[model] as Record<string, unknown>).options;
+          }
+        } else {
+          models[model] = modelConfig;
+        }
+      }
+      next.models = models;
+    }
+    (merged as Record<string, unknown>)[provider] = next;
+  }
+  return merged;
 }
 
 function mergeLayer(primaryPath: string, legacyPath: string): Config {
@@ -191,28 +293,41 @@ export function resolveProviderConfig(
   config: Config,
   provider: ProviderName,
 ): ProviderConfig {
+  const providerConfig = getProviderConfig(config, provider);
+  const options = getProviderOptions(providerConfig);
   return {
     adapter: resolveProviderAdapter(config, provider),
-    name: config.providers?.[provider]?.name,
-    model: resolveConfigValue(config.providers?.[provider]?.model, config.model),
-    baseUrl: resolveConfigValue(config.providers?.[provider]?.baseUrl, config.baseUrl),
-    apiKey: resolveConfigValue(config.providers?.[provider]?.apiKey, config.apiKey),
+    name: getString(providerConfig, "name"),
+    model: modelNameFromConfig(config, provider),
+    baseUrl: resolveConfigValue(
+      getString(options, "baseURL"),
+      getString(options, "baseUrl"),
+      getString(providerConfig, "baseUrl"),
+      config.baseUrl,
+    ),
+    apiKey: resolveConfigValue(
+      getString(options, "apiKey"),
+      getString(providerConfig, "apiKey"),
+      config.apiKey,
+    ),
     authToken: resolveConfigValue(
-      config.providers?.[provider]?.authToken,
+      getString(options, "authToken"),
+      getString(providerConfig, "authToken"),
       config.authToken,
     ),
     maxOutputTokens: resolveConfigValue(
-      config.providers?.[provider]?.maxOutputTokens,
+      getPositiveInt(options, "maxOutputTokens"),
+      getPositiveInt(providerConfig, "maxOutputTokens"),
       config.maxOutputTokens,
     ),
-    mode: config.providers?.[provider]?.mode,
-    models: config.providers?.[provider]?.models,
+    mode: resolveConfigValue(getMode(options), getMode(providerConfig)),
+    models: getModels(providerConfig) as ProviderConfig["models"],
   };
 }
 
 export function resolveProviderName(config: Config): ProviderName {
   const parsed = parseModelProfileId(config.model);
-  return parsed?.provider ?? config.provider ?? "openai";
+  return parsed?.provider ?? legacyProviderName(config) ?? firstConfiguredProvider(config) ?? "openai";
 }
 
 export function resolveModelName(
@@ -225,13 +340,14 @@ export function resolveModelName(
 
 export function resolveModelProfiles(config: Config): ModelProfile[] {
   const profiles = new Map<string, ModelProfile>();
+  const providers = getConfiguredProviders(config);
 
-  for (const provider of Object.keys(config.providers ?? {})) {
-    const providerConfig = config.providers?.[provider];
+  for (const provider of Object.keys(providers)) {
+    const providerConfig = providers[provider];
     if (!providerConfig) continue;
 
     const base = resolveProviderBaseConfig(config, provider);
-    const models = providerConfig.models;
+    const models = getModels(providerConfig);
     if (models && Object.keys(models).length > 0) {
       for (const [modelId, modelConfig] of Object.entries(models)) {
         const profile = buildModelProfile(provider, modelId, base, modelConfig);
@@ -303,7 +419,7 @@ export function findModelProfile(
 export function defaultModelProfileId(config: Config): string {
   const parsed = parseModelProfileId(config.model);
   if (parsed) return `${parsed.provider}/${parsed.model}`;
-  const provider = config.provider ?? "openai";
+  const provider = legacyProviderName(config) ?? firstConfiguredProvider(config) ?? "openai";
   return `${provider}/${modelNameFromConfig(config, provider)}`;
 }
 
@@ -311,18 +427,33 @@ function resolveProviderBaseConfig(
   config: Config,
   provider: ProviderName,
 ): ProviderModelConfig & { adapter: ProviderAdapter } {
-  const providerConfig = config.providers?.[provider];
+  const providerConfig = getProviderConfig(config, provider);
+  const options = getProviderOptions(providerConfig);
   return {
     adapter: resolveProviderAdapter(config, provider),
-    name: providerConfig?.name,
-    baseUrl: resolveConfigValue(providerConfig?.baseUrl, config.baseUrl),
-    apiKey: resolveConfigValue(providerConfig?.apiKey, config.apiKey),
-    authToken: resolveConfigValue(providerConfig?.authToken, config.authToken),
+    name: getString(providerConfig, "name"),
+    baseUrl: resolveConfigValue(
+      getString(options, "baseURL"),
+      getString(options, "baseUrl"),
+      getString(providerConfig, "baseUrl"),
+      config.baseUrl,
+    ),
+    apiKey: resolveConfigValue(
+      getString(options, "apiKey"),
+      getString(providerConfig, "apiKey"),
+      config.apiKey,
+    ),
+    authToken: resolveConfigValue(
+      getString(options, "authToken"),
+      getString(providerConfig, "authToken"),
+      config.authToken,
+    ),
     maxOutputTokens: resolveConfigValue(
-      providerConfig?.maxOutputTokens,
+      getPositiveInt(options, "maxOutputTokens"),
+      getPositiveInt(providerConfig, "maxOutputTokens"),
       config.maxOutputTokens,
     ),
-    mode: providerConfig?.mode,
+    mode: resolveConfigValue(getMode(options), getMode(providerConfig)),
   };
 }
 
@@ -330,25 +461,45 @@ function buildModelProfile(
   provider: ProviderName,
   modelId: string,
   base: ProviderModelConfig & { adapter: ProviderAdapter },
-  modelConfig: ProviderModelConfig,
+  modelConfig: ProviderModelConfig | OpenCodeModelConfig,
 ): ModelProfile {
-  const model = modelConfig.model ?? modelId;
-  const adapter = resolveConfigValue(modelConfig.adapter, base.adapter)!;
+  const options = getProviderOptions(modelConfig);
+  const model = getString(modelConfig, "model") ?? modelId;
+  const adapter = resolveConfigValue(
+    getAdapter(modelConfig, "adapter"),
+    getAdapter(modelConfig, "npm"),
+    base.adapter,
+  )!;
   const mode = normalizeModelMode(
     adapter,
-    resolveConfigValue(modelConfig.mode, base.mode),
+    resolveConfigValue(getMode(options), getMode(modelConfig), base.mode),
   );
   return {
     id: `${provider}/${modelId}`,
     provider,
     adapter,
     model,
-    name: modelConfig.name ?? base.name,
-    baseUrl: resolveConfigValue(modelConfig.baseUrl, base.baseUrl),
-    apiKey: resolveConfigValue(modelConfig.apiKey, base.apiKey),
-    authToken: resolveConfigValue(modelConfig.authToken, base.authToken),
+    name: getString(modelConfig, "name") ?? base.name,
+    baseUrl: resolveConfigValue(
+      getString(options, "baseURL"),
+      getString(options, "baseUrl"),
+      getString(modelConfig, "baseUrl"),
+      base.baseUrl,
+    ),
+    apiKey: resolveConfigValue(
+      getString(options, "apiKey"),
+      getString(modelConfig, "apiKey"),
+      base.apiKey,
+    ),
+    authToken: resolveConfigValue(
+      getString(options, "authToken"),
+      getString(modelConfig, "authToken"),
+      base.authToken,
+    ),
     maxOutputTokens: resolveConfigValue(
-      modelConfig.maxOutputTokens,
+      getPositiveInt(options, "maxOutputTokens"),
+      getPositiveInt(modelConfig, "maxOutputTokens"),
+      getOutputLimit(modelConfig),
       base.maxOutputTokens,
     ),
     mode,
@@ -358,12 +509,12 @@ function buildModelProfile(
 function modelNameFromConfig(config: Config, provider: ProviderName): string {
   const parsed = parseModelProfileId(config.model);
   if (parsed?.provider === provider) return parsed.model;
-  const providerModel = config.providers?.[provider]?.model;
+  const providerModel = getString(getProviderConfig(config, provider), "model");
   if (providerModel) return stripProviderPrefix(providerModel, provider);
-  if (config.provider === provider && config.model) {
+  if (legacyProviderName(config) === provider && config.model) {
     return stripProviderPrefix(config.model, provider);
   }
-  if (!config.provider && config.model && !config.model.includes("/")) return config.model;
+  if (!legacyProviderName(config) && config.model && !config.model.includes("/")) return config.model;
   return isOpenAIAdapter(resolveProviderAdapter(config, provider))
     ? "gpt-4o"
     : "claude-sonnet-4-5";
@@ -390,7 +541,8 @@ function stripProviderPrefix(value: string, provider: ProviderName): string {
 }
 
 function resolveProviderAdapter(config: Config, provider: ProviderName): ProviderAdapter {
-  const configured = config.providers?.[provider]?.adapter;
+  const providerConfig = getProviderConfig(config, provider);
+  const configured = getAdapter(providerConfig, "adapter") ?? getAdapter(providerConfig, "npm");
   if (configured) return configured;
   if (provider === "anthropic") return "@ai-sdk/anthropic";
   if (provider === "openai") return "@ai-sdk/openai";
@@ -408,4 +560,63 @@ function normalizeModelMode(
   if (adapter === "@ai-sdk/openai-compatible") return "chat";
   if (adapter === "@ai-sdk/anthropic") return "messages";
   return mode;
+}
+
+function legacyProviderName(config: Config): ProviderName | undefined {
+  return typeof config.provider === "string" ? config.provider : undefined;
+}
+
+function firstConfiguredProvider(config: Config): ProviderName | undefined {
+  return Object.keys(getConfiguredProviders(config))[0];
+}
+
+function getConfiguredProviders(config: Config): Record<string, ProviderConfig | OpenCodeProviderConfig> {
+  return {
+    ...(config.providers ?? {}),
+    ...(isProviderMap(config.provider) ? config.provider : {}),
+  };
+}
+
+function getProviderConfig(
+  config: Config,
+  provider: ProviderName,
+): ProviderConfig | OpenCodeProviderConfig | undefined {
+  return getConfiguredProviders(config)[provider];
+}
+
+function getProviderOptions(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined;
+  return isRecord(value.options) ? value.options : undefined;
+}
+
+function getModels(value: unknown): Record<string, ProviderModelConfig | OpenCodeModelConfig> | undefined {
+  if (!isRecord(value) || !isRecord(value.models)) return undefined;
+  return value.models as Record<string, ProviderModelConfig | OpenCodeModelConfig>;
+}
+
+function getString(value: unknown, key: string): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const item = value[key];
+  return typeof item === "string" ? item : undefined;
+}
+
+function getPositiveInt(value: unknown, key: string): number | undefined {
+  if (!isRecord(value)) return undefined;
+  const item = value[key];
+  return typeof item === "number" && Number.isInteger(item) && item > 0 ? item : undefined;
+}
+
+function getAdapter(value: unknown, key: string): ProviderAdapter | undefined {
+  const item = getString(value, key);
+  return ProviderAdapterSchema.safeParse(item).success ? (item as ProviderAdapter) : undefined;
+}
+
+function getMode(value: unknown): ModelMode | undefined {
+  const item = getString(value, "mode");
+  return ModelModeSchema.safeParse(item).success ? (item as ModelMode) : undefined;
+}
+
+function getOutputLimit(value: unknown): number | undefined {
+  if (!isRecord(value) || !isRecord(value.limit)) return undefined;
+  return getPositiveInt(value.limit, "output");
 }
