@@ -530,9 +530,6 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 .topbar-main {
   min-width: 0;
   flex: 1;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
 }
 
 .session-name {
@@ -544,16 +541,6 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0;
-}
-
-.topbar-project {
-  min-width: 0;
-  display: block;
-  color: var(--muted-soft);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .topbar-actions {

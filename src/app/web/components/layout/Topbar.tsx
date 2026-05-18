@@ -21,7 +21,6 @@ export function Topbar({
     <header className="topbar">
       <div className="topbar-main">
         <strong className="session-name">{sessionTitle}</strong>
-        <span className="topbar-project">{projectPath || "No project selected"}</span>
       </div>
       <details className="topbar-actions">
         <summary className="topbar-actions-trigger" aria-label="Session actions">
