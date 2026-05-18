@@ -5,7 +5,6 @@ export const APP_STYLES = String.raw`
   --content-width: 760px;
   --panel-width: 760px;
   --dock-width: 680px;
-  --right-width: 300px;
   --timeline-bottom-safe: 176px;
   --sp-1: 4px;
   --sp-2: 6px;
@@ -154,7 +153,7 @@ button:focus-visible {
 .app {
   height: 100vh;
   display: grid;
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--right-width);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   background: var(--canvas);
 }
 
@@ -2326,27 +2325,6 @@ textarea::placeholder {
 .submit-button span {
   opacity: 0.8;
   margin-left: 4px;
-}
-
-.right-panel {
-  min-width: 0;
-  min-height: 0;
-  height: 100vh;
-  overflow-y: auto;
-  background: #ffffff;
-  border-left: 1px solid var(--hairline);
-  padding: 0;
-  display: block;
-}
-
-@media (max-width: 1100px) {
-  :root {
-    --right-width: 0px;
-  }
-
-  .right-panel {
-    display: none;
-  }
 }
 
 @media (max-width: 1024px) {

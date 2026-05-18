@@ -544,8 +544,6 @@ export function App() {
         />
       </main>
 
-      <aside className="right-panel" aria-hidden="true" />
-
       {state.pendingApproval &&
       state.pendingApproval.sessionId === state.activeSessionId ? (
         <ApprovalDock
