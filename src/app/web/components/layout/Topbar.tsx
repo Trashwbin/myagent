@@ -52,12 +52,6 @@ export function Topbar({
           </button>
         </div>
       </details>
-      <button className="topbar-icon-button" type="button" aria-label="Layout">
-        <span aria-hidden="true" className="layout-icon" />
-      </button>
-      <button className="topbar-icon-button" type="button" aria-label="Expand">
-        <span aria-hidden="true" className="expand-icon" />
-      </button>
     </header>
   );
 }

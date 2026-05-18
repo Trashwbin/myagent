@@ -198,24 +198,20 @@ button:focus-visible {
   color: #242424;
 }
 
-.sidebar-action .action-icon {
+.sidebar-icon {
   width: 15px;
-  text-align: center;
-  font-size: 13px;
-  color: #8a8a8a;
+  height: 15px;
+  flex: 0 0 auto;
+  color: #777777;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.45;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-.sidebar-action:hover .action-icon {
+.sidebar-action:hover .sidebar-icon {
   color: var(--body);
-}
-
-.sidebar-action .action-badge {
-  margin-left: auto;
-  font-size: 10px;
-  background: #e2e2e2;
-  padding: 1px 6px;
-  border-radius: 999px;
-  color: var(--muted);
 }
 
 .brand {
@@ -376,25 +372,15 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 }
 
 .workspace-icon {
-  width: 14px;
-  height: 10px;
-  border: 1.4px solid #8a8a8a;
-  border-radius: 2px;
-  position: relative;
+  width: 15px;
+  height: 15px;
   flex: 0 0 auto;
-}
-
-.workspace-icon::before {
-  content: "";
-  position: absolute;
-  left: 1px;
-  top: -4px;
-  width: 6px;
-  height: 4px;
-  border: 1.4px solid #8a8a8a;
-  border-bottom: 0;
-  border-radius: 2px 2px 0 0;
-  background: var(--sidebar-surface);
+  color: #777777;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .workspace-name {
@@ -636,70 +622,6 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   border-radius: 8px;
   padding: 6px 10px;
   font-size: 12px;
-}
-
-.topbar-icon-button {
-  width: 30px;
-  height: 30px;
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: #a0a0a0;
-  padding: 0;
-}
-
-.topbar-icon-button:hover {
-  background: #f5f5f5;
-  color: #5f5f5f;
-}
-
-.layout-icon,
-.expand-icon {
-  position: relative;
-  width: 14px;
-  height: 14px;
-  display: inline-block;
-}
-
-.layout-icon {
-  border: 1.4px solid currentColor;
-  border-radius: 2px;
-}
-
-.layout-icon::before {
-  content: "";
-  position: absolute;
-  top: -1.4px;
-  bottom: -1.4px;
-  left: 5px;
-  border-left: 1.4px solid currentColor;
-}
-
-.expand-icon::before,
-.expand-icon::after {
-  content: "";
-  position: absolute;
-  border: 1.4px solid currentColor;
-  width: 6px;
-  height: 6px;
-}
-
-.expand-icon::before {
-  top: 0;
-  right: 0;
-  border-left: 0;
-  border-bottom: 0;
-}
-
-.expand-icon::after {
-  left: 0;
-  bottom: 0;
-  border-top: 0;
-  border-right: 0;
 }
 
 .dot {
@@ -1788,26 +1710,6 @@ details.tool-details pre {
   gap: 8px;
 }
 
-.composer-tool-button {
-  width: 30px;
-  height: 30px;
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted-soft);
-  padding: 0;
-  font-size: 17px;
-}
-
-.composer-tool-button:hover {
-  background: #f5f5f5;
-  color: var(--body);
-}
-
 .access-badge {
   min-height: 26px;
   display: inline-flex;
@@ -1823,7 +1725,13 @@ details.tool-details pre {
 }
 
 .access-icon {
-  font-size: 10px;
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 textarea {
@@ -2321,28 +2229,6 @@ textarea::placeholder {
   border-left: 1px solid var(--hairline);
   padding: 0;
   display: block;
-}
-
-.sidebar-footer {
-  flex: 0 0 auto;
-  padding: 10px 12px 14px;
-  border-top: 1px solid var(--hairline);
-}
-
-.sidebar-footer .model-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--muted);
-  padding: 4px 8px;
-  background: rgba(0, 0, 0, 0.04);
-  border-radius: 6px;
-}
-
-.sidebar-footer .model-badge .dot {
-  width: 5px;
-  height: 5px;
 }
 
 @media (max-width: 1100px) {
