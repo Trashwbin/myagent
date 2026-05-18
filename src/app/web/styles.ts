@@ -773,11 +773,11 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 
 .turn {
   max-width: var(--content-width);
-  margin: 0 auto 30px;
+  margin: 0 auto 34px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: var(--sp-6);
+  gap: 18px;
   content-visibility: auto;
   animation: slideUp 240ms ease both;
 }
@@ -831,12 +831,12 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   width: fit-content;
   max-width: min(76%, 64ch);
   margin-left: auto;
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid var(--hairline);
-  color: var(--ink);
-  border-radius: 16px 16px 4px 16px;
-  padding: 10px 14px;
-  box-shadow: 0 1px 4px rgba(10, 10, 0, 0.04);
+  background: #f2f2f2;
+  border: 0;
+  color: #3f3f3f;
+  border-radius: 18px;
+  padding: 9px 14px;
+  box-shadow: none;
 }
 
 .message.assistant .content {
@@ -846,8 +846,8 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 
 .markdown-body {
   color: var(--body);
-  font-size: 15px;
-  line-height: 1.62;
+  font-size: 14.5px;
+  line-height: 1.68;
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }
@@ -866,7 +866,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 .markdown-body blockquote,
 .markdown-body pre,
 .markdown-body table {
-  margin: 0.72em 0;
+  margin: 0.68em 0;
 }
 
 .markdown-body h1,
@@ -979,14 +979,14 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   max-width: 760px;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-5);
+  gap: 10px;
 }
 
 .assistant-parts {
   max-width: 760px;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-6);
+  gap: 14px;
 }
 
 .tool-batch {
@@ -1006,8 +1006,8 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 .tool-batch-summary {
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-3);
-  color: var(--muted);
+  gap: 8px;
+  color: #9b9b9b;
   cursor: pointer;
   list-style: none;
   font-size: 13px;
@@ -1028,7 +1028,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 }
 
 .tool-batch-header {
-  color: var(--muted);
+  color: #9b9b9b;
   font-size: 12px;
   font-weight: 500;
   padding: 0 2px;
@@ -1036,7 +1036,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 
 .shell-command-batch {
   max-width: 760px;
-  color: var(--muted);
+  color: #9b9b9b;
   font-size: 13px;
 }
 
@@ -1046,7 +1046,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   align-items: center;
   gap: 7px;
   min-height: 24px;
-  color: var(--muted-soft);
+  color: #9b9b9b;
   cursor: pointer;
   list-style: none;
 }
@@ -1062,9 +1062,9 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(10, 10, 0, 0.15);
+  border: 1px solid #cfcfcf;
   border-radius: 3px;
-  color: var(--muted);
+  color: #8a8a8a;
   font-size: 9px;
   line-height: 1;
 }
@@ -1091,7 +1091,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   align-items: center;
   gap: 7px;
   min-height: 22px;
-  color: var(--body);
+  color: #5f5f5f;
   cursor: pointer;
   list-style: none;
   overflow-wrap: anywhere;
@@ -1114,7 +1114,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 
 .shell-terminal-body {
   margin: 0;
-  padding: 16px 10px 36px;
+  padding: 14px 10px 34px;
   color: var(--code-ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
@@ -1146,9 +1146,9 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-5);
-  min-height: 28px;
+  min-height: 26px;
   padding: 0 2px;
-  color: var(--muted);
+  color: #8d8d8d;
 }
 
 .tool-line-compact .tool-line-main {
@@ -1178,9 +1178,9 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 }
 
 .tool-context-group {
-  border: 1px solid var(--hairline);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.78);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   overflow: hidden;
 }
 
@@ -1190,10 +1190,10 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-5);
-  padding: 0 14px;
+  padding: 0 2px;
   cursor: pointer;
   list-style: none;
-  background: rgba(10, 10, 0, 0.018);
+  background: transparent;
 }
 
 .tool-context-summary::-webkit-details-marker {
@@ -1201,9 +1201,9 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 }
 
 .tool-context-title {
-  color: var(--ink);
+  color: #8d8d8d;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .tool-context-meta {
@@ -1214,8 +1214,8 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 .tool-context-items {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
-  padding: 0 12px 12px;
+  gap: 2px;
+  padding: 0 0 8px;
 }
 
 .tool-line {
@@ -1227,32 +1227,32 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 
 .tool-card {
   max-width: 760px;
-  border: 1px solid var(--hairline);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.85);
-  box-shadow: 0 2px 8px rgba(10, 10, 0, 0.04), 0 8px 24px rgba(10, 10, 0, 0.03);
+  border: 1px solid #eeeeee;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: none;
   overflow: hidden;
   transition: box-shadow 200ms ease;
 }
 
 .tool-card:hover {
-  box-shadow: 0 4px 12px rgba(10, 10, 0, 0.06), 0 12px 32px rgba(10, 10, 0, 0.04);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.035);
 }
 
 .tool-card-context {
-  background: rgba(255, 255, 255, 0.85);
-  box-shadow: inset 3px 0 0 rgba(31, 107, 87, 0.22);
+  background: #ffffff;
+  box-shadow: none;
 }
 
 .tool-card-shell {
   background: #ffffff;
-  border-color: rgba(10, 10, 0, 0.08);
-  box-shadow: 0 2px 6px rgba(10, 10, 0, 0.04), 0 8px 20px rgba(10, 10, 0, 0.03);
+  border-color: #eeeeee;
+  box-shadow: none;
 }
 
 .tool-card-mutation {
-  background: rgba(255, 255, 255, 0.85);
-  box-shadow: inset 3px 0 0 rgba(31, 107, 87, 0.28);
+  background: #ffffff;
+  box-shadow: none;
 }
 
 .tool-card-generic {
@@ -1555,10 +1555,11 @@ details.tool-details pre {
 
 .diff-card {
   max-width: 760px;
-  border: 1px solid var(--hairline);
+  border: 1px solid #e5e5e5;
   border-radius: 12px;
   background: #ffffff;
   overflow: hidden;
+  box-shadow: none;
 }
 
 .diff-card-header {
@@ -1566,16 +1567,16 @@ details.tool-details pre {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-4);
-  padding: 11px 14px;
-  border-bottom: 1px solid var(--hairline);
+  padding: 12px 14px;
+  border-bottom: 1px solid #f0f0f0;
 }
 
 .diff-card-stats {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 13px;
+  gap: 8px;
+  font-family: inherit;
+  font-size: 12px;
   line-height: 1.2;
 }
 
@@ -1598,21 +1599,22 @@ details.tool-details pre {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 11px;
-  border-radius: 999px;
-  border: 1px solid var(--hairline);
-  background: #f8faf7;
-  color: var(--ink);
+  padding: 0;
+  min-height: 0;
+  border-radius: 0;
+  border: 0;
+  background: transparent;
+  color: #666666;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 150ms ease, border-color 150ms ease;
+  transition: color 150ms ease;
 }
 
 .diff-card-toggle:hover {
-  background: #eef4ef;
-  border-color: #cbd8ca;
+  background: transparent;
+  color: #1f1f1f;
 }
 
 .diff-card-toggle-mark {
@@ -1626,7 +1628,7 @@ details.tool-details pre {
 }
 
 .diff-card-file {
-  border-bottom: 1px solid rgba(10, 10, 0, 0.04);
+  border-bottom: 1px solid #f5f5f5;
 }
 
 .diff-card-file:last-child {
@@ -1638,7 +1640,7 @@ details.tool-details pre {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-4);
-  padding: 8px 14px;
+  padding: 9px 14px;
   cursor: pointer;
   list-style: none;
   transition: background 150ms ease;
@@ -1654,7 +1656,7 @@ details.tool-details pre {
 
 .diff-card-file-name {
   min-width: 0;
-  color: var(--ink);
+  color: #5f5f5f;
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   overflow: hidden;

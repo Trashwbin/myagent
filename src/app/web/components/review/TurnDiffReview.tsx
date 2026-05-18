@@ -37,8 +37,8 @@ export function TurnDiffReview({
           <span className="diff-card-del">-{totals.deletions}</span>
         </div>
         <button className="diff-card-toggle" onClick={toggleAll}>
-          {allExpanded ? "Collapse all" : "Expand all"}
-          <span className="diff-card-toggle-mark">{allExpanded ? "↑" : "↓"}</span>
+          {allExpanded ? "Collapse" : "Review"}
+          <span className="diff-card-toggle-mark">{allExpanded ? "↑" : "→"}</span>
         </button>
       </div>
       <div className="diff-card-files">
