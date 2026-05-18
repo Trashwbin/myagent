@@ -148,7 +148,7 @@ export function Sidebar({
                               <button
                                 key={session.id}
                                 className={`session-item nested${session.id === activeSessionId ? " active" : ""}`}
-                                title={session.id}
+                                title={sessionTitle(session)}
                                 onClick={() => onSelect(session.id)}
                               >
                                 <div className="session-title">{sessionTitle(session)}</div>

@@ -22,7 +22,7 @@ describe("session list helpers", () => {
     expect(groups[0]?.sessions.map((session) => session.id)).toEqual(["a", "c"]);
   });
 
-  it("adds short id to untitled session meta", () => {
+  it("does not expose session id in untitled session meta", () => {
     const session = {
       id: "12345678-abcd",
       workspaceRoot: "/tmp/a",
@@ -32,7 +32,7 @@ describe("session list helpers", () => {
 
     expect(shortSessionId(session.id)).toBe("12345678");
     expect(sessionTitle(session)).toBe("New session");
-    expect(sessionMeta(session)).toContain("12345678");
+    expect(sessionMeta(session)).toBe("2h");
   });
 
   it("keeps active session visible when beyond the default cap", () => {

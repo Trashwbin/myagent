@@ -400,6 +400,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 .session-item {
   position: relative;
   width: 100%;
+  min-width: 0;
   min-height: 30px;
   text-align: left;
   display: flex;
@@ -444,7 +445,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 
 .session-title {
   min-width: 0;
-  flex: 1;
+  flex: 1 1 auto;
   color: #5f5f5f;
   white-space: nowrap;
   overflow: hidden;
@@ -454,6 +455,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 }
 
 .session-meta {
+  min-width: 0;
   flex: 0 0 auto;
   color: var(--muted);
   font-family: inherit;

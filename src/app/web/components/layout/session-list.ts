@@ -58,11 +58,7 @@ export function sessionTitle(session: SessionSummary) {
 }
 
 export function sessionMeta(session: SessionSummary) {
-  const age = relativeAge(session.updatedAt);
-  if (!session.title || session.title === "New session") {
-    return `${shortSessionId(session.id)} · ${age}`;
-  }
-  return age;
+  return relativeAge(session.updatedAt);
 }
 
 export function visibleSessions(
