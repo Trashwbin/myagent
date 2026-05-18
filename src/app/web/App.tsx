@@ -3,6 +3,7 @@ import type { Message } from "../../model/types.js";
 import type { ApprovalResponse } from "../../permission/approval.js";
 import type { ServerMessage } from "../protocol.js";
 import { ApprovalDock } from "./components/approval/ApprovalDock.js";
+import type { SlashChoice } from "./components/composer/Composer.js";
 import { Composer } from "./components/composer/Composer.js";
 import { Sidebar } from "./components/layout/Sidebar.js";
 import { Topbar } from "./components/layout/Topbar.js";
@@ -14,6 +15,7 @@ import type {
   ProviderConfig,
   ProjectSummary,
   SessionSummary,
+  TimelineToolPart,
 } from "./state/types.js";
 import { sessionProjectPath } from "./components/layout/session-list.js";
 
@@ -84,6 +86,10 @@ export function App() {
     : isActiveRunning(state)
       ? "running"
       : "connected";
+  const slashChoices = useMemo(
+    () => buildSlashChoices(state.providerConfig, selectedModelId, activeTimeline),
+    [state.providerConfig, selectedModelId, activeTimeline],
+  );
 
   useEffect(() => {
     setApprovalIndex(0);
@@ -321,6 +327,35 @@ export function App() {
     dispatch({ type: "sessions_loaded", sessions });
   }
 
+  async function rewindToCheckpoint(checkpointId: string) {
+    if (!state.activeSessionId || !wsRef.current || isActiveRunning(state)) return;
+    const sessionId = state.activeSessionId;
+    dispatch({
+      type: "status_local",
+      sessionId,
+      level: "info",
+      text: `Restoring checkpoint ${checkpointId}...`,
+    });
+    dispatch({ type: "session_running", sessionId, running: true });
+    wsRef.current.send(
+      JSON.stringify({
+        type: "rewind_session",
+        sessionId,
+        checkpointId,
+      }),
+    );
+    setInput("");
+  }
+
+  async function handleSlashChoice(choice: SlashChoice) {
+    if (choice.type === "model") {
+      await selectModel(choice.id);
+      setInput("");
+      return;
+    }
+    await rewindToCheckpoint(choice.id);
+  }
+
   function subscribe(sessionId: string) {
     const socket = wsRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
@@ -365,6 +400,9 @@ export function App() {
       }
 
       const { command, args } = slashCommand;
+      if (command.picker) {
+        return;
+      }
       dispatch({
         type: "status_local",
         sessionId: activeSessionId,
@@ -490,6 +528,10 @@ export function App() {
           onSelectModel={(modelProfileId) => {
             void selectModel(modelProfileId);
           }}
+          slashChoices={slashChoices}
+          onSlashChoice={(choice) => {
+            void handleSlashChoice(choice);
+          }}
           onCommandError={(message) => {
             if (!state.activeSessionId) return;
             dispatch({
@@ -517,6 +559,60 @@ export function App() {
       ) : null}
     </div>
   );
+}
+
+function buildSlashChoices(
+  providerConfig: ProviderConfig | null,
+  selectedModelId: string,
+  timeline: AppState["timelines"][string],
+): SlashChoice[] {
+  return [
+    ...modelChoices(providerConfig, selectedModelId),
+    ...checkpointChoices(timeline),
+  ];
+}
+
+function modelChoices(
+  providerConfig: ProviderConfig | null,
+  selectedModelId: string,
+): SlashChoice[] {
+  if (!providerConfig) return [];
+  return providerConfig.models.map((model) => ({
+    type: "model" as const,
+    id: model.id,
+    label: model.model || model.modelID || model.id,
+    description: `${model.providerID || model.provider}${model.name ? ` · ${model.name}` : ""}`,
+    active: model.id === selectedModelId,
+  }));
+}
+
+function checkpointChoices(timeline: AppState["timelines"][string]): SlashChoice[] {
+  const choices: SlashChoice[] = [];
+  const seen = new Set<string>();
+  for (const turn of [...timeline].reverse()) {
+    for (const part of [...turn.assistantParts].reverse()) {
+      if (part.kind !== "tool" || !part.checkpointId || seen.has(part.checkpointId)) {
+        continue;
+      }
+      seen.add(part.checkpointId);
+      choices.push({
+        type: "checkpoint",
+        id: part.checkpointId,
+        label: checkpointLabel(part),
+        description: checkpointDescription(part),
+      });
+    }
+  }
+  return choices;
+}
+
+function checkpointLabel(part: TimelineToolPart): string {
+  return part.subtitle || part.title || part.toolName || part.checkpointId || "checkpoint";
+}
+
+function checkpointDescription(part: TimelineToolPart): string {
+  const summary = part.summary ? ` · ${part.summary}` : "";
+  return `${part.title}${summary}`;
 }
 
 function indexToDecision(index: number): ApprovalResponse {

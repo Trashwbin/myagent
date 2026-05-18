@@ -35,28 +35,27 @@ describe("web slash commands", () => {
     });
   });
 
-  it("requires a checkpoint id for rewind", () => {
+  it("opens a second-level picker for rewind", () => {
     expect(parseSlashCommand("/rewind")).toMatchObject({
-      type: "incomplete",
-      command: { id: "rewind" },
-    });
-    expect(parseSlashCommand("/rewind cp_123")).toMatchObject({
       type: "valid",
       command: { id: "rewind" },
-      args: "cp_123",
+      args: "",
+    });
+    expect(parseSlashCommand("/rewind cp_123")).toMatchObject({
+      type: "invalid",
+      command: { id: "rewind" },
     });
   });
 
-  it("parses model list and model switch commands", () => {
+  it("opens a second-level picker for model selection", () => {
     expect(parseSlashCommand("/model")).toMatchObject({
       type: "valid",
       command: { id: "model" },
       args: "",
     });
     expect(parseSlashCommand("/model anthropic/sonnet")).toMatchObject({
-      type: "valid",
+      type: "invalid",
       command: { id: "model" },
-      args: "anthropic/sonnet",
     });
   });
 

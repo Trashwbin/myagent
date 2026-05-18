@@ -8,6 +8,21 @@ import {
 import type { ProviderConfig } from "../../state/types.js";
 import { ModelSelector } from "./ModelSelector.js";
 
+export type SlashChoice =
+  | {
+      type: "model";
+      id: string;
+      label: string;
+      description: string;
+      active?: boolean;
+    }
+  | {
+      type: "checkpoint";
+      id: string;
+      label: string;
+      description: string;
+    };
+
 export function Composer({
   value,
   disabled,
@@ -17,6 +32,8 @@ export function Composer({
   providerConfig,
   selectedModelId,
   onSelectModel,
+  slashChoices,
+  onSlashChoice,
 }: {
   value: string;
   disabled?: boolean;
@@ -26,14 +43,29 @@ export function Composer({
   providerConfig: ProviderConfig | null;
   selectedModelId: string;
   onSelectModel: (modelProfileId: string) => void;
+  slashChoices: SlashChoice[];
+  onSlashChoice: (choice: SlashChoice) => void;
 }) {
   const commands = useMemo(() => matchingSlashCommands(value), [value]);
   const query = slashCommandQuery(value);
-  const showCommands = query !== null && commands.length > 0;
   const parsed = parseSlashCommand(value);
+  const activePicker =
+    parsed.type === "valid" && parsed.command.picker ? parsed.command.picker : null;
+  const choices = useMemo(
+    () => slashChoices.filter((choice) => choice.type === activePicker),
+    [slashChoices, activePicker],
+  );
+  const showChoices = !!activePicker;
+  const showCommands = !showChoices && query !== null && commands.length > 0;
   const commandHint =
     parsed.type === "incomplete" || parsed.type === "invalid" || parsed.type === "unknown"
       ? parsed.message
+      : showChoices && choices.length > 0
+        ? "Choose an item with ↑/↓, then press Enter."
+      : showChoices
+        ? activePicker === "checkpoint"
+          ? "No checkpoints found in this session."
+          : "No configured models found."
       : parsed.type === "valid"
         ? `Enter runs ${parsed.command.name}.`
       : query !== null
@@ -43,7 +75,7 @@ export function Composer({
 
   useEffect(() => {
     setSelectedIndex(0);
-  }, [query]);
+  }, [query, activePicker]);
 
   function applyCommand(command: SlashCommand) {
     onChange(command.insertText);
@@ -53,6 +85,19 @@ export function Composer({
     const command = parseSlashCommand(value);
     if (command.type === "incomplete" || command.type === "invalid" || command.type === "unknown") {
       onCommandError?.(command.message);
+      return;
+    }
+    if (command.type === "valid" && command.command.picker) {
+      const choice = choices[selectedIndex];
+      if (choice) {
+        onSlashChoice(choice);
+        return;
+      }
+      onCommandError?.(
+        command.command.picker === "checkpoint"
+          ? "No checkpoints found in this session."
+          : "No configured models found.",
+      );
       return;
     }
     onSend();
@@ -80,20 +125,53 @@ export function Composer({
           ))}
         </div>
       ) : null}
+      {showChoices ? (
+        <div className="slash-menu slash-choice-menu" role="listbox" aria-label="Command options">
+          {choices.length > 0 ? (
+            choices.map((choice, index) => (
+              <button
+                key={`${choice.type}:${choice.id}`}
+                type="button"
+                className={`slash-command slash-choice${index === selectedIndex ? " selected" : ""}`}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  onSlashChoice(choice);
+                }}
+                role="option"
+                aria-selected={index === selectedIndex}
+              >
+                <span className="slash-command-name">{choice.label}</span>
+                <span className="slash-command-description">
+                  {choice.description}
+                  {"active" in choice && choice.active ? " · active" : ""}
+                </span>
+              </button>
+            ))
+          ) : (
+            <div className="slash-empty">
+              {activePicker === "checkpoint"
+                ? "No checkpoints found in this session."
+                : "No configured models found."}
+            </div>
+          )}
+        </div>
+      ) : null}
       <div className="composer-inner">
         <div className="composer-row">
           <textarea
             value={value}
             onChange={(event) => onChange(event.target.value)}
             onKeyDown={(event) => {
-              if (showCommands && event.key === "ArrowDown") {
+              if ((showCommands || showChoices) && event.key === "ArrowDown") {
                 event.preventDefault();
-                setSelectedIndex((index) => (index + 1) % commands.length);
+                const length = showChoices ? choices.length : commands.length;
+                if (length > 0) setSelectedIndex((index) => (index + 1) % length);
                 return;
               }
-              if (showCommands && event.key === "ArrowUp") {
+              if ((showCommands || showChoices) && event.key === "ArrowUp") {
                 event.preventDefault();
-                setSelectedIndex((index) => (index + commands.length - 1) % commands.length);
+                const length = showChoices ? choices.length : commands.length;
+                if (length > 0) setSelectedIndex((index) => (index + length - 1) % length);
                 return;
               }
               if (showCommands && event.key === "Tab") {
@@ -109,6 +187,10 @@ export function Composer({
                   return;
                 }
                 if (command.type === "incomplete" || command.type === "invalid") {
+                  submit();
+                  return;
+                }
+                if (showChoices) {
                   submit();
                   return;
                 }

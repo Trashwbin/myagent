@@ -95,6 +95,7 @@ export type TimelineToolPart = {
   details?: string;
   diffFiles?: MutationDiffFile[];
   display?: ToolDisplay;
+  checkpointId?: string;
 };
 
 export type TimelinePart =

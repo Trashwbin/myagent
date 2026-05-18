@@ -8,6 +8,7 @@ export type SlashCommand = {
   insertText: string;
   requiresArgument?: boolean;
   argumentLabel?: string;
+  picker?: "model" | "checkpoint";
   pendingMessage: (args: string) => string;
 };
 
@@ -31,21 +32,20 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   {
     id: "rewind",
     name: "/rewind",
-    usage: "/rewind <checkpointId>",
-    description: "Restore files from a specific checkpoint id.",
-    insertText: "/rewind ",
-    requiresArgument: true,
-    argumentLabel: "checkpointId",
-    pendingMessage: (checkpointId) => `Restoring checkpoint ${checkpointId}...`,
+    usage: "/rewind",
+    description: "Choose a checkpoint from this session to restore.",
+    insertText: "/rewind",
+    picker: "checkpoint",
+    pendingMessage: () => "Choose a checkpoint to restore.",
   },
   {
     id: "model",
     name: "/model",
-    usage: "/model [id]",
-    description: "List model profiles or switch this session to a configured model.",
-    insertText: "/model ",
-    pendingMessage: (modelId) =>
-      modelId ? `Switching model to ${modelId}...` : "Listing available models...",
+    usage: "/model",
+    description: "Choose a configured model for this session.",
+    insertText: "/model",
+    picker: "model",
+    pendingMessage: () => "Choose a model.",
   },
 ];
 
@@ -95,7 +95,7 @@ export function parseSlashCommand(value: string): ParsedSlashCommand {
     };
   }
 
-  if (!command.requiresArgument && args && command.id !== "model") {
+  if (!command.requiresArgument && args) {
     return {
       type: "invalid",
       command,

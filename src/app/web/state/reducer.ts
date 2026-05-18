@@ -274,6 +274,7 @@ export function buildTimelineFromMessages(messages: Message[]): TimelineTurn[] {
         message.toolName,
         message.content,
         display,
+        message.checkpointId,
       );
       continue;
     }
@@ -512,6 +513,7 @@ export function applyTurnEvent(
         event.message.toolName,
         event.message.content,
         event.display,
+        event.message.checkpointId,
       );
     case "turn_truncated":
       return appendStatus(
@@ -532,6 +534,7 @@ function appendToolResult(
   toolName: string | undefined,
   content: string,
   display?: ToolDisplay,
+  checkpointId?: string,
 ): TimelineTurn[] {
   const name = toolName || "tool";
   const status = resultStatus(content);
@@ -553,6 +556,7 @@ function appendToolResult(
       details,
       diffFiles,
       display: normalizedDisplay,
+      checkpointId,
     });
     const mutationDiffs = mergeDiffFiles(turn.mutationDiffs, diffFiles);
     return { ...turn, assistantParts: parts, mutationDiffs };
