@@ -1784,6 +1784,10 @@ textarea::placeholder {
   border: 1px solid #eeeeee;
 }
 
+.model-badge.muted {
+  opacity: 0.65;
+}
+
 .model-badge .dot {
   width: 4px;
   height: 4px;
@@ -1792,6 +1796,132 @@ textarea::placeholder {
 }
 
 .model-badge .dot.connected { background: var(--success); }
+
+.model-selector {
+  position: relative;
+  min-width: 0;
+}
+
+.model-trigger {
+  min-height: 28px;
+  max-width: 230px;
+  padding: 4px 9px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.model-trigger:hover {
+  background: #ffffff;
+  border-color: var(--surface-stronger);
+}
+
+.model-trigger svg {
+  width: 13px;
+  height: 13px;
+  color: var(--muted-soft);
+  flex: 0 0 auto;
+}
+
+.model-trigger-text,
+.model-option-main {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.model-provider {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.model-name,
+.model-option-name,
+.model-option-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-name {
+  max-width: 128px;
+  color: var(--ink);
+}
+
+.model-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: var(--z-popover);
+  width: min(360px, calc(100vw - 32px));
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid rgba(10, 10, 0, 0.08);
+  border-radius: 14px;
+  background: rgba(253, 252, 250, 0.98);
+  box-shadow: 0 16px 40px rgba(10, 10, 0, 0.12);
+  padding: 6px;
+  animation: slideUp 140ms ease both;
+}
+
+.model-provider-group + .model-provider-group {
+  border-top: 1px solid rgba(10, 10, 0, 0.06);
+  margin-top: 5px;
+  padding-top: 5px;
+}
+
+.model-provider-heading {
+  padding: 7px 8px 5px;
+  color: var(--muted-soft);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.model-option {
+  width: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 8px;
+  text-align: left;
+}
+
+.model-option:hover,
+.model-option.active {
+  background: rgba(31, 107, 87, 0.08);
+}
+
+.model-option-main {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.model-option-name {
+  max-width: 250px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.model-option-id {
+  max-width: 250px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.model-option-meta {
+  color: var(--muted-soft);
+  font-size: 10px;
+}
 
 .hint {
   text-align: center;

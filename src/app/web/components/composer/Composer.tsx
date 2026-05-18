@@ -5,6 +5,8 @@ import {
   slashCommandQuery,
   type SlashCommand,
 } from "../../slash-commands.js";
+import type { ProviderConfig } from "../../state/types.js";
+import { ModelSelector } from "./ModelSelector.js";
 
 export function Composer({
   value,
@@ -12,12 +14,18 @@ export function Composer({
   onChange,
   onSend,
   onCommandError,
+  providerConfig,
+  selectedModelId,
+  onSelectModel,
 }: {
   value: string;
   disabled?: boolean;
   onChange: (value: string) => void;
   onSend: () => void;
   onCommandError?: (message: string) => void;
+  providerConfig: ProviderConfig | null;
+  selectedModelId: string;
+  onSelectModel: (modelProfileId: string) => void;
 }) {
   const commands = useMemo(() => matchingSlashCommands(value), [value]);
   const query = slashCommandQuery(value);
@@ -119,10 +127,12 @@ export function Composer({
         <div className="composer-actions">
           <div className="composer-left-actions" />
           <div className="composer-right-actions">
-            <div className="model-badge">
-              <span className="dot connected" />
-              <span>myAgent</span>
-            </div>
+            <ModelSelector
+              config={providerConfig}
+              selectedModelId={selectedModelId}
+              disabled={disabled}
+              onSelect={onSelectModel}
+            />
             <button className="send-button" onClick={submit} disabled={disabled}>
               <svg viewBox="0 0 16 16" fill="none">
                 <path d="M8 13.5v-11M4.5 6.5L8 2.5l3.5 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />

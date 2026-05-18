@@ -287,6 +287,32 @@ export class SessionManager {
     return { ok: true };
   }
 
+  async switchModel(
+    sessionId: string,
+    requestedId: string,
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    modelProfileId?: string;
+    provider?: string;
+    model?: string;
+  }> {
+    const active = this.ensureSession(sessionId);
+    if (!active) return { ok: false, error: "Session not found" };
+    if (active.activeTurn) return { ok: false, error: "Turn already active for this session" };
+
+    await this.refreshRuntime(active);
+    const result = this.applyModelSwitch(active, requestedId);
+    if (!result.ok) return result;
+
+    return {
+      ok: true,
+      modelProfileId: result.profile.id,
+      provider: result.profile.provider,
+      model: result.profile.model,
+    };
+  }
+
   private handleModelCommand(
     active: ActiveSession,
     text: string,
@@ -317,8 +343,8 @@ export class SessionManager {
       return { ok: true };
     }
 
-    const profile = findModelProfile(active.modelProfiles, requestedId);
-    if (!profile) {
+    const result = this.applyModelSwitch(active, requestedId);
+    if (!result.ok) {
       const message = formatUnknownModel(requestedId, active.modelProfiles);
       this.appendAssistantStatus(active, message);
       this.sendEvent(active.session.id, {
@@ -328,6 +354,26 @@ export class SessionManager {
       });
       return { ok: true };
     }
+
+    const message = formatModelSwitch(result.profile);
+    this.appendAssistantStatus(active, message);
+    this.sendEvent(active.session.id, {
+      type: "session_model_changed",
+      sessionId: active.session.id,
+      modelProfileId: result.profile.id,
+      provider: result.profile.provider,
+      model: result.profile.model,
+      message,
+    });
+    return { ok: true };
+  }
+
+  private applyModelSwitch(
+    active: ActiveSession,
+    requestedId: string,
+  ): { ok: true; profile: ModelProfile } | { ok: false; error: string } {
+    const profile = findModelProfile(active.modelProfiles, requestedId);
+    if (!profile) return { ok: false, error: `Unknown model profile: ${requestedId}` };
 
     active.provider = active.createProvider(profile);
     Object.assign(active.session, {
@@ -340,18 +386,7 @@ export class SessionManager {
       provider: profile.provider,
       model: profile.model,
     });
-
-    const message = formatModelSwitch(profile);
-    this.appendAssistantStatus(active, message);
-    this.sendEvent(active.session.id, {
-      type: "session_model_changed",
-      sessionId: active.session.id,
-      modelProfileId: profile.id,
-      provider: profile.provider,
-      model: profile.model,
-      message,
-    });
-    return { ok: true };
+    return { ok: true, profile };
   }
 
   private appendAssistantStatus(active: ActiveSession, content: string): void {

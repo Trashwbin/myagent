@@ -5,6 +5,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { Provider } from "../model/provider.js";
 import {
   loadConfig,
+  findModelProfile,
   resolveApprovalMode,
   resolveModelProfile,
   resolveModelProfiles,
@@ -207,11 +208,27 @@ export function createAppServer(deps: AppServerDeps): Server {
           : deps.cwd;
     const projectSession: SessionState = { id: "", cwd, messages: [] };
     const runtime = await resolveRuntime(projectSession);
+    const requestedModelProfileId =
+      typeof parsed.modelProfileId === "string"
+        ? parsed.modelProfileId
+        : typeof parsed.model === "string"
+          ? parsed.model
+          : undefined;
+    const requestedProfile = requestedModelProfileId
+      ? findModelProfile(runtime.modelProfiles, requestedModelProfileId)
+      : undefined;
+    if (requestedModelProfileId && !requestedProfile) {
+      throw new HttpError(`Unknown model profile: ${requestedModelProfileId}`, 400);
+    }
+    const profile =
+      requestedProfile ??
+      findModelProfile(runtime.modelProfiles, runtime.modelProfileId) ??
+      runtime.modelProfiles[0];
     const session = deps.store.createSession({
       workspaceRoot: cwd,
-      modelProfileId: runtime.modelProfileId,
-      provider: runtime.providerName,
-      model: runtime.modelName,
+      modelProfileId: profile?.id ?? runtime.modelProfileId,
+      provider: profile?.provider ?? runtime.providerName,
+      model: profile?.model ?? runtime.modelName,
     });
     manager.registerSession(session);
     return session;
@@ -389,6 +406,27 @@ export function createAppServer(deps: AppServerDeps): Server {
           return;
         }
 
+        if (leaf === "model" && req.method === "POST") {
+          const body = await readBody(req);
+          const parsed = body ? JSON.parse(body) : {};
+          if (typeof parsed.modelProfileId !== "string" || parsed.modelProfileId.trim() === "") {
+            json(res, { error: "modelProfileId is required" }, 400);
+            return;
+          }
+          const result = await manager.switchModel(sessionId, parsed.modelProfileId);
+          if (!result.ok) {
+            const status = result.error === "Session not found"
+              ? 404
+              : result.error?.includes("active")
+                ? 409
+                : 400;
+            json(res, { error: result.error }, status);
+            return;
+          }
+          json(res, result);
+          return;
+        }
+
         if (leaf === "abort" && req.method === "POST") {
           json(res, { error: "Abort not supported yet" }, 501);
           return;
@@ -398,6 +436,10 @@ export function createAppServer(deps: AppServerDeps): Server {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Not found" }));
     } catch (err) {
+      if (err instanceof HttpError) {
+        json(res, { error: err.message }, err.status);
+        return;
+      }
       json(res, { error: "Internal server error" }, 500);
     }
   };
@@ -527,6 +569,12 @@ export function createAppServer(deps: AppServerDeps): Server {
   });
 
   return server;
+}
+
+class HttpError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
 }
 
 function resolveSessionProfileFromRuntime(

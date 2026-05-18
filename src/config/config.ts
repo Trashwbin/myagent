@@ -479,7 +479,7 @@ function buildModelProfile(
     provider,
     adapter,
     model,
-    name: getString(modelConfig, "name") ?? base.name,
+    name: getString(modelConfig, "name"),
     baseUrl: resolveConfigValue(
       getString(options, "baseURL"),
       getString(options, "baseUrl"),

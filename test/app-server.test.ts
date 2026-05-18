@@ -390,6 +390,54 @@ describe("HTTP API", () => {
     expect(store.getSession(data.id)?.cwd).toBe(canonicalWorkspace);
   });
 
+  it("POST /session accepts a selected model profile", async () => {
+    const base = await tmpBaseDir();
+    const workspace = await mkdtemp(join(tmpdir(), "myagent-session-model-api-"));
+    const canonicalWorkspace = await realpath(workspace);
+    activeTmpDirs.push(workspace);
+    const store = openTestStore(base);
+    const { port } = await startTestServer(store);
+
+    const data = await fetchJson(port, "/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectPath: workspace,
+        modelProfileId: "openai/test-model",
+      }),
+    });
+
+    expect(data).toMatchObject({
+      id: expect.any(String),
+      projectPath: canonicalWorkspace,
+      modelProfileId: "openai/test-model",
+      provider: "openai",
+      model: "test-model",
+    });
+    expect(store.getSession(data.id)).toMatchObject({
+      modelProfileId: "openai/test-model",
+      provider: "openai",
+      model: "test-model",
+    });
+  });
+
+  it("POST /session rejects an unknown selected model profile", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const { port } = await startTestServer(store);
+
+    const data = await fetchJson(port, "/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectPath: "/test",
+        modelProfileId: "openai/missing",
+      }),
+    });
+
+    expect(data).toEqual({ error: "Unknown model profile: openai/missing" });
+  });
+
   it("GET /session/status reports idle and busy sessions", async () => {
     let release!: () => void;
     const blocker = new Promise<void>((resolve) => {
@@ -701,6 +749,107 @@ describe("WebSocket", () => {
     expect(store.getSession(session.id)).toMatchObject({
       modelProfileId: "mimo-claude/second",
       provider: "mimo-claude",
+      model: "second",
+    });
+
+    const runMessages = await wsCollect(port, (ws) => {
+      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+      ws.send(JSON.stringify({ type: "user_message", sessionId: session.id, text: "hi" }));
+    }, (msg) => msg.type === "turn_finished");
+
+    expect(
+      runMessages.some(
+        (msg) =>
+          msg.type === "turn_event" &&
+          msg.event.type === "assistant_text_delta" &&
+          msg.event.text === "second provider",
+      ),
+    ).toBe(true);
+  });
+
+  it("switches model over HTTP and uses the new provider for the next turn", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({
+      workspaceRoot: "/test",
+      modelProfileId: "openai/first",
+      provider: "openai",
+      model: "first",
+    });
+    const providers = {
+      "openai/first": textProvider("first", "first provider"),
+      "mimo/second": textProvider("second", "second provider"),
+    };
+    const port = await findAvailablePort(43200);
+    const server = createAppServer({
+      provider: providers["openai/first"],
+      providerName: "openai",
+      modelName: "first",
+      modelProfileId: "openai/first",
+      modelProfiles: [
+        {
+          id: "openai/first",
+          provider: "openai",
+          adapter: "@ai-sdk/openai",
+          model: "first",
+          apiKey: "sk-test",
+        },
+        {
+          id: "mimo/second",
+          provider: "mimo",
+          adapter: "@ai-sdk/openai-compatible",
+          model: "second",
+          apiKey: "sk-test",
+        },
+      ],
+      createProvider: (profile) => providers[profile.id as keyof typeof providers],
+      registry: new ToolRegistry(),
+      approval: "auto",
+      resolveRuntime: () => ({
+        provider: providers["openai/first"],
+        modelProfiles: [
+          {
+            id: "openai/first",
+            provider: "openai",
+            adapter: "@ai-sdk/openai",
+            model: "first",
+            apiKey: "sk-test",
+          },
+          {
+            id: "mimo/second",
+            provider: "mimo",
+            adapter: "@ai-sdk/openai-compatible",
+            model: "second",
+            apiKey: "sk-test",
+          },
+        ],
+        createProvider: (profile) => providers[profile.id as keyof typeof providers],
+        registry: new ToolRegistry(),
+        approval: "auto",
+      }),
+      store,
+      cwd: "/test",
+    });
+    activeServers.push(server);
+    await new Promise<void>((resolve) => {
+      server.listen(port, "127.0.0.1", () => resolve());
+    });
+
+    const switched = await fetchJson(port, `/session/${session.id}/model`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ modelProfileId: "mimo/second" }),
+    });
+
+    expect(switched).toMatchObject({
+      ok: true,
+      modelProfileId: "mimo/second",
+      provider: "mimo",
+      model: "second",
+    });
+    expect(store.getSession(session.id)).toMatchObject({
+      modelProfileId: "mimo/second",
+      provider: "mimo",
       model: "second",
     });
 

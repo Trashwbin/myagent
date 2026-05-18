@@ -19,6 +19,7 @@ import { sessionProjectPath } from "./components/layout/session-list.js";
 
 const ACTIVE_SESSION_KEY = "myagent.activeSession";
 const DRAFT_PROJECT_KEY = "myagent.draftProjectPath";
+const DRAFT_MODEL_KEY = "myagent.draftModelProfileId";
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
@@ -44,6 +45,7 @@ export function App() {
   const [input, setInput] = useState("");
   const [approvalIndex, setApprovalIndex] = useState(0);
   const [draftProjectPath, setDraftProjectPath] = useState<string | null>(null);
+  const [draftModelProfileId, setDraftModelProfileId] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<number | null>(null);
   const subscribed = useRef(new Set<string>());
@@ -64,11 +66,19 @@ export function App() {
   const displayProjectPath = activeSession
     ? sessionProjectPath(activeSession)
     : selectedProjectPath || "";
-  const modelLabel = activeSession?.provider && activeSession.model
-    ? `${activeSession.provider}/${activeSession.model}`
-    : state.providerConfig?.current
-      ? state.providerConfig.current
-      : "model";
+  const selectedModelId =
+    activeSession?.modelProfileId ||
+    (activeSession?.provider && activeSession.model
+      ? `${activeSession.provider}/${activeSession.model}`
+      : null) ||
+    draftModelProfileId ||
+    state.providerConfig?.current ||
+    state.providerConfig?.models[0]?.id ||
+    "";
+  const selectedModel = state.providerConfig?.models.find((model) => model.id === selectedModelId);
+  const modelLabel = selectedModel
+    ? `${selectedModel.providerID}/${selectedModel.modelID}`
+    : selectedModelId || "model";
   const status = !state.wsOpen
     ? "connecting"
     : isActiveRunning(state)
@@ -105,6 +115,7 @@ export function App() {
 
       const remembered = localStorage.getItem(ACTIVE_SESSION_KEY);
       const rememberedProject = localStorage.getItem(DRAFT_PROJECT_KEY);
+      const rememberedModel = localStorage.getItem(DRAFT_MODEL_KEY);
       const fromUrl = new URL(location.href).searchParams.get("session");
       const ids = new Set(sessions.map((session) => session.id));
       const nextSessionId =
@@ -120,6 +131,9 @@ export function App() {
 
       if (rememberedProject && projects.some((project) => project.path === rememberedProject)) {
         setDraftProjectPath(rememberedProject);
+      }
+      if (rememberedModel && config.models.some((model) => model.id === rememberedModel)) {
+        setDraftModelProfileId(rememberedModel);
       }
     };
 
@@ -261,17 +275,50 @@ export function App() {
     subscribe(sessionId);
   }
 
-  async function createSession(projectPath = selectedProjectPath || state.projects[0]?.path) {
+  async function createSession(
+    projectPath = selectedProjectPath || state.projects[0]?.path,
+    modelProfileId = selectedModelId,
+  ) {
     const session = await fetchJson<{ id: string; projectPath: string }>("/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(projectPath ? { projectPath } : {}),
+      body: JSON.stringify({
+        ...(projectPath ? { projectPath } : {}),
+        ...(modelProfileId ? { modelProfileId } : {}),
+      }),
     });
     await loadProjects();
     const sessions = await fetchJson<SessionSummary[]>("/session");
     dispatch({ type: "sessions_loaded", sessions });
     await selectSession(session.id, sessions);
     return session;
+  }
+
+  async function selectModel(modelProfileId: string) {
+    setDraftModelProfileId(modelProfileId);
+    localStorage.setItem(DRAFT_MODEL_KEY, modelProfileId);
+
+    if (!state.activeSessionId) return;
+    const result = await fetchJson<{
+      modelProfileId: string;
+      provider: string;
+      model: string;
+    }>(`/session/${encodeURIComponent(state.activeSessionId)}/model`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ modelProfileId }),
+    });
+    const sessions = state.sessions.map((session) =>
+      session.id === state.activeSessionId
+        ? {
+            ...session,
+            modelProfileId: result.modelProfileId,
+            provider: result.provider,
+            model: result.model,
+          }
+        : session,
+    );
+    dispatch({ type: "sessions_loaded", sessions });
   }
 
   function subscribe(sessionId: string) {
@@ -437,6 +484,11 @@ export function App() {
           onChange={setInput}
           onSend={() => {
             void sendMessage();
+          }}
+          providerConfig={state.providerConfig}
+          selectedModelId={selectedModelId}
+          onSelectModel={(modelProfileId) => {
+            void selectModel(modelProfileId);
           }}
           onCommandError={(message) => {
             if (!state.activeSessionId) return;
