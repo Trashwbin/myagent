@@ -466,7 +466,7 @@ describe("HTTP API", () => {
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
     expect(html).toContain("myAgent");
-    expect(html).toContain("--canvas: #faf8f3");
+    expect(html).toContain("--canvas: #f9f9f9");
     expect(html).toContain("/assets/client.js");
     expect(html).toContain('<div id="root"></div>');
     expect(html).not.toContain('id="session-list"');

@@ -21,6 +21,7 @@ export function Topbar({
     <header className="topbar">
       <div className="topbar-main">
         <strong className="session-name">{sessionTitle}</strong>
+        <span className="topbar-project">{projectPath || "No project selected"}</span>
       </div>
       <details className="topbar-actions">
         <summary className="topbar-actions-trigger" aria-label="Session actions">
@@ -52,6 +53,12 @@ export function Topbar({
           </button>
         </div>
       </details>
+      <button className="topbar-icon-button" type="button" aria-label="Layout">
+        <span aria-hidden="true" className="layout-icon" />
+      </button>
+      <button className="topbar-icon-button" type="button" aria-label="Expand">
+        <span aria-hidden="true" className="expand-icon" />
+      </button>
     </header>
   );
 }

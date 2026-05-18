@@ -117,15 +117,26 @@ export function Composer({
           />
         </div>
         <div className="composer-actions">
-          <div className="model-badge">
-            <span className="dot connected" />
-            <span>myAgent</span>
+          <div className="composer-left-actions">
+            <button className="composer-tool-button" type="button" aria-label="Add context">
+              +
+            </button>
+            <div className="access-badge">
+              <span className="access-icon">!</span>
+              <span>Full access</span>
+            </div>
           </div>
-          <button className="send-button" onClick={submit} disabled={disabled}>
-            <svg viewBox="0 0 16 16" fill="none">
-              <path d="M8 2.5v11M4.5 9.5L8 13.5l3.5-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
+          <div className="composer-right-actions">
+            <div className="model-badge">
+              <span className="dot connected" />
+              <span>myAgent</span>
+            </div>
+            <button className="send-button" onClick={submit} disabled={disabled}>
+              <svg viewBox="0 0 16 16" fill="none">
+                <path d="M8 13.5v-11M4.5 6.5L8 2.5l3.5 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
       <div className="hint"><span>{commandHint}</span></div>

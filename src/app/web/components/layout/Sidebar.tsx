@@ -81,6 +81,23 @@ export function Sidebar({
           <span className="action-icon">+</span>
           <span>New chat</span>
         </button>
+        <button className="sidebar-action" type="button">
+          <span className="action-icon">/</span>
+          <span>Search</span>
+        </button>
+        <button className="sidebar-action" type="button">
+          <span className="action-icon">*</span>
+          <span>Skills</span>
+        </button>
+        <button className="sidebar-action" type="button">
+          <span className="action-icon">#</span>
+          <span>Plugins</span>
+        </button>
+        <button className="sidebar-action" type="button">
+          <span className="action-icon">!</span>
+          <span>Automations</span>
+          <span className="action-badge">1</span>
+        </button>
       </div>
       <div className="session-list" aria-label="Sessions">
         <div className="session-controls">
@@ -189,6 +206,12 @@ export function Sidebar({
             })}
           </>
         )}
+      </div>
+      <div className="sidebar-footer">
+        <button className="sidebar-action" type="button">
+          <span className="action-icon">~</span>
+          <span>Settings</span>
+        </button>
       </div>
     </aside>
   );
