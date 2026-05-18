@@ -117,12 +117,7 @@ export function Composer({
           />
         </div>
         <div className="composer-actions">
-          <div className="composer-left-actions">
-            <div className="access-badge">
-              <BoltIcon />
-              <span>Full access</span>
-            </div>
-          </div>
+          <div className="composer-left-actions" />
           <div className="composer-right-actions">
             <div className="model-badge">
               <span className="dot connected" />
@@ -138,13 +133,5 @@ export function Composer({
       </div>
       <div className="hint"><span>{commandHint}</span></div>
     </section>
-  );
-}
-
-function BoltIcon() {
-  return (
-    <svg className="access-icon" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M8.9 1.8 4.4 8.4h3.2l-.6 5.8 4.5-7H8.4z" />
-    </svg>
   );
 }

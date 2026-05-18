@@ -1712,30 +1712,6 @@ details.tool-details pre {
   gap: 8px;
 }
 
-.access-badge {
-  min-height: 26px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid #e2e2e2;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #c15f1a;
-  padding: 0 10px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.access-icon {
-  width: 12px;
-  height: 12px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.35;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
 textarea {
   width: 100%;
   min-height: 24px;
