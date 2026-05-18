@@ -69,37 +69,48 @@ Supported fields:
 ```json
 {
   "$schema": "https://myagent.dev/config.json",
-  "model": "mimo/fast",
+  "model": "mimo/mimo-v2.5-pro",
   "approval": "auto" | "on-request",
-  "providers": {
+  "provider": {
     "mimo": {
-      "adapter": "@ai-sdk/openai-compatible",
-      "mode": "chat",
-      "baseUrl": "...",
-      "apiKey": "...",
-      "maxOutputTokens": 4096,
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "...",
+        "apiKey": "...",
+        "mode": "chat",
+        "maxOutputTokens": 4096
+      },
       "models": {
-        "fast": {
-          "model": "gpt-4o-mini",
-          "name": "Fast"
+        "mimo-v2.5-pro": {
+          "name": "mimo-v2.5-pro",
+          "limit": {
+            "output": 4096
+          },
+          "options": {
+            "store": false
+          }
         },
-        "accurate": {
-          "model": "gpt-4o",
-          "adapter": "@ai-sdk/openai",
-          "mode": "responses"
+        "gpt-5.2": {
+          "name": "GPT-5.2",
+          "npm": "@ai-sdk/openai",
+          "options": {
+            "mode": "responses",
+            "store": false
+          }
         }
       }
     },
     "mimo-claude": {
-      "adapter": "@ai-sdk/anthropic",
-      "mode": "messages",
-      "baseUrl": "...",
-      "apiKey": "...",
-      "authToken": "...",
-      "maxOutputTokens": 16384,
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "baseURL": "...",
+        "authToken": "...",
+        "mode": "messages",
+        "maxOutputTokens": 16384
+      },
       "models": {
-        "sonnet": {
-          "model": "claude-sonnet-4-5"
+        "claude-sonnet-4-6": {
+          "name": "Claude Sonnet 4.6"
         }
       }
     }
@@ -107,27 +118,29 @@ Supported fields:
 }
 ```
 
-Provider keys are user-facing provider IDs, not SDK adapter names. The `adapter`
-field selects the SDK integration, while `mode` selects the request shape for
-adapters that expose more than one shape. This allows a provider such as `mimo`,
+Provider keys are user-facing provider IDs, not SDK adapter names. The `npm`
+field selects the SDK integration, while `options.mode` selects the request shape
+for adapters that expose more than one shape. This allows a provider such as `mimo`,
 `abin`, or `gateway-prod` to expose whichever SDK-compatible surface it supports
 without pretending that the provider ID itself is `openai` or `anthropic`.
 
-Model profile IDs use `provider-id/model-id`, for example `mimo/fast` or
-`mimo-claude/sonnet`. During a conversation, `/model` lists available profiles
-and `/model <id>` switches the active model for that session. The selected
-profile is stored with the session, so resume and compaction use the same active
-model.
+Model profile IDs use `provider-id/model-id`, for example `mimo/mimo-v2.5-pro`
+or `mimo-claude/claude-sonnet-4-6`. The model map key is the real model ID by
+default; `name` is display-only. During a conversation, `/model` still lists or
+switches profiles, and the web composer uses the same IDs through
+`POST /session/:id/model`. The selected profile is stored with the session, so
+resume and compaction use the same active model.
 
-Provider-level `adapter`, `baseUrl`, credentials, `mode`, and `maxOutputTokens`
-are inherited by nested `providers.<name>.models.<id>` entries. A model entry can
-override endpoint/adapter/mode fields when one provider serves multiple incompatible
-model surfaces or endpoints. If `providers.<name>.models` is omitted, myAgent
-synthesizes a single profile from `providers.<name>.model`.
+Provider-level `npm`, credentials, and `options` are inherited by nested
+`provider.<name>.models.<id>` entries. A model entry can override `npm` or
+`options` when one provider serves multiple incompatible model surfaces or
+endpoints. If `provider.<name>.models` is omitted, myAgent synthesizes a single
+profile from the provider defaults.
 
 Top-level `provider`, `model`, `baseUrl`, `apiKey`, `authToken`, and
-`maxOutputTokens` are still accepted as flat compatibility keys, but new configs
-should prefer the nested provider/model profile form.
+`maxOutputTokens`, plus the old `providers` map, are still accepted as
+compatibility keys, but new configs should use the OpenCode-style `provider`
+map shown above.
 
 `maxOutputTokens` controls per-turn output length. When unset, OpenAI-compatible
 requests omit `max_tokens` and let the upstream decide the default. Anthropic
