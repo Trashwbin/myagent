@@ -9,7 +9,7 @@ import type { Message } from "../src/model/types.js";
 import type { TurnEvent } from "../src/session/loop.js";
 
 describe("web timeline reducer", () => {
-  it("tracks loaded projects and the active project", () => {
+  it("tracks loaded projects without deriving an active project", () => {
     const loaded = appReducer(initialAppState, {
       type: "projects_loaded",
       projects: [
@@ -26,24 +26,11 @@ describe("web timeline reducer", () => {
           createdAt: 2,
           updatedAt: 2,
           sessionCount: 1,
-          current: true,
         },
       ],
-      currentProjectPath: "/tmp/b",
     });
 
-    expect(loaded.activeProjectPath).toBe("/tmp/b");
-
-    const selected = appReducer(loaded, {
-      type: "set_active_project",
-      projectPath: "/tmp/a",
-    });
-
-    expect(selected.activeProjectPath).toBe("/tmp/a");
-    expect(selected.projects).toEqual([
-      expect.objectContaining({ path: "/tmp/a", current: true }),
-      expect.objectContaining({ path: "/tmp/b", current: false }),
-    ]);
+    expect(loaded.projects.map((project) => project.path)).toEqual(["/tmp/a", "/tmp/b"]);
   });
 
   it("rebuilds a turn from stored messages", () => {

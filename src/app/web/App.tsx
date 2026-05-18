@@ -18,7 +18,7 @@ import type {
 import { sessionProjectPath } from "./components/layout/session-list.js";
 
 const ACTIVE_SESSION_KEY = "myagent.activeSession";
-const ACTIVE_PROJECT_KEY = "myagent.activeProjectPath";
+const DRAFT_PROJECT_KEY = "myagent.draftProjectPath";
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
@@ -43,6 +43,7 @@ export function App() {
   const [state, dispatch] = useReducer(appReducer, initialAppState);
   const [input, setInput] = useState("");
   const [approvalIndex, setApprovalIndex] = useState(0);
+  const [draftProjectPath, setDraftProjectPath] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<number | null>(null);
   const subscribed = useRef(new Set<string>());
@@ -52,18 +53,17 @@ export function App() {
     () => state.sessions.find((session) => session.id === state.activeSessionId) || null,
     [state.sessions, state.activeSessionId],
   );
-  const activeProject = useMemo(
-    () =>
-      state.projects.find((project) => project.path === state.activeProjectPath) ||
-      (activeSession
-        ? state.projects.find((project) => project.path === sessionProjectPath(activeSession))
-        : null) ||
-      null,
-    [state.projects, state.activeProjectPath, activeSession],
-  );
   const activeTimeline = state.activeSessionId
     ? state.timelines[state.activeSessionId] ?? []
     : [];
+  const selectedProjectPath =
+    draftProjectPath ||
+    (activeSession ? sessionProjectPath(activeSession) : null) ||
+    state.projects[0]?.path ||
+    null;
+  const displayProjectPath = activeSession
+    ? sessionProjectPath(activeSession)
+    : selectedProjectPath || "";
   const modelLabel = activeSession?.provider && activeSession.model
     ? `${activeSession.provider}/${activeSession.model}`
     : state.providerConfig?.current
@@ -92,21 +92,19 @@ export function App() {
       if (cancelled) return;
       dispatch({ type: "provider_config_loaded", config });
 
-      const [projects, currentProject, sessions] = await Promise.all([
+      const [projects, sessions] = await Promise.all([
         fetchJson<ProjectSummary[]>("/project"),
-        fetchJson<ProjectSummary | null>("/project/current"),
         fetchJson<SessionSummary[]>("/session"),
       ]);
       if (cancelled) return;
       dispatch({
         type: "projects_loaded",
         projects,
-        currentProjectPath: currentProject?.path ?? null,
       });
       dispatch({ type: "sessions_loaded", sessions });
 
       const remembered = localStorage.getItem(ACTIVE_SESSION_KEY);
-      const rememberedProject = localStorage.getItem(ACTIVE_PROJECT_KEY);
+      const rememberedProject = localStorage.getItem(DRAFT_PROJECT_KEY);
       const fromUrl = new URL(location.href).searchParams.get("session");
       const ids = new Set(sessions.map((session) => session.id));
       const nextSessionId =
@@ -120,16 +118,8 @@ export function App() {
         return;
       }
 
-      const nextProjectPath =
-        (rememberedProject &&
-          projects.some((project) => project.path === rememberedProject) &&
-          rememberedProject) ||
-        currentProject?.path ||
-        projects[0]?.path ||
-        null;
-      if (nextProjectPath) {
-        dispatch({ type: "set_active_project", projectPath: nextProjectPath });
-        localStorage.setItem(ACTIVE_PROJECT_KEY, nextProjectPath);
+      if (rememberedProject && projects.some((project) => project.path === rememberedProject)) {
+        setDraftProjectPath(rememberedProject);
       }
     };
 
@@ -235,14 +225,10 @@ export function App() {
   }
 
   async function loadProjects() {
-    const [projects, currentProject] = await Promise.all([
-      fetchJson<ProjectSummary[]>("/project"),
-      fetchJson<ProjectSummary | null>("/project/current"),
-    ]);
+    const projects = await fetchJson<ProjectSummary[]>("/project");
     dispatch({
       type: "projects_loaded",
       projects,
-      currentProjectPath: currentProject?.path ?? null,
     });
   }
 
@@ -261,8 +247,8 @@ export function App() {
     dispatch({ type: "set_active_session", sessionId });
     if (session) {
       const projectPath = sessionProjectPath(session);
-      dispatch({ type: "set_active_project", projectPath });
-      localStorage.setItem(ACTIVE_PROJECT_KEY, projectPath);
+      setDraftProjectPath(null);
+      localStorage.setItem(DRAFT_PROJECT_KEY, projectPath);
     }
     localStorage.setItem(ACTIVE_SESSION_KEY, sessionId);
     const url = new URL(location.href);
@@ -275,8 +261,7 @@ export function App() {
     subscribe(sessionId);
   }
 
-  async function createSession() {
-    const projectPath = state.activeProjectPath || state.projects[0]?.path;
+  async function createSession(projectPath = selectedProjectPath || state.projects[0]?.path) {
     const session = await fetchJson<{ id: string; projectPath: string }>("/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -286,6 +271,7 @@ export function App() {
     const sessions = await fetchJson<SessionSummary[]>("/session");
     dispatch({ type: "sessions_loaded", sessions });
     await selectSession(session.id, sessions);
+    return session;
   }
 
   function subscribe(sessionId: string) {
@@ -310,15 +296,21 @@ export function App() {
 
   async function sendMessage() {
     const text = input.trim();
-    const sessionId = state.activeSessionId;
-    if (!text || !sessionId || !wsRef.current || isActiveRunning(state)) return;
+    let sessionId = state.activeSessionId;
+    if (!text || !wsRef.current || isActiveRunning(state)) return;
+
+    if (!sessionId) {
+      const session = await createSession();
+      sessionId = session.id;
+    }
+    const activeSessionId = sessionId;
 
     const slashCommand = parseSlashCommand(text);
     if (slashCommand.type !== "none") {
       if (slashCommand.type !== "valid") {
         dispatch({
           type: "status_local",
-          sessionId,
+          sessionId: activeSessionId,
           level: "warning",
           text: slashCommand.message,
         });
@@ -328,17 +320,17 @@ export function App() {
       const { command, args } = slashCommand;
       dispatch({
         type: "status_local",
-        sessionId,
+        sessionId: activeSessionId,
         level: "info",
         text: command.pendingMessage(args),
       });
-      dispatch({ type: "session_running", sessionId, running: true });
+      dispatch({ type: "session_running", sessionId: activeSessionId, running: true });
 
       if (command.id === "rewind") {
         wsRef.current.send(
           JSON.stringify({
             type: "rewind_session",
-            sessionId,
+            sessionId: activeSessionId,
             checkpointId: args,
           }),
         );
@@ -346,21 +338,21 @@ export function App() {
         wsRef.current.send(
           JSON.stringify({
             type: "revert_last",
-            sessionId,
+            sessionId: activeSessionId,
           }),
         );
       } else if (command.id === "compact") {
         wsRef.current.send(
           JSON.stringify({
             type: "compact_session",
-            sessionId,
+            sessionId: activeSessionId,
           }),
         );
       } else if (command.id === "model") {
         wsRef.current.send(
           JSON.stringify({
             type: "user_message",
-            sessionId,
+            sessionId: activeSessionId,
             text,
           }),
         );
@@ -372,16 +364,16 @@ export function App() {
 
     dispatch({
       type: "user_message_local",
-      sessionId,
+      sessionId: activeSessionId,
       turnId: `local:${Date.now()}`,
       text,
     });
-    dispatch({ type: "session_running", sessionId, running: true });
+    dispatch({ type: "session_running", sessionId: activeSessionId, running: true });
 
     wsRef.current.send(
       JSON.stringify({
         type: "user_message",
-        sessionId,
+        sessionId: activeSessionId,
         text,
       }),
     );
@@ -399,27 +391,29 @@ export function App() {
         projects={state.projects}
         sessions={state.sessions}
         activeSessionId={state.activeSessionId}
-        currentProject={activeProject}
+        selectedProjectPath={selectedProjectPath}
         onSelect={(sessionId) => {
           void selectSession(sessionId);
         }}
         onSelectProject={(projectPath) => {
-          dispatch({ type: "set_active_project", projectPath });
-          if (!activeSession || sessionProjectPath(activeSession) !== projectPath) {
-            dispatch({ type: "set_active_session", sessionId: null });
-            const url = new URL(location.href);
-            url.searchParams.delete("session");
-            history.replaceState(null, "", url);
+          if (!state.activeSessionId) {
+            setDraftProjectPath(projectPath);
+            localStorage.setItem(DRAFT_PROJECT_KEY, projectPath);
           }
-          localStorage.setItem(ACTIVE_PROJECT_KEY, projectPath);
-          void fetchJson<ProjectSummary>("/project/current", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path: projectPath }),
-          }).then(() => loadProjects());
         }}
         onNewSession={() => {
-          void createSession();
+          const projectPath =
+            draftProjectPath ||
+            (activeSession ? sessionProjectPath(activeSession) : selectedProjectPath);
+          if (projectPath) {
+            setDraftProjectPath(projectPath);
+            localStorage.setItem(DRAFT_PROJECT_KEY, projectPath);
+          }
+          dispatch({ type: "set_active_session", sessionId: null });
+          localStorage.removeItem(ACTIVE_SESSION_KEY);
+          const url = new URL(location.href);
+          url.searchParams.delete("session");
+          history.replaceState(null, "", url);
         }}
       />
 
@@ -427,7 +421,7 @@ export function App() {
         <Topbar
           sessionTitle={activeSession?.title || "No session"}
           sessionId={state.activeSessionId}
-          projectPath={activeProject?.path || (activeSession ? sessionProjectPath(activeSession) : "")}
+          projectPath={displayProjectPath}
           modelLabel={modelLabel}
           status={status}
           onCopySession={() => {

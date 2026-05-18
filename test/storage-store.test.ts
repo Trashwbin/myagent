@@ -121,27 +121,21 @@ describe("createSession", () => {
 });
 
 describe("projects", () => {
-  it("persists explicit projects and current selection", async () => {
+  it("persists explicit projects without global current state", async () => {
     const base = await tmpBaseDir();
     const store = openTestStore(base);
 
     const project = store.upsertProject({
       path: "/tmp/project-a",
       name: "Project A",
-      setCurrent: true,
     });
 
     expect(project).toMatchObject({
       path: "/tmp/project-a",
       name: "Project A",
       sessionCount: 0,
-      current: true,
     });
-    expect(store.getCurrentProject()).toMatchObject({
-      path: "/tmp/project-a",
-      name: "Project A",
-      current: true,
-    });
+    expect(store.listProjects()).toEqual([project]);
 
     await cleanup();
   });

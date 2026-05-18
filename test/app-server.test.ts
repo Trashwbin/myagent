@@ -321,42 +321,13 @@ describe("HTTP API", () => {
     const data = await fetchJson(port, "/project", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: workspace, name: "API Project", current: true }),
+      body: JSON.stringify({ path: workspace, name: "API Project" }),
     });
 
     expect(data).toMatchObject({
       path: canonicalWorkspace,
       name: "API Project",
       sessionCount: 0,
-      current: true,
-    });
-    expect(await fetchJson(port, "/project/current")).toMatchObject({
-      path: canonicalWorkspace,
-      name: "API Project",
-      current: true,
-    });
-  });
-
-  it("PUT /project/current selects an existing or implicit project", async () => {
-    const base = await tmpBaseDir();
-    const store = openTestStore(base);
-    store.createSession({ workspaceRoot: "/test" });
-    const { port } = await startTestServer(store);
-
-    const data = await fetchJson(port, "/project/current", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: "/test" }),
-    });
-
-    expect(data).toMatchObject({
-      path: "/test",
-      name: "test",
-      current: true,
-    });
-    expect(await fetchJson(port, "/project/current")).toMatchObject({
-      path: "/test",
-      current: true,
     });
   });
 

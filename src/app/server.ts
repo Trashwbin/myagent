@@ -188,7 +188,7 @@ export function createAppServer(deps: AppServerDeps): Server {
         ? canonicalProjectPath(parsed.projectPath)
         : typeof parsed.cwd === "string"
           ? canonicalProjectPath(parsed.cwd)
-          : deps.store.getCurrentProject()?.path ?? deps.cwd;
+          : deps.cwd;
     const projectSession: SessionState = { id: "", cwd, messages: [] };
     const runtime = await resolveRuntime(projectSession);
     const session = deps.store.createSession({
@@ -247,27 +247,8 @@ export function createAppServer(deps: AppServerDeps): Server {
         const project = deps.store.upsertProject({
           path: canonicalProjectPath(parsed.path),
           name: typeof parsed.name === "string" ? parsed.name : undefined,
-          setCurrent: parsed.current === true,
         });
         json(res, project, 201);
-        return;
-      }
-
-      if (path === "/project/current" && req.method === "GET") {
-        const current = deps.store.getCurrentProject();
-        json(res, current ?? null);
-        return;
-      }
-
-      if (path === "/project/current" && req.method === "PUT") {
-        const body = await readBody(req);
-        const parsed = body ? JSON.parse(body) : {};
-        if (typeof parsed.path !== "string" || parsed.path.trim() === "") {
-          json(res, { error: "Project path is required" }, 400);
-          return;
-        }
-        const project = deps.store.setCurrentProject(canonicalProjectPath(parsed.path));
-        json(res, project);
         return;
       }
 

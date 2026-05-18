@@ -13,7 +13,7 @@ export function Sidebar({
   projects,
   sessions,
   activeSessionId,
-  currentProject,
+  selectedProjectPath,
   onSelect,
   onSelectProject,
   onNewSession,
@@ -21,13 +21,14 @@ export function Sidebar({
   projects: ProjectSummary[];
   sessions: SessionSummary[];
   activeSessionId: string | null;
-  currentProject: ProjectSummary | null;
+  selectedProjectPath: string | null;
   onSelect: (sessionId: string) => void;
   onSelectProject: (projectPath: string) => void;
   onNewSession: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [expandedWorkspaces, setExpandedWorkspaces] = useState<Record<string, boolean>>({});
+  const [expandedSessionLists, setExpandedSessionLists] = useState<Record<string, boolean>>({});
   const groups = useMemo(() => {
     const projectPaths = new Set(projects.map((project) => project.path));
     const implicitProjects = sessions
@@ -69,18 +70,9 @@ export function Sidebar({
       })
       .filter((group): group is NonNullable<typeof group> => group !== null)
       .sort((a, b) => {
-        if (a.path === currentProject?.path) return -1;
-        if (b.path === currentProject?.path) return 1;
         return b.updatedAt - a.updatedAt || a.name.localeCompare(b.name);
       });
-  }, [currentProject?.path, projects, query, sessions]);
-
-  const toggleWorkspace = (path: string) => {
-    setExpandedWorkspaces((value) => ({
-      ...value,
-      [path]: !value[path],
-    }));
-  };
+  }, [projects, query, sessions]);
 
   return (
     <aside className="sidebar">
@@ -106,31 +98,32 @@ export function Sidebar({
           <>
             <div className="section-heading">Projects</div>
             {groups.map((group) => {
-              const active = group.path === currentProject?.path;
+              const selected = group.path === selectedProjectPath;
               const hasExplicitExpandedState = Object.prototype.hasOwnProperty.call(
                 expandedWorkspaces,
                 group.path,
               );
               const expanded =
                 !!query.trim() ||
-                (hasExplicitExpandedState ? !!expandedWorkspaces[group.path] : active);
+                (hasExplicitExpandedState ? !!expandedWorkspaces[group.path] : selected);
+              const showAllSessions = !!query.trim() || !!expandedSessionLists[group.path];
               const visible = visibleSessions(
                 group,
                 activeSessionId,
                 CURRENT_WORKSPACE_VISIBLE,
-                expanded,
+                showAllSessions,
               );
               return (
                 <React.Fragment key={group.path}>
                   <div className="workspace-stack">
                     <button
-                      className={`workspace-row workspace-toggle${expanded ? " expanded" : ""}${active ? " current" : ""}`}
+                      className={`workspace-row workspace-toggle${expanded ? " expanded" : ""}${selected ? " selected" : ""}`}
                       title={group.path}
                       onClick={() => {
                         onSelectProject(group.path);
                         setExpandedWorkspaces((value) => ({
                           ...value,
-                          [group.path]: hasExplicitExpandedState ? !value[group.path] : !active,
+                          [group.path]: hasExplicitExpandedState ? !value[group.path] : !selected,
                         }));
                       }}
                     >
@@ -163,16 +156,27 @@ export function Sidebar({
                         {visible.hiddenCount > 0 ? (
                           <button
                             className="session-more"
-                            onClick={() => toggleWorkspace(group.path)}
+                            onClick={() =>
+                              setExpandedSessionLists((value) => ({
+                                ...value,
+                                [group.path]: true,
+                              }))
+                            }
                           >
                             Show {visible.hiddenCount} more
                           </button>
                         ) : expanded &&
                           group.sessions.length > CURRENT_WORKSPACE_VISIBLE &&
-                          !query.trim() ? (
+                          !query.trim() &&
+                          showAllSessions ? (
                           <button
                             className="session-more"
-                            onClick={() => toggleWorkspace(group.path)}
+                            onClick={() =>
+                              setExpandedSessionLists((value) => ({
+                                ...value,
+                                [group.path]: false,
+                              }))
+                            }
                           >
                             Show less
                           </button>

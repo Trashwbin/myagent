@@ -27,8 +27,7 @@ import type {
 
 export type AppAction =
   | { type: "provider_config_loaded"; config: AppState["providerConfig"] }
-  | { type: "projects_loaded"; projects: ProjectSummary[]; currentProjectPath?: string | null }
-  | { type: "set_active_project"; projectPath: string | null }
+  | { type: "projects_loaded"; projects: ProjectSummary[] }
   | { type: "sessions_loaded"; sessions: SessionSummary[] }
   | { type: "set_active_session"; sessionId: string | null }
   | { type: "timeline_loaded"; sessionId: string; messages: Message[] }
@@ -47,7 +46,6 @@ export type AppAction =
 export const initialAppState: AppState = {
   providerConfig: null,
   projects: [],
-  activeProjectPath: null,
   sessions: [],
   activeSessionId: null,
   timelines: {},
@@ -65,19 +63,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         projects: action.projects,
-        activeProjectPath:
-          action.currentProjectPath ??
-          action.projects.find((project) => project.current)?.path ??
-          state.activeProjectPath,
-      };
-    case "set_active_project":
-      return {
-        ...state,
-        activeProjectPath: action.projectPath,
-        projects: state.projects.map((project) => ({
-          ...project,
-          current: project.path === action.projectPath,
-        })),
       };
     case "sessions_loaded":
       return { ...state, sessions: action.sessions };

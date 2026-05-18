@@ -343,7 +343,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   color: var(--body);
 }
 
-.workspace-row.current {
+.workspace-row.selected {
   background: rgba(255, 255, 255, 0.78);
 }
 

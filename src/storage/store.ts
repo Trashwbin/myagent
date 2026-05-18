@@ -14,7 +14,6 @@ export type ProjectRow = {
   sessionCount: number;
   lastSessionId?: string;
   lastSessionUpdatedAt?: number;
-  current?: boolean;
 };
 
 export type SessionRow = {
@@ -33,12 +32,9 @@ export type TranscriptStore = {
   upsertProject(input: {
     path: string;
     name?: string;
-    setCurrent?: boolean;
   }): ProjectRow;
   getProject(path: string): ProjectRow | undefined;
   listProjects(): ProjectRow[];
-  getCurrentProject(): ProjectRow | undefined;
-  setCurrentProject(path: string): ProjectRow;
   deleteProject(path: string): void;
   createSession(input: {
     workspaceRoot: string;
@@ -161,11 +157,6 @@ export function openStore(options?: StoreOptions): TranscriptStore {
     updated_at INTEGER NOT NULL
   )`);
 
-  db.exec(`CREATE TABLE IF NOT EXISTS app_state (
-    key TEXT PRIMARY KEY,
-    value TEXT
-  )`);
-
   db.exec(`CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     workspace_root TEXT NOT NULL,
@@ -251,23 +242,6 @@ export function openStore(options?: StoreOptions): TranscriptStore {
     db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(now(), sessionId);
   }
 
-  function currentProjectPath(): string | undefined {
-    const row = db.prepare("SELECT value FROM app_state WHERE key = 'current_project_path'").get() as
-      | Record<string, unknown>
-      | undefined;
-    return (row?.value as string | null) ?? undefined;
-  }
-
-  function writeCurrentProjectPath(path: string | null) {
-    if (path === null) {
-      db.prepare("DELETE FROM app_state WHERE key = 'current_project_path'").run();
-      return;
-    }
-    db.prepare(
-      "INSERT INTO app_state (key, value) VALUES ('current_project_path', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-    ).run(path);
-  }
-
   function projectRows(): ProjectRow[] {
     const explicitRows = db
       .prepare("SELECT * FROM projects")
@@ -283,7 +257,6 @@ export function openStore(options?: StoreOptions): TranscriptStore {
       )
       .all() as Record<string, unknown>[];
 
-    const currentPath = currentProjectPath();
     const rows = new Map<string, ProjectRow>();
 
     for (const row of explicitRows) {
@@ -294,7 +267,6 @@ export function openStore(options?: StoreOptions): TranscriptStore {
         createdAt: row.created_at as number,
         updatedAt: row.updated_at as number,
         sessionCount: 0,
-        current: path === currentPath,
       });
     }
 
@@ -315,13 +287,10 @@ export function openStore(options?: StoreOptions): TranscriptStore {
         sessionCount: row.session_count as number,
         lastSessionId: (lastSession?.id as string) ?? undefined,
         lastSessionUpdatedAt,
-        current: path === currentPath,
       });
     }
 
     return [...rows.values()].sort((a, b) => {
-      if (a.current && !b.current) return -1;
-      if (!a.current && b.current) return 1;
       return b.updatedAt - a.updatedAt || a.name.localeCompare(b.name);
     });
   }
@@ -333,7 +302,6 @@ export function openStore(options?: StoreOptions): TranscriptStore {
   function upsertProject(input: {
     path: string;
     name?: string;
-    setCurrent?: boolean;
   }): ProjectRow {
     const ts = now();
     const requestedName = input.name?.trim() || null;
@@ -345,7 +313,6 @@ export function openStore(options?: StoreOptions): TranscriptStore {
          name = COALESCE(?, projects.name),
          updated_at = ?`,
     ).run(input.path, name, ts, ts, requestedName, ts);
-    if (input.setCurrent) writeCurrentProjectPath(input.path);
     return getProjectRow(input.path)!;
   }
 
@@ -415,21 +382,8 @@ export function openStore(options?: StoreOptions): TranscriptStore {
       return projectRows();
     },
 
-    getCurrentProject() {
-      const current = currentProjectPath();
-      if (current) return getProjectRow(current);
-      return projectRows()[0];
-    },
-
-    setCurrentProject(path) {
-      const project = getProjectRow(path) ?? upsertProject({ path });
-      writeCurrentProjectPath(path);
-      return { ...project, current: true };
-    },
-
     deleteProject(path) {
       db.prepare("DELETE FROM projects WHERE path = ?").run(path);
-      if (currentProjectPath() === path) writeCurrentProjectPath(null);
     },
 
     createSession(input) {

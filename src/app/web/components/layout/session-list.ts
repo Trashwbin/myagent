@@ -69,18 +69,27 @@ export function visibleSessions(
   group: SessionGroup,
   activeSessionId: string | null,
   limit: number,
-  expanded: boolean,
+  showAll: boolean,
 ) {
-  if (expanded) {
+  if (showAll) {
     return {
       sessions: group.sessions,
       hiddenCount: 0,
     };
   }
 
-  let count = Math.min(group.sessions.length, limit);
   const activeIndex = group.sessions.findIndex((session) => session.id === activeSessionId);
-  if (activeIndex >= count) count = activeIndex + 1;
+  if (activeIndex >= limit && limit > 0) {
+    return {
+      sessions: [
+        ...group.sessions.slice(0, Math.max(0, limit - 1)),
+        group.sessions[activeIndex]!,
+      ],
+      hiddenCount: Math.max(0, group.sessions.length - limit),
+    };
+  }
+
+  const count = Math.min(group.sessions.length, limit);
 
   return {
     sessions: group.sessions.slice(0, count),

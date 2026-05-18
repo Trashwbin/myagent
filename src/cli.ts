@@ -595,9 +595,7 @@ async function handleApp(options: { cwd: string }): Promise<void> {
   const provider = createAppBootstrapProvider();
   const registry = buildDefaultRegistry();
   const store = openStore();
-  if (!store.getCurrentProject()) {
-    store.upsertProject({ path: fallbackProjectPath, setCurrent: true });
-  }
+  store.upsertProject({ path: fallbackProjectPath });
   const { createAppServer, findAvailablePort } = await import("./app/server.js");
   const port = await findAvailablePort(43110);
   const server = createAppServer({

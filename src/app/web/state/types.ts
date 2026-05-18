@@ -42,7 +42,6 @@ export type ProjectSummary = {
   sessionCount: number;
   lastSessionId?: string;
   lastSessionUpdatedAt?: number;
-  current?: boolean;
 };
 
 export type MutationDiffFile = {
@@ -119,7 +118,6 @@ export type PendingApproval = {
 export type AppState = {
   providerConfig: ProviderConfig | null;
   projects: ProjectSummary[];
-  activeProjectPath: string | null;
   sessions: SessionSummary[];
   activeSessionId: string | null;
   timelines: Record<string, TimelineTurn[]>;

@@ -51,6 +51,26 @@ describe("session list helpers", () => {
     const result = visibleSessions(group, "s-14", CURRENT_WORKSPACE_VISIBLE, false);
 
     expect(result.sessions.at(-1)?.id).toBe("s-14");
+    expect(result.sessions).toHaveLength(CURRENT_WORKSPACE_VISIBLE);
+    expect(result.hiddenCount).toBe(3);
+  });
+
+  it("shows all sessions only when explicitly requested", () => {
+    const group = {
+      path: "/tmp/a",
+      name: "a",
+      sessions: Array.from({ length: CURRENT_WORKSPACE_VISIBLE + 3 }, (_, index) => ({
+        id: `s-${index}`,
+        workspaceRoot: "/tmp/a",
+        title: `Session ${index}`,
+        createdAt: index,
+        updatedAt: index,
+      })),
+    };
+
+    const result = visibleSessions(group, null, CURRENT_WORKSPACE_VISIBLE, true);
+
+    expect(result.sessions).toHaveLength(CURRENT_WORKSPACE_VISIBLE + 3);
     expect(result.hiddenCount).toBe(0);
   });
 

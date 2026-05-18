@@ -13,13 +13,14 @@ Open the printed URL in a browser to use the local web UI.
 The web app starts on the default project page. Projects are first-class objects
 in the sidebar; sessions belong to projects, and runtime config, skills,
 permissions, checkpoints, and diffs are resolved from each session's project
-path. `--cwd` is only a fallback used to seed the first current project when no
-project exists yet.
+path. `--cwd` is only a fallback used to seed the project list and create draft
+sessions when no project has been selected yet.
 
-The browser remembers the active session and active project in `localStorage`.
+The browser remembers the active session and draft project target in `localStorage`.
 Opening the page again restores the last selected session when it still exists;
-it does not create a fresh session on every refresh. Use `New chat` to explicitly
-start another session under the selected project.
+it does not create a fresh session on every refresh. Use `New chat` to enter a
+draft state under the selected project; the session is created only when the
+first message is sent.
 
 The embedded page follows the design guide in [DESIGN.md](DESIGN.md). The shell
 is still served by the Node app server, but the browser client is bundled from
@@ -36,7 +37,7 @@ Assistant answers render through a small React markdown island:
 
 - **Server** binds to `127.0.0.1` only — no remote access.
 - **Browser** never executes tools directly. All tool execution happens in the Node.js server process via the existing `runTurn()` loop.
-- **Project API** owns the current project and project list; the browser does not infer execution cwd from the launch command.
+- **Project API** owns the project list; selected sessions own execution context, and browser draft state decides where the next new session will be created.
 - **Approval** flows through WebSocket: the server sends `approval_required`, the browser shows buttons, and the user's choice is sent back as `approval_decision`.
 - **Session shell** is browser-side: the sidebar lists projects with nested
   sessions, the header exposes session actions in a compact menu, and the active
@@ -52,9 +53,7 @@ Assistant answers render through a small React markdown island:
 | GET | `/api/health` | Returns `{ ok: true }` |
 | GET | `/assets/client.js` | Bundled browser client |
 | GET | `/project` | List known projects |
-| POST | `/project` | Create or update a project |
-| GET | `/project/current` | Return the current project |
-| PUT | `/project/current` | Select the current project |
+| POST | `/project` | Create or update a project (body: `{ path, name? }`) |
 | GET | `/config/providers` | Return public provider/model config (no secrets) |
 | GET | `/session` | List all sessions |
 | POST | `/session` | Create new session (body: `{ projectPath?: string }`) |
