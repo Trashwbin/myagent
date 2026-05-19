@@ -337,27 +337,14 @@ summary prompt 要求包含：
 
 ## Skills 渐进发现与按需调用
 
-Skills 不是启动时全部塞进 prompt。流程是：
+Skills 是项目级本地 instruction bundle，不是启动时全部塞进 prompt。
+当前实现使用 Project 级 `ProjectSkillIndex`：文件 watcher 负责
+invalidation，`snapshot()` 负责在每次 run turn 前产出最新的
+`registry` 和 `availableSkills`。provider/model/runtime 不因为 skill
+增删改而重建。
 
-1. `discoverSkills()` 扫描 skill roots。
-2. system prompt 只展示 skill `name`、`description`、`scope`。
-3. 模型判断任务匹配某个 skill 后，调用 `skill` tool。
-4. `skill` tool 才返回完整 `SKILL.md` 内容和少量资源文件列表。
-
-skill roots：
-
-- workspace: `.agents/skills`, `.claude/skills`, `.opencode/skill`, `.opencode/skills`
-- myagent home: `$MYAGENT_HOME/skills` 或 `~/.myagent/skills`
-- global: `~/.agents/skills`, `~/.claude/skills`
-
-`src/tools/skill.ts` 实现 `skill` tool。权限策略会按 scope 控制：
-
-- workspace skill 在 `auto` 下可自动加载。
-- myagent/global skill 在 `auto` 下需要审批。
-- `on-request` 总是询问。
-- `never` 拒绝 skill load。
-
-这对应简历里的“渐进发现与按需调用”：模型先看到能力摘要，只有需要时才加载完整 instruction。
+完整实现细节见 [skills.md](skills.md)，包括 discovery roots、热更新、
+permission、prompt 注入、`skill` tool 输出格式和 Web UI 展示。
 
 ## Web UI 与 Review Surface
 
