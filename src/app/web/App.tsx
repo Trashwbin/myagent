@@ -558,19 +558,19 @@ export function App() {
             });
           }}
         />
-      </main>
 
-      {state.pendingApproval &&
-      state.pendingApproval.sessionId === state.activeSessionId ? (
-        <ApprovalDock
-          request={state.pendingApproval.request}
-          selectedIndex={approvalIndex}
-          onSelect={setApprovalIndex}
-          onSubmit={() => {
-            void decideApproval(indexToDecision(approvalIndex));
-          }}
-        />
-      ) : null}
+        {state.pendingApproval &&
+        state.pendingApproval.sessionId === state.activeSessionId ? (
+          <ApprovalDock
+            request={state.pendingApproval.request}
+            selectedIndex={approvalIndex}
+            onSelect={setApprovalIndex}
+            onSubmit={() => {
+              void decideApproval(indexToDecision(approvalIndex));
+            }}
+          />
+        ) : null}
+      </main>
     </div>
   );
 }

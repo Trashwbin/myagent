@@ -2033,12 +2033,12 @@ textarea::placeholder {
 }
 
 .approval {
-  position: fixed;
+  position: absolute;
   z-index: var(--z-dock);
-  left: calc(var(--sidebar-width) + (100vw - var(--sidebar-width)) / 2);
+  left: 50%;
   bottom: 118px;
   transform: translateX(-50%);
-  width: min(var(--dock-width), calc(100vw - var(--sidebar-width) - 56px));
+  width: min(90%, var(--dock-width));
   border: 1px solid var(--hairline);
   background: rgba(255, 255, 255, 0.96);
   border-radius: 18px;
