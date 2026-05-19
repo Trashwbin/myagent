@@ -20,10 +20,10 @@ the minimum runtime mechanics behind AI coding agents:
 
 Reference source is kept outside this project implementation:
 
-- `/Users/zt-user/code/pre/myAgents/source/codex`
-- `/Users/zt-user/code/pre/myAgents/source/opencode`
-- `/Users/zt-user/code/pre/myAgents/source/claude-code`
-- `/Users/zt-user/code/pre/myAgents/source/claude-code-yasas`
+- `../source/codex`
+- `../source/opencode`
+- `../source/claude-code`
+- `../source/claude-code-yasas`
 
 Use them for architecture study only. Do not copy implementation code into this
 project.
