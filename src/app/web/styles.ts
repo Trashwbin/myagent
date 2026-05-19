@@ -5,7 +5,7 @@ export const APP_STYLES = String.raw`
   --content-width: 760px;
   --panel-width: 760px;
   --dock-width: 680px;
-  --timeline-bottom-safe: 176px;
+  --timeline-bottom-safe: 220px;
   --sp-1: 4px;
   --sp-2: 6px;
   --sp-3: 8px;
@@ -1669,14 +1669,21 @@ details.tool-details pre {
   border-top: 1px solid rgba(10, 10, 0, 0.04);
 }
 
-.composer {
+.main-dock {
   position: absolute;
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
   width: 90%;
   max-width: var(--dock-width);
-  z-index: var(--z-header);
+  z-index: var(--z-dock);
+  display: grid;
+  gap: 12px;
+}
+
+.composer {
+  position: relative;
+  width: 100%;
 }
 
 .slash-menu {
@@ -2031,12 +2038,7 @@ textarea::placeholder {
 }
 
 .approval {
-  position: absolute;
-  z-index: var(--z-dock);
-  left: 50%;
-  bottom: 118px;
-  transform: translateX(-50%);
-  width: min(90%, var(--dock-width));
+  width: 100%;
   border: 1px solid var(--hairline);
   background: rgba(255, 255, 255, 0.96);
   border-radius: 18px;
@@ -2414,16 +2416,16 @@ textarea::placeholder {
     width: min(340px, calc(100vw - 28px));
   }
 
-  .composer {
-    padding: var(--sp-5);
+  .main-dock {
+    width: auto;
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    transform: none;
   }
 
   .approval {
-    right: 12px;
-    left: 12px;
-    transform: none;
     width: auto;
-    bottom: 92px;
   }
 
   .approval-fields {

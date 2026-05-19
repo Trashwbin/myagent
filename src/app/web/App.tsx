@@ -532,44 +532,46 @@ export function App() {
 
         <MessageTimeline turns={activeTimeline} timelineRef={timelineRef} />
 
-        <Composer
-          value={input}
-          disabled={isActiveRunning(state)}
-          onChange={setInput}
-          onSend={() => {
-            void sendMessage();
-          }}
-          providerConfig={state.providerConfig}
-          selectedModelId={selectedModelId}
-          onSelectModel={(modelProfileId) => {
-            void selectModel(modelProfileId);
-          }}
-          slashChoices={slashChoices}
-          onSlashChoice={(choice) => {
-            void handleSlashChoice(choice);
-          }}
-          onCommandError={(message) => {
-            if (!state.activeSessionId) return;
-            dispatch({
-              type: "status_local",
-              sessionId: state.activeSessionId,
-              level: "warning",
-              text: message,
-            });
-          }}
-        />
+        <div className="main-dock">
+          {state.pendingApproval &&
+          state.pendingApproval.sessionId === state.activeSessionId ? (
+            <ApprovalDock
+              request={state.pendingApproval.request}
+              selectedIndex={approvalIndex}
+              onSelect={setApprovalIndex}
+              onSubmit={() => {
+                void decideApproval(indexToDecision(approvalIndex));
+              }}
+            />
+          ) : null}
 
-        {state.pendingApproval &&
-        state.pendingApproval.sessionId === state.activeSessionId ? (
-          <ApprovalDock
-            request={state.pendingApproval.request}
-            selectedIndex={approvalIndex}
-            onSelect={setApprovalIndex}
-            onSubmit={() => {
-              void decideApproval(indexToDecision(approvalIndex));
+          <Composer
+            value={input}
+            disabled={isActiveRunning(state)}
+            onChange={setInput}
+            onSend={() => {
+              void sendMessage();
+            }}
+            providerConfig={state.providerConfig}
+            selectedModelId={selectedModelId}
+            onSelectModel={(modelProfileId) => {
+              void selectModel(modelProfileId);
+            }}
+            slashChoices={slashChoices}
+            onSlashChoice={(choice) => {
+              void handleSlashChoice(choice);
+            }}
+            onCommandError={(message) => {
+              if (!state.activeSessionId) return;
+              dispatch({
+                type: "status_local",
+                sessionId: state.activeSessionId,
+                level: "warning",
+                text: message,
+              });
             }}
           />
-        ) : null}
+        </div>
       </main>
     </div>
   );
