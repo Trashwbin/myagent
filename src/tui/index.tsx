@@ -17,10 +17,8 @@ import {
 import type { ApprovalMode } from "../permission/policy.js";
 import type { Provider } from "../model/provider.js";
 import type { ModelProfile } from "../config/config.js";
-import type { ToolRegistry } from "../tools/registry.js";
 import type { TranscriptStore } from "../storage/store.js";
 import type { SessionState } from "../session/loop.js";
-import type { SkillSummary } from "../skill/types.js";
 
 export type LaunchTuiOptions = {
   session: SessionState;
@@ -29,10 +27,8 @@ export type LaunchTuiOptions = {
   modelName: string;
   modelProfiles?: ModelProfile[];
   createProvider?: (profile: ModelProfile) => Provider;
-  registry: ToolRegistry;
   approval: ApprovalMode;
   store: TranscriptStore;
-  availableSkills?: SkillSummary[];
 };
 
 export async function launchTui(options: LaunchTuiOptions): Promise<void> {

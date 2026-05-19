@@ -5,10 +5,10 @@ import type { ApprovalMode } from "../permission/policy.js";
 import type { Provider } from "../model/provider.js";
 import type { ModelProfile } from "../config/config.js";
 import { findModelProfile } from "../config/config.js";
-import type { ToolRegistry } from "../tools/registry.js";
 import type { TranscriptStore } from "../storage/store.js";
 import type { SessionState, ApprovalRequest, TurnEvent } from "../session/loop.js";
-import type { SkillSummary } from "../skill/types.js";
+import { ProjectSkillIndexRegistry } from "../skill/index.js";
+import { buildDefaultRegistry } from "../tools/default-registry.js";
 import { runTurn } from "../session/loop.js";
 import { compactSession } from "../session/compact.js";
 import {
@@ -46,10 +46,8 @@ type AppProps = {
   modelName: string;
   modelProfiles?: ModelProfile[];
   createProvider?: (profile: ModelProfile) => Provider;
-  registry: ToolRegistry;
   approval: ApprovalMode;
   store: TranscriptStore;
-  availableSkills?: SkillSummary[];
   onExit: () => void;
 };
 
@@ -81,6 +79,12 @@ export function TuiApp(props: AppProps): React.ReactElement {
   >([]);
   const readStateRef = useRef(new ReadStateTracker());
   const followTailRef = useRef(true);
+  const skillIndexesRef = useRef(new ProjectSkillIndexRegistry());
+
+  useEffect(() => {
+    const skillIndexes = skillIndexesRef.current;
+    return () => skillIndexes.dispose();
+  }, []);
 
   const handleEvent = useCallback((event: TurnEvent) => {
     if (event.type === "tool_approval_required" && event.metadata?.sensitive) {
@@ -274,18 +278,19 @@ export function TuiApp(props: AppProps): React.ReactElement {
 
       const runAsync = async () => {
         try {
+          const skillSnapshot = await skillIndexesRef.current.get(props.session.cwd).snapshot();
           const {
             session: updated,
             newMessages,
             aborted,
-          } = await runTurn(activeProvider, props.registry, props.session, expanded, {
+          } = await runTurn(activeProvider, buildDefaultRegistry(skillSnapshot.skills), props.session, expanded, {
             approval: props.approval,
             approvalHandler,
             onEvent: handleEvent,
             sessionApprovalRules: sessionApprovalRulesRef.current,
             store: props.store,
             readState: readStateRef.current,
-            availableSkills: props.availableSkills,
+            availableSkills: skillSnapshot.availableSkills,
           });
           Object.assign(props.session, updated);
           props.store.appendMessages(props.session.id, newMessages);

@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import type { SkillInfo, SkillScope, SkillSummary } from "./types.js";
 
-type SkillRoot = {
+export type SkillRootInfo = {
   root: string;
   scope: SkillScope;
   priority: number;
@@ -35,7 +35,7 @@ const GLOBAL_SKILL_DIRS = [
 ] as const;
 
 export async function discoverSkills(options: DiscoverSkillsOptions): Promise<SkillInfo[]> {
-  const roots = skillRoots(options);
+  const roots = getSkillRoots(options);
   const discovered: SkillInfo[] = [];
 
   for (const root of roots) {
@@ -75,13 +75,13 @@ export async function sampleSkillFiles(skill: SkillInfo, limit = 10): Promise<st
     .map((file) => relative(skill.baseDir, file));
 }
 
-function skillRoots(options: DiscoverSkillsOptions): SkillRoot[] {
+export function getSkillRoots(options: DiscoverSkillsOptions): SkillRootInfo[] {
   const cwd = resolve(options.cwd);
   const myagentHome =
     options.myagentHome ?? process.env.MYAGENT_HOME ?? join(homedir(), ".myagent");
   const home = options.homeDir ?? homedir();
 
-  const roots: SkillRoot[] = [];
+  const roots: SkillRootInfo[] = [];
   let priority = 0;
 
   for (const parts of WORKSPACE_SKILL_DIRS) {
@@ -192,7 +192,7 @@ function parseFrontmatter(raw: string): { data: Record<string, string>; content:
   return { data, content };
 }
 
-function dedupeSkills(skills: SkillInfo[], roots: SkillRoot[]): SkillInfo[] {
+function dedupeSkills(skills: SkillInfo[], roots: SkillRootInfo[]): SkillInfo[] {
   const rootPriority = new Map(roots.map((root) => [root.root, root.priority]));
   const priorityFor = (skill: SkillInfo): number => {
     const matchingRoot = roots.find((root) => skill.location.startsWith(root.root));

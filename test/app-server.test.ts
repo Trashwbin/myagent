@@ -8,7 +8,7 @@ import type { TranscriptStore } from "../src/storage/store.js";
 import { openStore } from "../src/storage/store.js";
 import { ToolRegistry } from "../src/tools/registry.js";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
@@ -72,6 +72,36 @@ function noopProvider(): Provider {
     name: "test",
     async *stream() {
       yield { type: "text" as const, delta: "ok" };
+      yield { type: "finish" as const, reason: "stop" as const };
+    },
+  };
+}
+
+function skillProbeProvider(): Provider {
+  return {
+    name: "test",
+    async *stream(messages, tools, options) {
+      const prompt = options?.systemPrompt ?? "";
+      const lastToolResult = [...messages]
+        .reverse()
+        .find((message) => message.role === "tool_result" && message.toolName === "skill");
+      if (lastToolResult?.content.includes('<skill_content name="changed-skill">')) {
+        yield { type: "text" as const, delta: "loaded changed-skill" };
+        yield { type: "finish" as const, reason: "stop" as const };
+        return;
+      }
+      if (prompt.includes("changed-skill")) {
+        yield {
+          type: "tool-call" as const,
+          id: "call_skill",
+          name: "skill",
+          input: { name: "changed-skill" },
+        };
+        yield { type: "finish" as const, reason: "tool-calls" as const };
+        return;
+      }
+      const toolNames = (tools ?? []).map((tool) => tool.name).join(",");
+      yield { type: "text" as const, delta: `tools:${toolNames}` };
       yield { type: "finish" as const, reason: "stop" as const };
     },
   };
@@ -740,6 +770,96 @@ describe("WebSocket", () => {
       ),
     ).toBe(true);
     expect(store.getSession(session.id)?.messages.some((m) => m.role === "user")).toBe(true);
+  });
+
+  it("refreshes project skills on the next turn without rebuilding the provider", async () => {
+    const base = await tmpBaseDir();
+    const workspace = await mkdtemp(join(tmpdir(), "myagent-app-skill-refresh-"));
+    const home = await tmpBaseDir();
+    const myagentHome = await tmpBaseDir();
+    activeTmpDirs.push(workspace);
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: workspace });
+    const port = await findAvailablePort(43200);
+    const provider = skillProbeProvider();
+    let createProviderCalls = 0;
+    const server = createAppServer({
+      provider,
+      providerName: "openai",
+      modelName: "test-model",
+      modelProfileId: "openai/test-model",
+      modelProfiles: [
+        {
+          id: "openai/test-model",
+          provider: "openai",
+          adapter: "@ai-sdk/openai",
+          model: "test-model",
+          apiKey: "sk-test",
+        },
+      ],
+      createProvider: () => {
+        createProviderCalls++;
+        return provider;
+      },
+      registry: new ToolRegistry(),
+      approval: "auto",
+      skillRootOptions: { homeDir: home, myagentHome },
+      store,
+      cwd: workspace,
+    });
+    activeServers.push(server);
+    await new Promise<void>((resolve) => {
+      server.listen(port, "127.0.0.1", () => resolve());
+    });
+
+    const firstTurn = await wsCollect(port, (ws) => {
+      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+      ws.send(JSON.stringify({ type: "user_message", sessionId: session.id, text: "before" }));
+    }, (msg) => msg.type === "turn_finished");
+    expect(
+      firstTurn.some(
+        (msg) =>
+          msg.type === "turn_event" &&
+          msg.event.type === "assistant_text_delta" &&
+          msg.event.text.includes("tools:Read,grep,edit_file,write_file,bash,list_dir,apply_patch,glob"),
+      ),
+    ).toBe(true);
+    const firstText = firstTurn
+      .filter((msg) => msg.type === "turn_event" && msg.event.type === "assistant_text_delta")
+      .map((msg) => msg.event.text)
+      .join("");
+    expect(firstText.split(",")).not.toContain("skill");
+
+    const skillDir = join(workspace, ".agents", "skills", "changed-skill");
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: changed-skill\ndescription: Test hot skill refresh.\n---\n# Changed Skill\n",
+    );
+    const providerCallsBeforeSkillRefreshTurn = createProviderCalls;
+
+    const secondTurn = await wsCollect(port, (ws) => {
+      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+      ws.send(JSON.stringify({ type: "user_message", sessionId: session.id, text: "after" }));
+    }, (msg) => msg.type === "turn_finished");
+
+    expect(
+      secondTurn.some(
+        (msg) =>
+          msg.type === "turn_event" &&
+          msg.event.type === "tool_call" &&
+          msg.event.name === "skill",
+      ),
+    ).toBe(true);
+    expect(
+      secondTurn.some(
+        (msg) =>
+          msg.type === "turn_event" &&
+          msg.event.type === "assistant_text_delta" &&
+          msg.event.text === "loaded changed-skill",
+      ),
+    ).toBe(true);
+    expect(createProviderCalls).toBe(providerCallsBeforeSkillRefreshTurn);
   });
 
   it("switches model over websocket and uses the new provider for the next turn", async () => {

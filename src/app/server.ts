@@ -25,9 +25,10 @@ import { getAppClientAsset } from "./web/bundle.js";
 import { publicModelProfile } from "../model/provider-factory.js";
 import { getGitDiff } from "../workspace/diff.js";
 import { parseUnifiedDiffFiles } from "../diff/unified.js";
-import { discoverSkills, summarizeSkills } from "../skill/discovery.js";
 import { buildDefaultRegistry } from "../tools/default-registry.js";
 import type { SessionState } from "../session/loop.js";
+import { ProjectSkillIndex, ProjectSkillIndexRegistry } from "../skill/index.js";
+import type { DiscoverSkillsOptions } from "../skill/discovery.js";
 
 type AppServerDeps = {
   provider: Provider;
@@ -41,6 +42,7 @@ type AppServerDeps = {
   store: TranscriptStore;
   availableSkills?: SkillSummary[];
   resolveRuntime?: (session: SessionState) => SessionRuntime | Promise<SessionRuntime>;
+  skillRootOptions?: Omit<DiscoverSkillsOptions, "cwd">;
   pickProjectDirectory?: () => Promise<string | null>;
   cwd: string;
 };
@@ -56,6 +58,8 @@ type ResolvedAppRuntime = {
   approval: ApprovalMode;
   availableSkills: SkillSummary[];
 };
+
+type BaseAppRuntime = Omit<ResolvedAppRuntime, "registry" | "availableSkills">;
 
 function canonicalProjectPath(input: string): string {
   const resolved = resolve(input);
@@ -108,7 +112,8 @@ function publicProviderList(profiles: ModelProfile[]) {
 
 export function createAppServer(deps: AppServerDeps): Server {
   const subscribers = new Map<string, Set<WebSocket>>();
-  const runtimeCache = new Map<string, Promise<ResolvedAppRuntime>>();
+  const runtimeCache = new Map<string, Promise<BaseAppRuntime>>();
+  const skillIndexes = new ProjectSkillIndexRegistry(deps.skillRootOptions);
 
   const sendEvent = (sessionId: string, msg: ServerMessage) => {
     const subs = subscribers.get(sessionId);
@@ -139,28 +144,39 @@ export function createAppServer(deps: AppServerDeps): Server {
         availableSkills: runtime.availableSkills ?? [],
       };
     }
+    const runtime = await resolveBaseRuntime(session);
+    const skills = await skillIndexFor(session.cwd).snapshot();
+    return {
+      ...runtime,
+      registry: buildDefaultRegistry(skills.skills),
+      availableSkills: skills.availableSkills,
+    };
+  };
+
+  const resolveBaseRuntime = async (session: SessionState): Promise<BaseAppRuntime> => {
     const key = session.cwd;
     const existing = runtimeCache.get(key);
     if (existing) return existing;
-    const pending = (async () => {
+    const pending = (async (): Promise<BaseAppRuntime> => {
       const config = loadConfig({ workspaceRoot: session.cwd });
       const modelProfiles = resolveModelProfiles(config);
       const profile = resolveModelProfile(config, session.modelProfileId);
-      const skills = await discoverSkills({ cwd: session.cwd });
       return {
-        provider: createProvider(profile),
+        provider: deps.provider,
         providerName: profile.provider,
         modelName: profile.model,
         modelProfileId: profile.id,
         modelProfiles,
         createProvider,
-        registry: buildDefaultRegistry(skills),
         approval: resolveApprovalMode(config),
-        availableSkills: summarizeSkills(skills),
       };
     })();
     runtimeCache.set(key, pending);
     return pending;
+  };
+
+  const skillIndexFor = (cwd: string): ProjectSkillIndex => {
+    return skillIndexes.get(canonicalProjectPath(cwd));
   };
 
   const manager = new SessionManager({
@@ -464,6 +480,9 @@ export function createAppServer(deps: AppServerDeps): Server {
   };
 
   const server = createServer(handleRequest);
+  server.on("close", () => {
+    skillIndexes.dispose();
+  });
 
   const wss = new WebSocketServer({ server, path: "/ws" });
 

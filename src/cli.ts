@@ -5,7 +5,6 @@ import { realpathSync } from "node:fs";
 import * as readline from "node:readline";
 import { createProviderFromProfile } from "./model/provider-factory.js";
 import { buildDefaultRegistry } from "./tools/default-registry.js";
-import type { ToolRegistry } from "./tools/registry.js";
 import { ReadStateTracker } from "./tools/file-mutation.js";
 import { runTurn } from "./session/loop.js";
 import type { ApprovalRequest, SessionState, TurnEvent } from "./session/loop.js";
@@ -26,8 +25,7 @@ import {
   resolveModelProfiles,
 } from "./config/config.js";
 import type { Config, ModelProfile, ProviderName } from "./config/config.js";
-import { discoverSkills, summarizeSkills } from "./skill/discovery.js";
-import type { SkillSummary } from "./skill/types.js";
+import { ProjectSkillIndexRegistry } from "./skill/index.js";
 import { compactSession } from "./session/compact.js";
 import type { CompactResult } from "./session/compact.js";
 import { formatRewindMessage, revertLast, rewindSession } from "./session/revert.js";
@@ -334,11 +332,9 @@ function resolveSessionProvider(config: Config): {
 async function chatMode(
   provider: Provider,
   modelProfiles: ModelProfile[],
-  registry: ToolRegistry,
   session: SessionState,
   approval: ApprovalMode,
   store: TranscriptStore,
-  availableSkills: SkillSummary[] = [],
 ) {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -349,6 +345,7 @@ async function chatMode(
   const approvalHandler = makeApprovalHandler(rl);
   const onEvent = makeEventRenderer();
   let activeProvider = provider;
+  const skillIndexes = new ProjectSkillIndexRegistry();
 
   console.log(`Session: ${session.id}`);
   console.log("Type your message, /exit to quit.\n");
@@ -375,18 +372,19 @@ async function chatMode(
         continue;
 
       try {
+        const skillSnapshot = await skillIndexes.get(session.cwd).snapshot();
         const {
           session: updated,
           newMessages,
           aborted,
-        } = await runTurn(activeProvider, registry, session, input, {
+        } = await runTurn(activeProvider, buildDefaultRegistry(skillSnapshot.skills), session, input, {
           approval,
           approvalHandler,
           onEvent,
           sessionApprovalRules,
           store,
           readState,
-          availableSkills,
+          availableSkills: skillSnapshot.availableSkills,
         });
         Object.assign(session, updated);
         store.appendMessages(session.id, newMessages);
@@ -409,6 +407,7 @@ async function chatMode(
       console.log(diffStat);
     }
   } finally {
+    skillIndexes.dispose();
     rl.close();
   }
 }
@@ -500,16 +499,12 @@ async function handleResume(sessionId: string, options: { cwd: string }): Promis
     const modelProfiles = resolveModelProfiles(config);
     const activeProfile = resolveModelProfile(config, session.modelProfileId);
     const provider = createProviderForProfile(activeProfile);
-    const skills = await discoverSkills({ cwd });
-    const registry = buildDefaultRegistry(skills);
     await chatMode(
       provider,
       modelProfiles,
-      registry,
       session,
       resolveApprovalMode(config),
       store,
-      summarizeSkills(skills),
     );
   } finally {
     store.close();
@@ -531,16 +526,12 @@ async function handleMainRun(options: { cwd: string }): Promise<void> {
     });
     const provider = createProvider(config);
     const modelProfiles = resolveModelProfiles(config);
-    const skills = await discoverSkills({ cwd });
-    const registry = buildDefaultRegistry(skills);
     await chatMode(
       provider,
       modelProfiles,
-      registry,
       session,
       resolveApprovalMode(config),
       store,
-      summarizeSkills(skills),
     );
   } finally {
     store.close();
@@ -561,8 +552,6 @@ async function handleTui(options: { cwd: string }): Promise<void> {
       model: resolved.model,
     });
     const provider = createProvider(config);
-    const skills = await discoverSkills({ cwd });
-    const registry = buildDefaultRegistry(skills);
 
     const { launchTui } = await import("./tui/index.js");
     await launchTui({
@@ -572,10 +561,8 @@ async function handleTui(options: { cwd: string }): Promise<void> {
       modelName: resolved.model,
       modelProfiles: resolveModelProfiles(config),
       createProvider: createProviderForProfile,
-      registry,
       approval: resolveApprovalMode(config),
       store,
-      availableSkills: summarizeSkills(skills),
     });
   } finally {
     store.close();

@@ -34,6 +34,7 @@ type PendingApproval = {
 type ActiveSession = {
   session: SessionState;
   provider: Provider;
+  providerProfileId?: string;
   modelProfiles: ModelProfile[];
   createProvider: (profile: ModelProfile) => Provider;
   registry: ToolRegistry;
@@ -99,6 +100,7 @@ export class SessionManager {
     this.sessions.set(session.id, {
       session,
       provider: profile ? runtime.createProvider(profile) : runtime.provider,
+      providerProfileId: profile?.id,
       modelProfiles: runtime.modelProfiles,
       createProvider: runtime.createProvider,
       registry: runtime.registry,
@@ -376,6 +378,7 @@ export class SessionManager {
     if (!profile) return { ok: false, error: `Unknown model profile: ${requestedId}` };
 
     active.provider = active.createProvider(profile);
+    active.providerProfileId = profile.id;
     Object.assign(active.session, {
       modelProfileId: profile.id,
       provider: profile.provider,
@@ -415,7 +418,15 @@ export class SessionManager {
     active.registry = runtime.registry;
     active.approval = runtime.approval;
     active.availableSkills = runtime.availableSkills;
-    active.provider = profile ? runtime.createProvider(profile) : runtime.provider;
+    if (profile) {
+      if (active.providerProfileId !== profile.id) {
+        active.provider = runtime.createProvider(profile);
+        active.providerProfileId = profile.id;
+      }
+    } else {
+      active.provider = runtime.provider;
+      active.providerProfileId = undefined;
+    }
   }
 
   private resolveSessionProfile(
