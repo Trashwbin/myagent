@@ -197,21 +197,15 @@ button:focus-visible {
   color: #242424;
 }
 
-.sidebar-icon,
-.workspace-icon,
-.workspace-chevron,
-.model-trigger-icon,
-.send-icon,
-.turn-tool-trace-caret,
-.tool-batch-caret,
-.shell-command-icon,
-.shell-command-caret,
-.diff-card-toggle-mark {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.45;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+.iconfont-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  color: inherit;
+  fill: currentColor;
+  stroke: none;
+  vertical-align: -0.125em;
+  overflow: hidden;
 }
 
 .sidebar-icon {
@@ -386,7 +380,6 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   height: 15px;
   flex: 0 0 auto;
   color: #777777;
-  stroke-width: 1.25;
 }
 
 .workspace-name {
