@@ -934,16 +934,11 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   white-space: nowrap;
 }
 
-.turn-tool-trace-caret {
+.turn-tool-trace-icon {
   flex: 0 0 auto;
   width: 14px;
   height: 14px;
   color: var(--muted-soft);
-  transition: transform 120ms ease;
-}
-
-.turn-tool-trace[open] .turn-tool-trace-caret {
-  transform: rotate(90deg);
 }
 
 .turn-tool-trace-body {
@@ -982,7 +977,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   display: none;
 }
 
-.tool-batch-caret {
+.tool-batch-icon {
   width: 13px;
   height: 13px;
   color: var(--muted-soft);
@@ -1028,12 +1023,6 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   border-radius: 3px;
   color: #8a8a8a;
   padding: 2px;
-}
-
-.shell-command-caret {
-  width: 13px;
-  height: 13px;
-  color: var(--muted-soft);
 }
 
 .shell-command-list {

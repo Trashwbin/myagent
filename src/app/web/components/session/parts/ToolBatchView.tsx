@@ -2,7 +2,7 @@ import React from "react";
 import type { TimelineToolPart } from "../../../state/types.js";
 import { Icon } from "../../icons/Icon.js";
 import { CompactToolPartView } from "./ToolPartView.js";
-import { summarizeBatch } from "./tool-batch.js";
+import { batchIconName, summarizeBatch } from "./tool-batch.js";
 
 function isShellBatch(tools: TimelineToolPart[]) {
   return tools.length > 0 && tools.every((tool) => tool.displayKind === "shell");
@@ -57,7 +57,6 @@ function ShellCommandBatch({
       <summary className="shell-command-batch-summary">
         <Icon name="terminal" className="shell-command-icon" />
         <span>{summary}</span>
-        <Icon name="chevron-down" className="shell-command-caret" />
       </summary>
       {active || !collapsed ? (
         <div className="shell-command-list">
@@ -67,7 +66,6 @@ function ShellCommandBatch({
               <details key={tool.id} className="shell-command-item" open={index === 0}>
                 <summary className="shell-command-row">
                   <span>Ran {command}</span>
-                  <Icon name="chevron-down" className="shell-command-caret" />
                 </summary>
                 <div className="shell-terminal">
                   <div className="shell-terminal-label">Shell</div>
@@ -99,6 +97,7 @@ export function ToolBatchView({
   collapsed: boolean;
 }) {
   const summary = summarizeBatch(tools) || `${tools.length} operations`;
+  const iconName = batchIconName(tools);
 
   if (isShellBatch(tools)) {
     return <ShellCommandBatch tools={tools} active={active} collapsed={collapsed} />;
@@ -122,10 +121,7 @@ export function ToolBatchView({
   return (
     <details className="tool-batch collapsed" open={!collapsed}>
       <summary className="tool-batch-summary">
-        <Icon
-          name={collapsed ? "chevron-right" : "chevron-down"}
-          className="tool-batch-caret"
-        />
+        <Icon name={iconName} className="tool-batch-icon" />
         <span className="tool-batch-title">{summary}</span>
       </summary>
       {!collapsed ? (

@@ -9,6 +9,7 @@ export type IconName =
   | "folder"
   | "folder-open"
   | "folder-plus"
+  | "pencil"
   | "plus-square"
   | "search"
   | "terminal";
@@ -22,6 +23,7 @@ const symbols: Record<IconName, string> = {
   folder: "icon-folder-close",
   "folder-open": "icon-folder-filling",
   "folder-plus": "icon-file-add",
+  pencil: "icon-edit",
   "plus-square": "icon-add",
   search: "icon-search",
   terminal: "icon-code",

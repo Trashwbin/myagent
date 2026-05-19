@@ -3,7 +3,7 @@ import type { TimelineToolPart, TimelineTurn } from "../../../state/types.js";
 import { Icon } from "../../icons/Icon.js";
 import { ContextToolGroup } from "./ContextToolGroup.js";
 import { ToolBatchView } from "./ToolBatchView.js";
-import { batchAssistantParts, summarizeToolTrace } from "./tool-batch.js";
+import { batchAssistantParts, batchIconName, summarizeToolTrace } from "./tool-batch.js";
 
 function durationLabel(turn: TimelineTurn) {
   if (!turn.createdAt || !turn.completedAt || turn.completedAt < turn.createdAt) {
@@ -32,13 +32,14 @@ export function TurnToolTrace({ turn }: { turn: TimelineTurn }) {
   const collapsed = !!turn.completed && !active;
   const summary = summarizeToolTrace(tools);
   const batches = batchAssistantParts(tools);
+  const iconName = batchIconName(tools);
 
   return (
     <details className={`turn-tool-trace${active ? " live" : ""}`} open={!collapsed}>
       <summary className="turn-tool-trace-summary">
+        <Icon name={iconName} className="turn-tool-trace-icon" />
         <span className="turn-tool-trace-title">{durationLabel(turn)}</span>
         {summary ? <span className="turn-tool-trace-meta">{summary}</span> : null}
-        <Icon name="chevron-right" className="turn-tool-trace-caret" />
       </summary>
       <div className="turn-tool-trace-body">
         {batches.map((entry, index) => {

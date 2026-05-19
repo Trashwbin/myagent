@@ -1,4 +1,5 @@
 import type { TimelinePart, TimelineToolPart } from "../../../state/types.js";
+import type { IconName } from "../../icons/Icon.js";
 
 export type ToolBatch =
   | { kind: "part"; part: TimelinePart }
@@ -59,6 +60,12 @@ export function summarizeBatch(tools: TimelineToolPart[]) {
   ].filter(Boolean);
 
   return items.join(", ");
+}
+
+export function batchIconName(tools: TimelineToolPart[]): IconName {
+  if (tools.some((tool) => tool.displayKind === "mutation")) return "pencil";
+  if (tools.some((tool) => tool.displayKind === "shell")) return "terminal";
+  return "search";
 }
 
 export function summarizeToolTrace(tools: TimelineToolPart[]) {
