@@ -15,7 +15,6 @@ import { bashTool } from "../tools/bash.js";
 import { listDirTool } from "../tools/list-dir.js";
 import { applyPatchTool } from "../tools/apply-patch.js";
 import { globTool } from "../tools/glob.js";
-import { findUpTool } from "../tools/find-up.js";
 import { createSkillTool } from "../tools/skill.js";
 import { ReadStateTracker } from "../tools/file-mutation.js";
 import { runSession } from "../session/loop.js";
@@ -43,7 +42,6 @@ async function buildRegistry(cwd: string): Promise<{
   registry.register(listDirTool);
   registry.register(applyPatchTool);
   registry.register(globTool);
-  registry.register(findUpTool);
   const skills = await discoverSkills({ cwd });
   if (skills.length > 0) registry.register(createSkillTool(skills));
   return { registry, availableSkills: summarizeSkills(skills) };

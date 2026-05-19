@@ -31,7 +31,7 @@ export function buildSystemPrompt(cwd: string, options: SystemPromptOptions = {}
 
   sections.push(
     "Tool discipline:",
-    "- Prefer dedicated tools over bash for file exploration (glob, grep, Read, find_up).",
+    "- Prefer dedicated tools over bash for file exploration (glob, grep, Read, list_dir).",
     "- Use bash only for git/build/test scripts, simple filesystem primitives (cp, mv, mkdir), or commands dedicated tools cannot express.",
     "- Do not use bash commands like `cat > file`, `sed -i`, `tee`, or heredocs to write files. Use edit_file, write_file, or apply_patch instead.",
     "- Do not use bash for `cat`, `ls`, `rg`, or `grep` when dedicated tools can express the task.",

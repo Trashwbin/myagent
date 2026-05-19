@@ -43,7 +43,7 @@ export const bashTool: ToolDefinition = {
     "and commands that dedicated tools cannot express.",
     "",
     "Prefer dedicated tools for file exploration:",
-    "- glob for file discovery, grep for content search, Read for file reading, find_up for ancestor config lookup.",
+    "- glob for file discovery, grep for content search, Read for file reading, list_dir for single-directory browsing.",
     "- Do not use bash for `cat`, `head`, `tail`, `ls`, `rg`, or `grep` when dedicated tools can express the task.",
   ].join("\n"),
   inputSchema,

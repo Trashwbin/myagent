@@ -6,6 +6,7 @@ import { editFileTool } from "../src/tools/edit.js";
 import { bashTool } from "../src/tools/bash.js";
 import { globTool } from "../src/tools/glob.js";
 import { findUpTool } from "../src/tools/find-up.js";
+import { buildDefaultRegistry } from "../src/tools/default-registry.js";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 describe("ToolRegistry", () => {
@@ -39,6 +40,22 @@ describe("ToolRegistry", () => {
     const list = registry.list();
     expect(list).toHaveLength(2);
     expect(list.map((t) => t.name)).toEqual(["Read", "bash"]);
+  });
+
+  it("does not expose find_up in the default tool registry", () => {
+    const registry = buildDefaultRegistry();
+
+    expect(registry.get("find_up")).toBeUndefined();
+    expect(registry.list().map((tool) => tool.name)).toEqual([
+      "Read",
+      "grep",
+      "edit_file",
+      "write_file",
+      "bash",
+      "list_dir",
+      "apply_patch",
+      "glob",
+    ]);
   });
 
   it("all tools have name, description, inputSchema, and execute", () => {

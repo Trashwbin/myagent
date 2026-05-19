@@ -2,7 +2,6 @@ import type { SkillInfo } from "../skill/types.js";
 import { applyPatchTool } from "./apply-patch.js";
 import { bashTool } from "./bash.js";
 import { editFileTool } from "./edit.js";
-import { findUpTool } from "./find-up.js";
 import { globTool } from "./glob.js";
 import { listDirTool } from "./list-dir.js";
 import { readFileTool } from "./read.js";
@@ -21,7 +20,6 @@ export function buildDefaultRegistry(skills: SkillInfo[] = []): ToolRegistry {
   registry.register(listDirTool);
   registry.register(applyPatchTool);
   registry.register(globTool);
-  registry.register(findUpTool);
   if (skills.length > 0) registry.register(createSkillTool(skills));
   return registry;
 }
