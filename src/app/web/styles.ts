@@ -911,7 +911,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   min-height: 32px;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   cursor: pointer;
   list-style: none;
   color: #8d8d8d;
@@ -934,10 +934,14 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   white-space: nowrap;
 }
 
-.turn-tool-trace-icon {
+.tool-row-icon,
+.tool-row-icon-spacer {
   flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
+}
+
+.tool-row-icon {
   color: var(--muted-soft);
 }
 
@@ -965,7 +969,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 .tool-batch-summary {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   color: #9b9b9b;
   cursor: pointer;
   list-style: none;
@@ -977,17 +981,14 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   display: none;
 }
 
-.tool-batch-icon {
-  width: 13px;
-  height: 13px;
-  color: var(--muted-soft);
-}
-
 .tool-batch-items.readonly {
   display: none;
 }
 
 .tool-batch-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: #9b9b9b;
   font-size: 12px;
   font-weight: 500;
@@ -1004,7 +1005,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   width: fit-content;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   min-height: 24px;
   color: #9b9b9b;
   cursor: pointer;
@@ -1017,12 +1018,12 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 }
 
 .shell-command-icon {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   border: 1px solid #cfcfcf;
   border-radius: 3px;
   color: #8a8a8a;
-  padding: 2px;
+  padding: 1.5px;
 }
 
 .shell-command-list {
@@ -1040,7 +1041,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   max-width: 100%;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   min-height: 22px;
   color: #5f5f5f;
   cursor: pointer;
@@ -1136,23 +1137,31 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 }
 
 .tool-context-summary {
-  min-height: 38px;
+  min-height: 32px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--sp-5);
-  padding: 0 2px;
+  gap: 14px;
+  padding: 0;
   cursor: pointer;
   list-style: none;
   background: transparent;
+  color: #9b9b9b;
 }
 
 .tool-context-summary::-webkit-details-marker {
   display: none;
 }
 
+.tool-context-main {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .tool-context-title {
-  color: #8d8d8d;
+  color: inherit;
   font-size: 13px;
   font-weight: 500;
 }
@@ -1160,6 +1169,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 .tool-context-meta {
   color: var(--muted);
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .tool-context-items {

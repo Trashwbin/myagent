@@ -1,5 +1,6 @@
 import React from "react";
 import type { TimelineToolPart } from "../../../state/types.js";
+import { Icon } from "../../icons/Icon.js";
 
 function summarize(parts: TimelineToolPart[]) {
   const read = parts.filter((part) => part.toolName === "Read" || part.toolName === "read_file").length;
@@ -21,7 +22,10 @@ export function ContextToolGroup({ parts }: { parts: TimelineToolPart[] }) {
   return (
     <details className="tool-context-group">
       <summary className="tool-context-summary">
-        <span className="tool-context-title">Gathered context</span>
+        <span className="tool-context-main">
+          <Icon name="search" className="tool-row-icon" />
+          <span className="tool-context-title">Gathered context</span>
+        </span>
         <span className="tool-context-meta">{summary || `${parts.length} operations`}</span>
       </summary>
       <div className="tool-context-items">

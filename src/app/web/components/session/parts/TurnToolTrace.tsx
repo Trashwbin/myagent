@@ -37,7 +37,7 @@ export function TurnToolTrace({ turn }: { turn: TimelineTurn }) {
   return (
     <details className={`turn-tool-trace${active ? " live" : ""}`} open={!collapsed}>
       <summary className="turn-tool-trace-summary">
-        <Icon name={iconName} className="turn-tool-trace-icon" />
+        <Icon name={iconName} className="tool-row-icon" />
         <span className="turn-tool-trace-title">{durationLabel(turn)}</span>
         {summary ? <span className="turn-tool-trace-meta">{summary}</span> : null}
       </summary>

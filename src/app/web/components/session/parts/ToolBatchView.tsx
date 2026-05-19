@@ -65,6 +65,7 @@ function ShellCommandBatch({
             return (
               <details key={tool.id} className="shell-command-item" open={index === 0}>
                 <summary className="shell-command-row">
+                  <span className="tool-row-icon-spacer" aria-hidden="true" />
                   <span>Ran {command}</span>
                 </summary>
                 <div className="shell-terminal">
@@ -107,6 +108,7 @@ export function ToolBatchView({
     return (
       <section className="tool-batch live">
         <div className="tool-batch-header">
+          <Icon name={iconName} className="tool-row-icon" />
           <span className="tool-batch-title">{summary}</span>
         </div>
         <div className="tool-batch-items">
@@ -121,7 +123,7 @@ export function ToolBatchView({
   return (
     <details className="tool-batch collapsed" open={!collapsed}>
       <summary className="tool-batch-summary">
-        <Icon name={iconName} className="tool-batch-icon" />
+        <Icon name={iconName} className="tool-row-icon" />
         <span className="tool-batch-title">{summary}</span>
       </summary>
       {!collapsed ? (
