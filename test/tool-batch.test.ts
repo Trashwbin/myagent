@@ -4,9 +4,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ToolBatchView } from "../src/app/web/components/session/parts/ToolBatchView.js";
 import { TurnToolTrace } from "../src/app/web/components/session/parts/TurnToolTrace.js";
 import {
+  batchIconName,
   batchAssistantParts,
   summarizeBatch,
   summarizeToolTrace,
+  toolIconName,
 } from "../src/app/web/components/session/parts/tool-batch.js";
 
 describe("tool batch", () => {
@@ -55,7 +57,7 @@ describe("tool batch", () => {
     expect(result[0]).toMatchObject({ kind: "batch", active: true });
   });
 
-  it("summarizes explored, ran, and edited counts", () => {
+  it("summarizes explored, loaded skills, ran, and edited counts", () => {
     expect(
       summarizeBatch([
         {
@@ -75,6 +77,15 @@ describe("tool batch", () => {
           title: "Bash",
         },
         {
+          id: "skill1",
+          kind: "tool",
+          toolName: "skill",
+          displayKind: "skill",
+          status: "ok",
+          title: "Load skill",
+          subtitle: "say-hello",
+        },
+        {
           id: "t3",
           kind: "tool",
           toolName: "write_file",
@@ -91,7 +102,24 @@ describe("tool batch", () => {
           title: "Edit file",
         },
       ]),
-    ).toBe("explored 1 file, ran 1 command, edited 2 files");
+    ).toBe("explored 1 file, loaded 1 skill, ran 1 command, edited 2 files");
+  });
+
+  it("uses a skill icon instead of search for skill-only batches", () => {
+    const tools = [
+      {
+        id: "skill1",
+        kind: "tool" as const,
+        toolName: "skill",
+        displayKind: "skill" as const,
+        status: "ok" as const,
+        title: "Load skill",
+        subtitle: "say-hello",
+      },
+    ];
+
+    expect(batchIconName(tools)).toBe("skill");
+    expect(toolIconName(tools[0]!)).toBe("skill");
   });
 
   it("summarizes a whole turn tool trace by operation type", () => {
@@ -114,6 +142,15 @@ describe("tool batch", () => {
           title: "List directory",
         },
         {
+          id: "skill1",
+          kind: "tool",
+          toolName: "skill",
+          displayKind: "skill",
+          status: "ok",
+          title: "Load skill",
+          subtitle: "say-hello",
+        },
+        {
           id: "bash1",
           kind: "tool",
           toolName: "bash",
@@ -134,7 +171,34 @@ describe("tool batch", () => {
           ],
         },
       ]),
-    ).toBe("1 read, 1 browse, 1 command, 2 files edited");
+    ).toBe("1 read, 1 browse, 1 skill, 1 command, 2 files edited");
+  });
+
+  it("renders expanded skill batches with a visible child row", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(ToolBatchView, {
+        active: false,
+        collapsed: false,
+        tools: [
+          {
+            id: "skill1",
+            kind: "tool",
+            toolName: "skill",
+            displayKind: "skill",
+            status: "ok",
+            title: "Load skill",
+            subtitle: "say-hello",
+            summary: "loaded",
+          },
+        ],
+      }),
+    );
+
+    expect(html).toContain("loaded 1 skill");
+    expect(html).toContain("Load skill");
+    expect(html).toContain("say-hello");
+    expect(html).toContain("loaded");
+    expect(html).toContain("#icon-prompt");
   });
 
   it("keeps completed shell batches collapsed to a single summary row", () => {

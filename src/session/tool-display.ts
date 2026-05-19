@@ -9,7 +9,7 @@ export type ToolDisplayFile = {
 };
 
 export type ToolDisplay = {
-  kind: "context" | "shell" | "mutation" | "generic";
+  kind: "context" | "shell" | "mutation" | "skill" | "generic";
   title: string;
   subtitle?: string;
   summary?: string;
@@ -63,6 +63,7 @@ export function buildToolResultDisplay(
 export function toolDisplayKind(toolName: string): ToolDisplay["kind"] {
   if (CONTEXT_TOOLS.has(toolName)) return "context";
   if (MUTATION_TOOLS.has(toolName)) return "mutation";
+  if (toolName === "skill") return "skill";
   if (toolName === "bash") return "shell";
   return "generic";
 }

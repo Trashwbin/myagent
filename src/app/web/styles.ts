@@ -981,10 +981,6 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   display: none;
 }
 
-.tool-batch-items.readonly {
-  display: none;
-}
-
 .tool-batch-header {
   display: inline-flex;
   align-items: center;
@@ -1121,6 +1117,11 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   color: var(--muted);
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.tool-line-summary {
+  color: var(--muted-soft);
+  font-size: 12px;
 }
 
 .tool-line-files {

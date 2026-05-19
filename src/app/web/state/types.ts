@@ -72,7 +72,7 @@ export type TimelineStatusPart = {
   text: string;
 };
 
-export type TimelineToolKind = "context" | "shell" | "mutation" | "generic";
+export type TimelineToolKind = "context" | "shell" | "mutation" | "skill" | "generic";
 
 export type TimelineToolStatus =
   | "queued"

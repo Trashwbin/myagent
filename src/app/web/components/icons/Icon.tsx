@@ -12,6 +12,7 @@ export type IconName =
   | "pencil"
   | "plus-square"
   | "search"
+  | "skill"
   | "terminal";
 
 const symbols: Record<IconName, string> = {
@@ -26,6 +27,7 @@ const symbols: Record<IconName, string> = {
   pencil: "icon-edit",
   "plus-square": "icon-add",
   search: "icon-search",
+  skill: "icon-prompt",
   terminal: "icon-code",
 };
 

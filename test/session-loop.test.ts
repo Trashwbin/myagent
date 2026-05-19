@@ -903,6 +903,71 @@ describe("TurnEvent ordering", () => {
     await rm(tmp, { recursive: true });
   });
 
+  it("emits skill-specific display for skill tool calls and results", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "myagent-skill-display-"));
+    const skill = {
+      name: "reviewer",
+      description: "Review code.",
+      scope: "workspace" as const,
+      location: join(tmp, ".agents", "skills", "reviewer", "SKILL.md"),
+      baseDir: join(tmp, ".agents", "skills", "reviewer"),
+      content: "# Reviewer\nReview carefully.",
+    };
+    await mkdir(skill.baseDir, { recursive: true });
+    await writeFile(skill.location, skill.content);
+
+    const provider = new FakeProvider([
+      [
+        { type: "tool-call", id: "tc1", name: "skill", input: { name: "reviewer" } },
+        { type: "finish", reason: "tool-calls" },
+      ],
+      [
+        { type: "text", delta: "done" },
+        { type: "finish", reason: "stop" },
+      ],
+    ]);
+    const registry = new ToolRegistry();
+    registry.register(createSkillTool([skill]));
+
+    const { events, onEvent } = captureEvents();
+    const { newMessages } = await runTurn(provider, registry, makeSession(tmp), "review", {
+      approval: "auto",
+      onEvent,
+    });
+
+    const call = events.find((event) => event.type === "tool_call") as Extract<
+      TurnEvent,
+      { type: "tool_call" }
+    >;
+    const result = events.find((event) => event.type === "tool_result") as Extract<
+      TurnEvent,
+      { type: "tool_result" }
+    >;
+
+    expect(call.display).toMatchObject({
+      kind: "skill",
+      title: "Load skill",
+      subtitle: "reviewer",
+    });
+    expect(result.display).toMatchObject({
+      kind: "skill",
+      title: "Load skill",
+      subtitle: "reviewer",
+      summary: "loaded",
+    });
+    const resultMessage = newMessages.find(
+      (message) => message.role === "tool_result" && message.toolName === "skill",
+    );
+    expect(resultMessage?.toolDisplay).toMatchObject({
+      kind: "skill",
+      title: "Load skill",
+      subtitle: "reviewer",
+      summary: "loaded",
+    });
+
+    await rm(tmp, { recursive: true });
+  });
+
   it("carries provider metadata from tool-call to tool_result message", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
     await writeFile(join(tmp, "f.txt"), "hi");

@@ -46,15 +46,18 @@ export function summarizeBatch(tools: TimelineToolPart[]) {
   let readCount = 0;
   let commandCount = 0;
   let mutationCount = 0;
+  let skillCount = 0;
 
   for (const tool of tools) {
     if (tool.displayKind === "context") readCount += 1;
     else if (tool.displayKind === "mutation") mutationCount += 1;
+    else if (tool.displayKind === "skill") skillCount += 1;
     else commandCount += 1;
   }
 
   const items = [
     readCount ? `explored ${readCount} ${readCount === 1 ? "file" : "files"}` : "",
+    skillCount ? `loaded ${skillCount} ${skillCount === 1 ? "skill" : "skills"}` : "",
     commandCount ? `ran ${commandCount} ${commandCount === 1 ? "command" : "commands"}` : "",
     mutationCount ? `edited ${mutationCount} ${mutationCount === 1 ? "file" : "files"}` : "",
   ].filter(Boolean);
@@ -65,6 +68,14 @@ export function summarizeBatch(tools: TimelineToolPart[]) {
 export function batchIconName(tools: TimelineToolPart[]): IconName {
   if (tools.some((tool) => tool.displayKind === "mutation")) return "pencil";
   if (tools.some((tool) => tool.displayKind === "shell")) return "terminal";
+  if (tools.some((tool) => tool.displayKind === "skill")) return "skill";
+  return "search";
+}
+
+export function toolIconName(tool: TimelineToolPart): IconName {
+  if (tool.displayKind === "mutation") return "pencil";
+  if (tool.displayKind === "shell") return "terminal";
+  if (tool.displayKind === "skill") return "skill";
   return "search";
 }
 
@@ -74,8 +85,13 @@ export function summarizeToolTrace(tools: TimelineToolPart[]) {
   let searchCount = 0;
   let commandCount = 0;
   let editCount = 0;
+  let skillCount = 0;
 
   for (const tool of tools) {
+    if (tool.displayKind === "skill") {
+      skillCount += 1;
+      continue;
+    }
     if (tool.displayKind === "shell") {
       commandCount += 1;
       continue;
@@ -101,6 +117,7 @@ export function summarizeToolTrace(tools: TimelineToolPart[]) {
     readCount ? `${readCount} read` : "",
     browseCount ? `${browseCount} browse` : "",
     searchCount ? `${searchCount} search` : "",
+    skillCount ? `${skillCount} ${skillCount === 1 ? "skill" : "skills"}` : "",
     commandCount ? `${commandCount} ${commandCount === 1 ? "command" : "commands"}` : "",
     editCount ? `${editCount} ${editCount === 1 ? "file edited" : "files edited"}` : "",
   ]
