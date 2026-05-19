@@ -1,5 +1,6 @@
 import React from "react";
 import type { TimelineToolPart } from "../../../state/types.js";
+import { Icon } from "../../icons/Icon.js";
 import { CompactToolPartView } from "./ToolPartView.js";
 import { summarizeBatch } from "./tool-batch.js";
 
@@ -54,13 +55,9 @@ function ShellCommandBatch({
       open={active || !collapsed}
     >
       <summary className="shell-command-batch-summary">
-        <span className="shell-command-icon" aria-hidden="true">
-          ▹
-        </span>
+        <Icon name="terminal" className="shell-command-icon" />
         <span>{summary}</span>
-        <span className="shell-command-caret" aria-hidden="true">
-          ⌄
-        </span>
+        <Icon name="chevron-down" className="shell-command-caret" />
       </summary>
       {active || !collapsed ? (
         <div className="shell-command-list">
@@ -70,9 +67,7 @@ function ShellCommandBatch({
               <details key={tool.id} className="shell-command-item" open={index === 0}>
                 <summary className="shell-command-row">
                   <span>Ran {command}</span>
-                  <span className="shell-command-caret" aria-hidden="true">
-                    ⌄
-                  </span>
+                  <Icon name="chevron-down" className="shell-command-caret" />
                 </summary>
                 <div className="shell-terminal">
                   <div className="shell-terminal-label">Shell</div>
@@ -127,7 +122,10 @@ export function ToolBatchView({
   return (
     <details className="tool-batch collapsed" open={!collapsed}>
       <summary className="tool-batch-summary">
-        <span className="tool-batch-caret">{collapsed ? "▸" : "▾"}</span>
+        <Icon
+          name={collapsed ? "chevron-right" : "chevron-down"}
+          className="tool-batch-caret"
+        />
         <span className="tool-batch-title">{summary}</span>
       </summary>
       {!collapsed ? (

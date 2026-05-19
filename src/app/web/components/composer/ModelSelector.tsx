@@ -4,6 +4,7 @@ import type {
   ProviderModelSummary,
   ProviderSummary,
 } from "../../state/types.js";
+import { Icon } from "../icons/Icon.js";
 
 export function ModelSelector({
   config,
@@ -61,9 +62,7 @@ export function ModelSelector({
           {provider ? <span className="model-provider">{provider}</span> : null}
           <span className="model-name">{label}</span>
         </span>
-        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M4.5 6.5 8 10l3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <Icon name="chevron-down" className="model-trigger-icon" />
       </button>
 
       {open ? (

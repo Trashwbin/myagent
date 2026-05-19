@@ -8,6 +8,7 @@ import {
   visibleSessions,
   workspaceName,
 } from "./session-list.js";
+import { Icon } from "../icons/Icon.js";
 
 export function Sidebar({
   projects,
@@ -81,15 +82,15 @@ export function Sidebar({
     <aside className="sidebar">
       <div className="sidebar-actions">
         <button className="sidebar-action" onClick={onNewSession}>
-          <PlusSquareIcon />
+          <Icon name="plus-square" className="sidebar-icon" />
           <span>New chat</span>
         </button>
         <button className="sidebar-action" type="button" onClick={onAddProject}>
-          <FolderPlusIcon />
+          <Icon name="folder-plus" className="sidebar-icon" />
           <span>New project</span>
         </button>
         <button className="sidebar-action" type="button" onClick={() => searchRef.current?.focus()}>
-          <SearchIcon />
+          <Icon name="search" className="sidebar-icon" />
           <span>Search</span>
         </button>
       </div>
@@ -139,10 +140,14 @@ export function Sidebar({
                         }));
                       }}
                     >
-                      <span className="workspace-chevron" aria-hidden="true">
-                        {expanded ? "▾" : "▸"}
-                      </span>
-                      <FolderIcon open={expanded} />
+                      <Icon
+                        name={expanded ? "chevron-down" : "chevron-right"}
+                        className="workspace-chevron"
+                      />
+                      <Icon
+                        name={expanded ? "folder-open" : "folder"}
+                        className="workspace-icon"
+                      />
                       <span className="workspace-name">{group.name}</span>
                       <span className="workspace-count">{group.sessionCount}</span>
                     </button>
@@ -203,51 +208,5 @@ export function Sidebar({
         )}
       </div>
     </aside>
-  );
-}
-
-function PlusSquareIcon() {
-  return (
-    <svg className="sidebar-icon" viewBox="0 0 16 16" aria-hidden="true">
-      <rect x="3" y="3" width="10" height="10" rx="2.2" />
-      <path d="M8 5.8v4.4M5.8 8h4.4" />
-    </svg>
-  );
-}
-
-function FolderPlusIcon() {
-  return (
-    <svg className="sidebar-icon" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M2.5 4.5h4l1.1 1.2h5.9v5.8h-11z" />
-      <path d="M2.5 6.2h11" />
-      <path d="M8 8.4v4M6 10.4h4" />
-    </svg>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg className="sidebar-icon" viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="7" cy="7" r="3.5" />
-      <path d="m9.7 9.7 2.8 2.8" />
-    </svg>
-  );
-}
-
-function FolderIcon({ open }: { open: boolean }) {
-  return (
-    <svg className="workspace-icon" viewBox="0 0 16 16" aria-hidden="true">
-      {open ? (
-        <>
-          <path d="M2.4 5.5h4l1.2 1.2h6" />
-          <path d="M2.6 6.8h10.9l-1 5H3.2z" />
-        </>
-      ) : (
-        <>
-          <path d="M2.5 4.5h4l1.1 1.2h5.9v5.8h-11z" />
-          <path d="M2.5 6.2h11" />
-        </>
-      )}
-    </svg>
   );
 }

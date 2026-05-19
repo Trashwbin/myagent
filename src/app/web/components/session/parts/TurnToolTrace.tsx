@@ -1,5 +1,6 @@
 import React from "react";
 import type { TimelineToolPart, TimelineTurn } from "../../../state/types.js";
+import { Icon } from "../../icons/Icon.js";
 import { ContextToolGroup } from "./ContextToolGroup.js";
 import { ToolBatchView } from "./ToolBatchView.js";
 import { batchAssistantParts, summarizeToolTrace } from "./tool-batch.js";
@@ -37,9 +38,7 @@ export function TurnToolTrace({ turn }: { turn: TimelineTurn }) {
       <summary className="turn-tool-trace-summary">
         <span className="turn-tool-trace-title">{durationLabel(turn)}</span>
         {summary ? <span className="turn-tool-trace-meta">{summary}</span> : null}
-        <span className="turn-tool-trace-caret" aria-hidden="true">
-          ›
-        </span>
+        <Icon name="chevron-right" className="turn-tool-trace-caret" />
       </summary>
       <div className="turn-tool-trace-body">
         {batches.map((entry, index) => {

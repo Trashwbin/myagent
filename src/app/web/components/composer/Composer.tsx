@@ -6,6 +6,7 @@ import {
   type SlashCommand,
 } from "../../slash-commands.js";
 import type { ProviderConfig } from "../../state/types.js";
+import { Icon } from "../icons/Icon.js";
 import { ModelSelector } from "./ModelSelector.js";
 
 export type SlashChoice =
@@ -216,9 +217,7 @@ export function Composer({
               onSelect={onSelectModel}
             />
             <button className="send-button" onClick={submit} disabled={disabled}>
-              <svg viewBox="0 0 16 16" fill="none">
-                <path d="M8 13.5v-11M4.5 6.5L8 2.5l3.5 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <Icon name="arrow-up" className="send-icon" />
             </button>
           </div>
         </div>

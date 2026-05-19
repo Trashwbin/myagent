@@ -197,16 +197,28 @@ button:focus-visible {
   color: #242424;
 }
 
-.sidebar-icon {
-  width: 15px;
-  height: 15px;
-  flex: 0 0 auto;
-  color: #777777;
+.sidebar-icon,
+.workspace-icon,
+.workspace-chevron,
+.model-trigger-icon,
+.send-icon,
+.turn-tool-trace-caret,
+.tool-batch-caret,
+.shell-command-icon,
+.shell-command-caret,
+.diff-card-toggle-mark {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.45;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.sidebar-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  color: #777777;
 }
 
 .sidebar-action:hover .sidebar-icon {
@@ -364,10 +376,9 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 
 .workspace-chevron {
   width: 12px;
+  height: 12px;
   flex: 0 0 auto;
   color: var(--muted-soft);
-  font-size: 11px;
-  text-align: center;
 }
 
 .workspace-icon {
@@ -375,11 +386,7 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   height: 15px;
   flex: 0 0 auto;
   color: #777777;
-  fill: none;
-  stroke: currentColor;
   stroke-width: 1.25;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .workspace-name {
@@ -936,9 +943,9 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 
 .turn-tool-trace-caret {
   flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
   color: var(--muted-soft);
-  font-size: 16px;
-  line-height: 1;
   transition: transform 120ms ease;
 }
 
@@ -983,8 +990,9 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 }
 
 .tool-batch-caret {
+  width: 13px;
+  height: 13px;
   color: var(--muted-soft);
-  font-size: 11px;
 }
 
 .tool-batch-items.readonly {
@@ -1023,19 +1031,16 @@ details.tool-details pre::-webkit-scrollbar-thumb,
 .shell-command-icon {
   width: 14px;
   height: 14px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   border: 1px solid #cfcfcf;
   border-radius: 3px;
   color: #8a8a8a;
-  font-size: 9px;
-  line-height: 1;
+  padding: 2px;
 }
 
 .shell-command-caret {
+  width: 13px;
+  height: 13px;
   color: var(--muted-soft);
-  font-size: 12px;
 }
 
 .shell-command-list {
@@ -1582,9 +1587,9 @@ details.tool-details pre {
 }
 
 .diff-card-toggle-mark {
+  width: 13px;
+  height: 13px;
   color: var(--body);
-  font-size: 12px;
-  line-height: 1;
 }
 
 .diff-card-files {
@@ -1819,7 +1824,7 @@ textarea::placeholder {
   transform: none;
 }
 
-.send-button svg {
+.send-icon {
   width: 16px;
   height: 16px;
 }
@@ -1868,7 +1873,7 @@ textarea::placeholder {
   border-color: var(--surface-stronger);
 }
 
-.model-trigger svg {
+.model-trigger-icon {
   width: 13px;
   height: 13px;
   color: var(--muted-soft);

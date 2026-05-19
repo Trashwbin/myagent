@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import type { MutationDiffFile } from "../../state/types.js";
+import { Icon } from "../icons/Icon.js";
 import { ReviewDiffFile } from "./ReviewDiffFile.js";
 import { summarizeReview } from "./review-utils.js";
 
@@ -38,7 +39,10 @@ export function TurnDiffReview({
         </div>
         <button className="diff-card-toggle" onClick={toggleAll}>
           {allExpanded ? "Collapse" : "Review"}
-          <span className="diff-card-toggle-mark">{allExpanded ? "↑" : "→"}</span>
+          <Icon
+            name={allExpanded ? "chevron-up" : "arrow-right"}
+            className="diff-card-toggle-mark"
+          />
         </button>
       </div>
       <div className="diff-card-files">
