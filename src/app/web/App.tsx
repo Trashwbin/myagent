@@ -300,6 +300,21 @@ export function App() {
     return session;
   }
 
+  async function addProject() {
+    const result = await fetchJson<ProjectSummary & { canceled?: boolean }>("/project/pick", {
+      method: "POST",
+    });
+    if (result.canceled) return;
+    await loadProjects();
+    setDraftProjectPath(result.path);
+    localStorage.setItem(DRAFT_PROJECT_KEY, result.path);
+    dispatch({ type: "set_active_session", sessionId: null });
+    localStorage.removeItem(ACTIVE_SESSION_KEY);
+    const url = new URL(location.href);
+    url.searchParams.delete("session");
+    history.replaceState(null, "", url);
+  }
+
   async function selectModel(modelProfileId: string) {
     setDraftModelProfileId(modelProfileId);
     localStorage.setItem(DRAFT_MODEL_KEY, modelProfileId);
@@ -481,10 +496,8 @@ export function App() {
           void selectSession(sessionId);
         }}
         onSelectProject={(projectPath) => {
-          if (!state.activeSessionId) {
-            setDraftProjectPath(projectPath);
-            localStorage.setItem(DRAFT_PROJECT_KEY, projectPath);
-          }
+          setDraftProjectPath(projectPath);
+          localStorage.setItem(DRAFT_PROJECT_KEY, projectPath);
         }}
         onNewSession={() => {
           const projectPath =
@@ -499,6 +512,9 @@ export function App() {
           const url = new URL(location.href);
           url.searchParams.delete("session");
           history.replaceState(null, "", url);
+        }}
+        onAddProject={() => {
+          void addProject();
         }}
       />
 

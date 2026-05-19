@@ -17,6 +17,7 @@ export function Sidebar({
   onSelect,
   onSelectProject,
   onNewSession,
+  onAddProject,
 }: {
   projects: ProjectSummary[];
   sessions: SessionSummary[];
@@ -25,6 +26,7 @@ export function Sidebar({
   onSelect: (sessionId: string) => void;
   onSelectProject: (projectPath: string) => void;
   onNewSession: () => void;
+  onAddProject: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [expandedWorkspaces, setExpandedWorkspaces] = useState<Record<string, boolean>>({});
@@ -81,6 +83,10 @@ export function Sidebar({
         <button className="sidebar-action" onClick={onNewSession}>
           <PlusSquareIcon />
           <span>New chat</span>
+        </button>
+        <button className="sidebar-action" type="button" onClick={onAddProject}>
+          <FolderPlusIcon />
+          <span>New project</span>
         </button>
         <button className="sidebar-action" type="button" onClick={() => searchRef.current?.focus()}>
           <SearchIcon />
@@ -205,6 +211,16 @@ function PlusSquareIcon() {
     <svg className="sidebar-icon" viewBox="0 0 16 16" aria-hidden="true">
       <rect x="3" y="3" width="10" height="10" rx="2.2" />
       <path d="M8 5.8v4.4M5.8 8h4.4" />
+    </svg>
+  );
+}
+
+function FolderPlusIcon() {
+  return (
+    <svg className="sidebar-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2.5 4.5h4l1.1 1.2h5.9v5.8h-11z" />
+      <path d="M2.5 6.2h11" />
+      <path d="M8 8.4v4M6 10.4h4" />
     </svg>
   );
 }

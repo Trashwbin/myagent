@@ -20,6 +20,7 @@ import { parseClientMessage } from "./protocol.js";
 import { SessionManager } from "./session-api.js";
 import type { SessionRuntime } from "./session-api.js";
 import { EMBEDDED_HTML } from "./html.js";
+import { pickProjectDirectory, ProjectPickerUnavailableError } from "./project-picker.js";
 import { getAppClientAsset } from "./web/bundle.js";
 import { publicModelProfile } from "../model/provider-factory.js";
 import { getGitDiff } from "../workspace/diff.js";
@@ -40,6 +41,7 @@ type AppServerDeps = {
   store: TranscriptStore;
   availableSkills?: SkillSummary[];
   resolveRuntime?: (session: SessionState) => SessionRuntime | Promise<SessionRuntime>;
+  pickProjectDirectory?: () => Promise<string | null>;
   cwd: string;
 };
 
@@ -285,6 +287,19 @@ export function createAppServer(deps: AppServerDeps): Server {
         return;
       }
 
+      if (path === "/project/pick" && req.method === "POST") {
+        const picked = await (deps.pickProjectDirectory ?? pickProjectDirectory)();
+        if (!picked) {
+          json(res, { canceled: true });
+          return;
+        }
+        const project = deps.store.upsertProject({
+          path: canonicalProjectPath(picked),
+        });
+        json(res, project, 201);
+        return;
+      }
+
       if (path.startsWith("/project/") && req.method === "DELETE") {
         const encodedPath = decodeURIComponent(path.slice("/project/".length));
         if (!encodedPath) {
@@ -438,6 +453,10 @@ export function createAppServer(deps: AppServerDeps): Server {
     } catch (err) {
       if (err instanceof HttpError) {
         json(res, { error: err.message }, err.status);
+        return;
+      }
+      if (err instanceof ProjectPickerUnavailableError) {
+        json(res, { error: err.message }, 501);
         return;
       }
       json(res, { error: "Internal server error" }, 500);

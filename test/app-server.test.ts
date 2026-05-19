@@ -348,6 +348,88 @@ describe("HTTP API", () => {
     });
   });
 
+  it("POST /project/pick creates a project from the native picker result", async () => {
+    const base = await tmpBaseDir();
+    const workspace = await mkdtemp(join(tmpdir(), "myagent-project-picker-"));
+    const canonicalWorkspace = await realpath(workspace);
+    activeTmpDirs.push(workspace);
+    const store = openTestStore(base);
+    const port = await findAvailablePort(43200);
+    const server = createAppServer({
+      provider: noopProvider(),
+      providerName: "openai",
+      modelName: "test-model",
+      modelProfileId: "openai/test-model",
+      modelProfiles: [
+        {
+          id: "openai/test-model",
+          provider: "openai",
+          adapter: "@ai-sdk/openai",
+          model: "test-model",
+          apiKey: "sk-test",
+        },
+      ],
+      registry: new ToolRegistry(),
+      approval: "on-request",
+      resolveRuntime: () => testRuntime(),
+      store,
+      pickProjectDirectory: async () => workspace,
+      cwd: "/test",
+    });
+    activeServers.push(server);
+    await new Promise<void>((resolve) => {
+      server.listen(port, "127.0.0.1", () => resolve());
+    });
+
+    const data = await fetchJson(port, "/project/pick", {
+      method: "POST",
+    });
+
+    expect(data).toMatchObject({
+      path: canonicalWorkspace,
+      name: canonicalWorkspace.split("/").pop(),
+      sessionCount: 0,
+    });
+  });
+
+  it("POST /project/pick reports cancellation without creating a project", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const port = await findAvailablePort(43200);
+    const server = createAppServer({
+      provider: noopProvider(),
+      providerName: "openai",
+      modelName: "test-model",
+      modelProfileId: "openai/test-model",
+      modelProfiles: [
+        {
+          id: "openai/test-model",
+          provider: "openai",
+          adapter: "@ai-sdk/openai",
+          model: "test-model",
+          apiKey: "sk-test",
+        },
+      ],
+      registry: new ToolRegistry(),
+      approval: "on-request",
+      resolveRuntime: () => testRuntime(),
+      store,
+      pickProjectDirectory: async () => null,
+      cwd: "/test",
+    });
+    activeServers.push(server);
+    await new Promise<void>((resolve) => {
+      server.listen(port, "127.0.0.1", () => resolve());
+    });
+
+    const data = await fetchJson(port, "/project/pick", {
+      method: "POST",
+    });
+
+    expect(data).toEqual({ canceled: true });
+    expect(store.listProjects()).toEqual([]);
+  });
+
   it("GET /session lists sessions with OpenCode-style path", async () => {
     const base = await tmpBaseDir();
     const store = openTestStore(base);
