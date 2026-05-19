@@ -72,13 +72,6 @@ export function batchIconName(tools: TimelineToolPart[]): IconName {
   return "search";
 }
 
-export function toolIconName(tool: TimelineToolPart): IconName {
-  if (tool.displayKind === "mutation") return "pencil";
-  if (tool.displayKind === "shell") return "terminal";
-  if (tool.displayKind === "skill") return "skill";
-  return "search";
-}
-
 export function summarizeToolTrace(tools: TimelineToolPart[]) {
   let readCount = 0;
   let browseCount = 0;

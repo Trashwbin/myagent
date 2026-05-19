@@ -8,7 +8,6 @@ import {
   batchAssistantParts,
   summarizeBatch,
   summarizeToolTrace,
-  toolIconName,
 } from "../src/app/web/components/session/parts/tool-batch.js";
 
 describe("tool batch", () => {
@@ -119,7 +118,6 @@ describe("tool batch", () => {
     ];
 
     expect(batchIconName(tools)).toBe("skill");
-    expect(toolIconName(tools[0]!)).toBe("skill");
   });
 
   it("summarizes a whole turn tool trace by operation type", () => {
@@ -199,6 +197,7 @@ describe("tool batch", () => {
     expect(html).toContain("say-hello");
     expect(html).toContain("loaded");
     expect(html).toContain("#icon-prompt");
+    expect(html.match(/#icon-prompt/g)).toHaveLength(2);
   });
 
   it("keeps completed shell batches collapsed to a single summary row", () => {

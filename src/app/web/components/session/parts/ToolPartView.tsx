@@ -1,7 +1,5 @@
 import React from "react";
 import type { TimelineToolPart } from "../../../state/types.js";
-import { Icon } from "../../icons/Icon.js";
-import { toolIconName } from "./tool-batch.js";
 
 function summarizeFiles(part: TimelineToolPart) {
   const files = part.diffFiles ?? [];
@@ -82,7 +80,6 @@ function ToolPartViewInner({
     return (
       <div className={`tool-line tool-line-compact tool-line-${part.displayKind} ${part.status}`}>
         <div className="tool-line-main">
-          <Icon name={toolIconName(part)} className="tool-row-icon" />
           <span className="tool-line-title">{part.title}</span>
           {part.subtitle ? <span className="tool-line-subtitle">{part.subtitle}</span> : null}
           {part.displayKind === "skill" && part.summary ? (
