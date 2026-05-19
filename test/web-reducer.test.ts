@@ -54,6 +54,7 @@ describe("web timeline reducer", () => {
 
     expect(turns).toHaveLength(1);
     expect(turns[0]?.userMessage.text).toBe("edit app.ts");
+    expect(turns[0]?.completed).toBe(true);
     expect(turns[0]?.assistantParts.some((part) => part.kind === "text")).toBe(true);
     expect(turns[0]?.mutationDiffs).toHaveLength(1);
     expect(turns[0]?.mutationDiffs[0]?.path).toBe("app.ts");

@@ -60,3 +60,43 @@ export function summarizeBatch(tools: TimelineToolPart[]) {
 
   return items.join(", ");
 }
+
+export function summarizeToolTrace(tools: TimelineToolPart[]) {
+  let readCount = 0;
+  let browseCount = 0;
+  let searchCount = 0;
+  let commandCount = 0;
+  let editCount = 0;
+
+  for (const tool of tools) {
+    if (tool.displayKind === "shell") {
+      commandCount += 1;
+      continue;
+    }
+    if (tool.displayKind === "mutation") {
+      editCount += Math.max(1, tool.diffFiles?.length ?? 0);
+      continue;
+    }
+    if (tool.toolName === "Read" || tool.toolName === "read_file") {
+      readCount += 1;
+      continue;
+    }
+    if (tool.toolName === "grep" || tool.toolName === "glob") {
+      searchCount += 1;
+      continue;
+    }
+    if (tool.displayKind === "context") {
+      browseCount += 1;
+    }
+  }
+
+  return [
+    readCount ? `${readCount} read` : "",
+    browseCount ? `${browseCount} browse` : "",
+    searchCount ? `${searchCount} search` : "",
+    commandCount ? `${commandCount} ${commandCount === 1 ? "command" : "commands"}` : "",
+    editCount ? `${editCount} ${editCount === 1 ? "file edited" : "files edited"}` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+}

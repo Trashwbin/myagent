@@ -284,7 +284,7 @@ export function buildTimelineFromMessages(messages: Message[]): TimelineTurn[] {
     }
   }
 
-  return timeline;
+  return timeline.map((turn) => ({ ...turn, completed: true }));
 }
 
 function replayDisplayFromToolInput(
@@ -355,6 +355,7 @@ function createTurn(id: string, text: string): TimelineTurn {
     assistantParts: [],
     mutationDiffs: [],
     completed: false,
+    createdAt: Date.now(),
   };
 }
 
@@ -582,6 +583,7 @@ function finalizeStreamingText(timeline: TimelineTurn[]): TimelineTurn[] {
   return updateLastTurn(timeline, (turn) => ({
     ...turn,
     completed: true,
+    completedAt: turn.completedAt ?? Date.now(),
     assistantParts: turn.assistantParts.map((part) =>
       part.kind === "text" && part.streaming ? { ...part, streaming: false } : part,
     ),

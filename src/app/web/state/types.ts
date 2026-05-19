@@ -114,6 +114,8 @@ export type TimelineTurn = {
   assistantParts: TimelinePart[];
   mutationDiffs: MutationDiffFile[];
   completed?: boolean;
+  createdAt?: number;
+  completedAt?: number;
 };
 
 export type PendingApproval = {
