@@ -10,6 +10,7 @@ import { Topbar } from "./components/layout/Topbar.js";
 import { MessageTimeline } from "./components/session/MessageTimeline.js";
 import { parseSlashCommand } from "./slash-commands.js";
 import { appReducer, initialAppState } from "./state/reducer.js";
+import { isNearScrollBottom } from "./timeline-scroll.js";
 import type {
   AppState,
   ProviderConfig,
@@ -52,6 +53,7 @@ export function App() {
   const reconnectTimer = useRef<number | null>(null);
   const subscribed = useRef(new Set<string>());
   const timelineRef = useRef<HTMLElement | null>(null);
+  const shouldFollowTimelineRef = useRef(true);
 
   const activeSession = useMemo(
     () => state.sessions.find((session) => session.id === state.activeSessionId) || null,
@@ -96,9 +98,27 @@ export function App() {
   }, [state.pendingApproval?.approvalId]);
 
   useEffect(() => {
-    if (!timelineRef.current) return;
-    timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
-  }, [state.activeSessionId, activeTimeline]);
+    shouldFollowTimelineRef.current = true;
+    const timeline = timelineRef.current;
+    if (timeline) timeline.scrollTop = timeline.scrollHeight;
+  }, [state.activeSessionId]);
+
+  useEffect(() => {
+    const timeline = timelineRef.current;
+    if (!timeline || !shouldFollowTimelineRef.current) return;
+    timeline.scrollTop = timeline.scrollHeight;
+  }, [activeTimeline]);
+
+  useEffect(() => {
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+    const updateFollowMode = () => {
+      shouldFollowTimelineRef.current = isNearScrollBottom(timeline);
+    };
+    updateFollowMode();
+    timeline.addEventListener("scroll", updateFollowMode, { passive: true });
+    return () => timeline.removeEventListener("scroll", updateFollowMode);
+  }, [state.activeSessionId]);
 
   useEffect(() => {
     let cancelled = false;
