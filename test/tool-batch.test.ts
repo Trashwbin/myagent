@@ -3,6 +3,8 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ToolBatchView } from "../src/app/web/components/session/parts/ToolBatchView.js";
 import { TurnToolTrace } from "../src/app/web/components/session/parts/TurnToolTrace.js";
+import { splitTurnAssistantParts } from "../src/app/web/components/session/SessionTurn.js";
+import { buildTimelineFromMessages } from "../src/app/web/state/reducer.js";
 import {
   batchIconName,
   batchAssistantParts,
@@ -271,5 +273,85 @@ describe("tool batch", () => {
     expect(html).toContain("1 read, 1 command");
     expect(html).toContain('<details class="turn-tool-trace">');
     expect(html).not.toContain('<details class="turn-tool-trace" open="">');
+  });
+
+  it("keeps pre-tool assistant text inside the worked trace and only final text outside", () => {
+    const split = splitTurnAssistantParts([
+      {
+        id: "intro",
+        kind: "text",
+        text: "I will inspect these files first.",
+      },
+      {
+        id: "read1",
+        kind: "tool",
+        toolName: "Read",
+        displayKind: "context",
+        status: "ok",
+        title: "Read",
+        subtitle: "src/cli.ts",
+      },
+      {
+        id: "final",
+        kind: "text",
+        text: "Here is the first batch summary.",
+      },
+    ]);
+
+    expect(split.traceParts).toMatchObject([
+      { kind: "text", text: "I will inspect these files first." },
+      { kind: "tool", title: "Read" },
+    ]);
+    expect(split.finalParts).toMatchObject([
+      { kind: "text", text: "Here is the first batch summary." },
+    ]);
+
+    const html = renderToStaticMarkup(
+      React.createElement(TurnToolTrace, {
+        turn: {
+          id: "turn1",
+          userMessage: { id: "user1", text: "execute" },
+          createdAt: 1_000,
+          completedAt: 3_000,
+          completed: true,
+          mutationDiffs: [],
+          assistantParts: split.traceParts,
+        },
+      }),
+    );
+
+    expect(html).toContain("I will inspect these files first.");
+    expect(html).not.toContain("Here is the first batch summary.");
+  });
+
+  it("splits stored assistant text with tool calls from the later final assistant reply", () => {
+    const [turn] = buildTimelineFromMessages([
+      { role: "user", content: "execute" },
+      {
+        role: "assistant",
+        content: "I will inspect these files first.",
+        toolCalls: [{ id: "read1", name: "Read", input: { path: "src/cli.ts" } }],
+      },
+      {
+        role: "tool_result",
+        toolCallId: "read1",
+        toolName: "Read",
+        content: "1: import React from \"react\";",
+      },
+      {
+        role: "assistant",
+        content: "Here is the first batch summary.",
+      },
+    ]);
+
+    const split = splitTurnAssistantParts(turn?.assistantParts ?? []);
+
+    expect(split.traceParts).toMatchObject([
+      { kind: "text", text: "I will inspect these files first." },
+      { kind: "tool", title: "Read", status: "ok" },
+    ]);
+    expect(split.finalParts).toMatchObject([
+      { kind: "text", text: "Here is the first batch summary." },
+    ]);
   });
 });

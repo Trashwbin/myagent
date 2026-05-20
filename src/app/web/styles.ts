@@ -952,6 +952,35 @@ details.tool-details pre::-webkit-scrollbar-thumb,
   padding: 2px 0 12px;
 }
 
+.turn-trace-note,
+.turn-trace-status {
+  width: fit-content;
+  max-width: 100%;
+  color: #686868;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.turn-trace-note p {
+  margin: 0 0 4px;
+}
+
+.turn-trace-note p:last-child {
+  margin-bottom: 0;
+}
+
+.turn-trace-status {
+  color: var(--muted-soft);
+}
+
+.turn-trace-status.warning {
+  color: #8a6d1e;
+}
+
+.turn-trace-status.error {
+  color: #9b2c2c;
+}
+
 .tool-batch {
   max-width: 760px;
 }
