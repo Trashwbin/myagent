@@ -76,9 +76,21 @@ export type CanonicalModelEvent =
 
 export type ModelEvent = CanonicalModelEvent;
 
+export type MessagePhase = "commentary" | "final";
+
 export type MessagePart =
-  | { type: "text"; text: string; providerMetadata?: ProviderMetadata }
-  | { type: "reasoning"; text: string; providerMetadata?: ProviderMetadata }
+  | {
+      type: "text";
+      text: string;
+      phase?: MessagePhase;
+      providerMetadata?: ProviderMetadata;
+    }
+  | {
+      type: "reasoning";
+      text: string;
+      phase?: MessagePhase;
+      providerMetadata?: ProviderMetadata;
+    }
   | {
       type: "tool-call";
       id: string;

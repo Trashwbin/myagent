@@ -163,6 +163,55 @@ describe("web timeline reducer", () => {
     expect("streaming" in textParts[0]!).toBe(false);
   });
 
+  it("uses explicit assistant phases instead of guessing final text from position", () => {
+    const initial = buildTimelineFromMessages([{ role: "user", content: "inspect" }]);
+    const events: TurnEvent[] = [
+      { type: "assistant_text_started", phase: "commentary" },
+      { type: "assistant_text_delta", text: "I will inspect first.", phase: "commentary" },
+      { type: "assistant_text_finished", phase: "commentary" },
+      {
+        type: "assistant_message",
+        message: {
+          role: "assistant",
+          content: "I will inspect first.",
+          parts: [
+            { type: "text", text: "I will inspect first.", phase: "commentary" },
+          ],
+          toolCalls: [{ id: "read1", name: "Read", input: { path: "src/cli.ts" } }],
+        },
+      },
+      {
+        type: "tool_result",
+        message: {
+          role: "tool_result",
+          toolCallId: "read1",
+          toolName: "Read",
+          content: "1: import React from \"react\";",
+        },
+      },
+      {
+        type: "assistant_message",
+        message: {
+          role: "assistant",
+          content: "The final answer.",
+          parts: [{ type: "text", text: "The final answer.", phase: "final" }],
+        },
+      },
+    ];
+
+    const result = events.reduce(
+      (timeline, event) => applyTurnEvent(timeline, event),
+      initial,
+    );
+    const textParts =
+      result[0]?.assistantParts.filter((part) => part.kind === "text") ?? [];
+
+    expect(textParts).toMatchObject([
+      { text: "I will inspect first.", phase: "commentary" },
+      { text: "The final answer.", phase: "final" },
+    ]);
+  });
+
   it("does not mark a turn complete when only assistant text streaming finishes", () => {
     const initial = buildTimelineFromMessages([{ role: "user", content: "hi" }]);
     const streamingFinished = [
@@ -203,7 +252,9 @@ describe("web timeline reducer", () => {
     const parts = result[0]?.assistantParts ?? [];
 
     expect(parts.filter((part) => part.kind === "status")).toHaveLength(0);
-    expect(parts).toMatchObject([{ kind: "text", text: "Hello", streaming: false }]);
+    expect(parts).toMatchObject([
+      { kind: "text", text: "Hello", streaming: false, phase: "commentary" },
+    ]);
   });
 
   it("keeps context tools as context-kind parts and mutation tools as mutation-kind parts", () => {

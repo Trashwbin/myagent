@@ -281,6 +281,7 @@ describe("tool batch", () => {
         id: "intro",
         kind: "text",
         text: "I will inspect these files first.",
+        phase: "commentary",
       },
       {
         id: "read1",
@@ -295,6 +296,7 @@ describe("tool batch", () => {
         id: "final",
         kind: "text",
         text: "Here is the first batch summary.",
+        phase: "final",
       },
     ]);
 
@@ -330,6 +332,13 @@ describe("tool batch", () => {
       {
         role: "assistant",
         content: "I will inspect these files first.",
+        parts: [
+          {
+            type: "text",
+            text: "I will inspect these files first.",
+            phase: "commentary",
+          },
+        ],
         toolCalls: [{ id: "read1", name: "Read", input: { path: "src/cli.ts" } }],
       },
       {
@@ -341,6 +350,13 @@ describe("tool batch", () => {
       {
         role: "assistant",
         content: "Here is the first batch summary.",
+        parts: [
+          {
+            type: "text",
+            text: "Here is the first batch summary.",
+            phase: "final",
+          },
+        ],
       },
     ]);
 

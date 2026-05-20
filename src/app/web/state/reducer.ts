@@ -1,4 +1,4 @@
-import type { Message } from "../../../model/types.js";
+import type { Message, MessagePart, MessagePhase } from "../../../model/types.js";
 import type { ServerMessage } from "../../protocol.js";
 import type { TurnEvent } from "../../../session/loop.js";
 import type { ToolDisplay } from "../../../session/tool-display.js";
@@ -365,11 +365,27 @@ function appendAssistantMessage(
 ): TimelineTurn[] {
   return updateLastTurn(timeline, (turn) => {
     const nextParts = [...turn.assistantParts];
-    if (message.content.trim()) {
+    const messageParts = message.parts ?? [];
+    const textParts = messageParts.filter(
+      (part): part is Extract<MessagePart, { type: "text" | "reasoning" }> =>
+        part.type === "text" || part.type === "reasoning",
+    );
+    if (textParts.length > 0) {
+      for (const part of textParts) {
+        if (!part.text.trim()) continue;
+        nextParts.push({
+          id: `${turn.id}:assistant:${nextParts.length}`,
+          kind: "text",
+          text: part.text,
+          phase: part.phase,
+        });
+      }
+    } else if (message.content.trim()) {
       nextParts.push({
         id: `${turn.id}:assistant:${nextParts.length}`,
         kind: "text",
         text: message.content,
+        phase: message.toolCalls?.length ? "commentary" : undefined,
       });
     }
 
@@ -410,12 +426,17 @@ export function applyTurnEvent(
         const parts = [...turn.assistantParts];
         const last = parts[parts.length - 1];
         if (last?.kind === "text" && last.streaming) {
-          parts[parts.length - 1] = { ...last, text: last.text + event.text };
+          parts[parts.length - 1] = {
+            ...last,
+            text: last.text + event.text,
+            phase: event.phase ?? last.phase,
+          };
         } else {
           parts.push({
             id: `${turn.id}:stream`,
             kind: "text",
             text: event.text,
+            phase: event.phase ?? "commentary",
             streaming: true,
           });
         }
@@ -432,22 +453,31 @@ export function applyTurnEvent(
               : -1,
           )
           .filter((index) => index >= 0);
-        if (event.message.content.trim()) {
+        const textParts = assistantTextPartsFromMessage(event.message);
+        if (textParts.length > 0) {
           if (streamIndexes.length > 0) {
             const firstIndex = streamIndexes[0]!;
             const streamIndexSet = new Set(streamIndexes);
             parts = parts.filter((_, index) => !streamIndexSet.has(index));
-            parts.splice(firstIndex, 0, {
-              id: `${turn.id}:assistant:${firstIndex}`,
-              kind: "text",
-              text: event.message.content,
-            });
+            parts.splice(
+              firstIndex,
+              0,
+              ...textParts.map((part, offset) => ({
+                id: `${turn.id}:assistant:${firstIndex + offset}`,
+                kind: "text" as const,
+                text: part.text,
+                phase: part.phase,
+              })),
+            );
           } else {
-            parts.push({
-              id: `${turn.id}:assistant:${parts.length}`,
-              kind: "text",
-              text: event.message.content,
-            });
+            for (const part of textParts) {
+              parts.push({
+                id: `${turn.id}:assistant:${parts.length}`,
+                kind: "text",
+                text: part.text,
+                phase: part.phase,
+              });
+            }
           }
         } else if (streamIndexes.length > 0) {
           const streamIndexSet = new Set(streamIndexes);
@@ -526,6 +556,26 @@ export function applyTurnEvent(
     default:
       return timeline;
   }
+}
+
+function assistantTextPartsFromMessage(
+  message: Message,
+): Array<{ text: string; phase?: MessagePhase }> {
+  const parts = message.parts
+    ?.filter(
+      (part): part is Extract<MessagePart, { type: "text" | "reasoning" }> =>
+        part.type === "text" || part.type === "reasoning",
+    )
+    .filter((part) => part.text.trim())
+    .map((part) => ({ text: part.text, phase: part.phase }));
+  if (parts?.length) return parts;
+  if (!message.content.trim()) return [];
+  return [
+    {
+      text: message.content,
+      phase: message.toolCalls?.length ? "commentary" : undefined,
+    },
+  ];
 }
 
 function appendToolResult(

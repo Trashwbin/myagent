@@ -1,6 +1,7 @@
 import type { Provider } from "../model/provider.js";
 import type {
   CanonicalModelEvent,
+  MessagePhase,
   ModelEvent,
   ProviderMetadata,
   ToolSchema,
@@ -92,11 +93,11 @@ export type TurnEvent =
   | { type: "provider_stream_started" }
   | { type: "provider_step_started" }
   | { type: "provider_step_finished" }
-  | { type: "assistant_text_started" }
-  | { type: "assistant_text_finished" }
+  | { type: "assistant_text_started"; phase?: MessagePhase }
+  | { type: "assistant_text_finished"; phase?: MessagePhase }
   | { type: "assistant_reasoning_started" }
   | { type: "assistant_reasoning_finished" }
-  | { type: "assistant_text_delta"; text: string }
+  | { type: "assistant_text_delta"; text: string; phase?: MessagePhase }
   | { type: "tool_call"; id: string; name: string; input: unknown; display?: ToolDisplay }
   | { type: "assistant_message"; message: Message }
   | {
@@ -227,15 +228,21 @@ async function runAgentLoop(
                 : "end_turn";
           break;
         case "text-start":
-          if (onEvent) await onEvent({ type: "assistant_text_started" });
+          if (onEvent)
+            await onEvent({ type: "assistant_text_started", phase: "commentary" });
           break;
         case "text":
           assistantText += canonical.delta;
           if (onEvent)
-            await onEvent({ type: "assistant_text_delta", text: canonical.delta });
+            await onEvent({
+              type: "assistant_text_delta",
+              text: canonical.delta,
+              phase: "commentary",
+            });
           break;
         case "text-end":
-          if (onEvent) await onEvent({ type: "assistant_text_finished" });
+          if (onEvent)
+            await onEvent({ type: "assistant_text_finished", phase: "commentary" });
           break;
         case "reasoning-start":
           if (onEvent) await onEvent({ type: "assistant_reasoning_started" });
@@ -286,17 +293,22 @@ async function runAgentLoop(
       }
     }
 
+    const messagePhase: MessagePhase =
+      toolCalls.length > 0 ? "commentary" : "final";
     const parts = [
       ...(reasoningText
         ? [
             {
               type: "reasoning" as const,
               text: reasoningText,
+              phase: "commentary" as const,
               providerMetadata: reasoningMetadata,
             },
           ]
         : []),
-      ...(assistantText ? [{ type: "text" as const, text: assistantText }] : []),
+      ...(assistantText
+        ? [{ type: "text" as const, text: assistantText, phase: messagePhase }]
+        : []),
       ...toolCalls.map((tc) => ({
         type: "tool-call" as const,
         id: tc.id,

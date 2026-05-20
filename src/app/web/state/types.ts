@@ -62,6 +62,7 @@ export type TimelineTextPart = {
   id: string;
   kind: "text";
   text: string;
+  phase?: "commentary" | "final";
   streaming?: boolean;
 };
 

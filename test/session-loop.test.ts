@@ -81,7 +81,7 @@ describe("Session loop (runSession wrapper)", () => {
       role: "assistant",
       content: "Hello, world!",
       toolCalls: undefined,
-      parts: [{ type: "text", text: "Hello, world!" }],
+      parts: [{ type: "text", text: "Hello, world!", phase: "final" }],
       providerMetadata: undefined,
       providerRaw: undefined,
     });
@@ -281,8 +281,15 @@ describe("Session loop (runSession wrapper)", () => {
     expect(transcript).toHaveLength(4);
     expect(transcript[1].content).toBe("Let me check.");
     expect(transcript[1].toolCalls).toHaveLength(1);
+    expect(transcript[1].parts).toMatchObject([
+      { type: "text", text: "Let me check.", phase: "commentary" },
+      { type: "tool-call", id: "tc3" },
+    ]);
     expect(transcript[2].content).toBeTruthy();
     expect(transcript[3].content).toBe("Done.");
+    expect(transcript[3].parts).toMatchObject([
+      { type: "text", text: "Done.", phase: "final" },
+    ]);
   });
 
   it("preserves initial history before continuing", async () => {

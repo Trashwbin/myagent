@@ -10,7 +10,8 @@ export function splitTurnAssistantParts(parts: TimelinePart[]): {
   finalParts: TimelinePart[];
 } {
   const lastToolIndex = parts.findLastIndex((part) => part.kind === "tool");
-  if (lastToolIndex < 0) {
+  const hasExplicitPhase = parts.some((part) => part.kind === "text" && part.phase);
+  if (lastToolIndex < 0 && !hasExplicitPhase) {
     return {
       traceParts: [],
       finalParts: parts.filter((part) => part.kind !== "tool"),
@@ -21,6 +22,14 @@ export function splitTurnAssistantParts(parts: TimelinePart[]): {
   const finalParts: TimelinePart[] = [];
 
   parts.forEach((part, index) => {
+    if (part.kind === "text" && part.phase === "final") {
+      finalParts.push(part);
+      return;
+    }
+    if (part.kind === "text" && part.phase === "commentary") {
+      traceParts.push(part);
+      return;
+    }
     if (part.kind === "text" && index > lastToolIndex) {
       finalParts.push(part);
       return;
