@@ -20,6 +20,13 @@ type AiToolResultOutput =
   | { type: "text"; value: string }
   | { type: "json"; value: JsonValue };
 type ProviderOptions = Record<string, Record<string, JsonValue | undefined>>;
+const RESPONSE_OPTION_KEYS = [
+  "store",
+  "reasoningEffort",
+  "reasoningSummary",
+  "textVerbosity",
+  "systemMessageMode",
+] as const;
 
 function toAiProviderMetadata(metadata: ProviderMetadata | undefined): AiProviderMetadata | undefined {
   return metadata as AiProviderMetadata | undefined;
@@ -73,12 +80,37 @@ export function providerOptions(input: {
   }
 
   const previousResponseId = continuationResponseId(input.messages);
+  const configured = pickResponseOptions(input.config.options);
   return {
     openai: {
       store: true,
+      ...configured,
       ...(previousResponseId ? { previousResponseId } : {}),
     },
   };
+}
+
+function pickResponseOptions(options: Record<string, unknown> | undefined): Record<string, JsonValue | undefined> {
+  if (!options) return {};
+  const result: Record<string, JsonValue | undefined> = {};
+  for (const key of RESPONSE_OPTION_KEYS) {
+    if (isJsonValue(options[key])) result[key] = options[key];
+  }
+  return result;
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (typeof value !== "object") return false;
+  return Object.values(value as Record<string, unknown>).every(isJsonValue);
 }
 
 export function convertMessagesToUI(messages: Message[]): UIMessage[] {

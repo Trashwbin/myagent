@@ -376,6 +376,80 @@ describe("config resolution helpers", () => {
     });
   });
 
+  it("expands OpenCode model variants without changing the request model name", () => {
+    const config = {
+      model: "mimo/gpt-5.4/high",
+      provider: {
+        mimo: {
+          npm: "@ai-sdk/openai" as const,
+          options: {
+            baseURL: "https://openai.example/v1",
+            apiKey: "sk-openai",
+            mode: "responses" as const,
+            store: false,
+            systemMessageMode: "developer",
+          },
+          models: {
+            "gpt-5.4": {
+              name: "GPT-5.4",
+              options: {
+                reasoningSummary: "auto",
+                textVerbosity: "medium",
+              },
+              variants: {
+                low: {},
+                high: { textVerbosity: "high" },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    expect(resolveModelProfiles(config)).toEqual([
+      expect.objectContaining({
+        id: "mimo/gpt-5.4",
+        model: "gpt-5.4",
+        variants: ["low", "high"],
+        options: {
+          store: false,
+          systemMessageMode: "developer",
+          reasoningSummary: "auto",
+          textVerbosity: "medium",
+        },
+      }),
+      expect.objectContaining({
+        id: "mimo/gpt-5.4/low",
+        model: "gpt-5.4",
+        variant: "low",
+        options: {
+          store: false,
+          systemMessageMode: "developer",
+          reasoningSummary: "auto",
+          textVerbosity: "medium",
+          reasoningEffort: "low",
+        },
+      }),
+      expect.objectContaining({
+        id: "mimo/gpt-5.4/high",
+        model: "gpt-5.4",
+        variant: "high",
+        options: {
+          store: false,
+          systemMessageMode: "developer",
+          reasoningSummary: "auto",
+          textVerbosity: "high",
+          reasoningEffort: "high",
+        },
+      }),
+    ]);
+    expect(resolveModelProfile(config)).toMatchObject({
+      id: "mimo/gpt-5.4/high",
+      model: "gpt-5.4",
+      variant: "high",
+    });
+  });
+
   it("normalizes adapter-specific model modes", () => {
     const config = {
       provider: {

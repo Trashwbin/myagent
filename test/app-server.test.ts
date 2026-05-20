@@ -274,7 +274,7 @@ describe("HTTP API", () => {
           id: "openai",
           name: "openai",
           adapters: ["@ai-sdk/openai"],
-          defaultModel: "test-model",
+          defaultModel: "openai/test-model",
           models: [
             {
               id: "openai/test-model",
@@ -289,7 +289,7 @@ describe("HTTP API", () => {
         },
       ],
       connected: ["openai"],
-      default: { openai: "test-model" },
+      default: { openai: "openai/test-model" },
     });
     expect(JSON.stringify(data)).not.toContain("sk-test");
   });
@@ -308,7 +308,7 @@ describe("HTTP API", () => {
           id: "openai",
           name: "openai",
           adapters: ["@ai-sdk/openai"],
-          defaultModel: "test-model",
+          defaultModel: "openai/test-model",
           models: [
             {
               id: "openai/test-model",
@@ -323,7 +323,7 @@ describe("HTTP API", () => {
         },
       ],
       connected: ["openai"],
-      default: { openai: "test-model" },
+      default: { openai: "openai/test-model" },
       models: [
         {
           id: "openai/test-model",
@@ -1219,7 +1219,7 @@ describe("SessionManager", () => {
       {
         role: "assistant",
         content: "ok",
-        parts: [{ type: "text", text: "ok" }],
+        parts: [{ type: "text", text: "ok", phase: "final" }],
       },
     ]);
   });

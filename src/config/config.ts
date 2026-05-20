@@ -102,11 +102,14 @@ export type ModelProfile = {
   adapter: ProviderAdapter;
   model: string;
   name?: string;
+  variant?: string;
+  variants?: string[];
   baseUrl?: string;
   apiKey?: string;
   authToken?: string;
   maxOutputTokens?: number;
   mode?: ModelMode;
+  options?: Record<string, unknown>;
 };
 
 export function globalConfigPath(): string {
@@ -352,6 +355,17 @@ export function resolveModelProfiles(config: Config): ModelProfile[] {
       for (const [modelId, modelConfig] of Object.entries(models)) {
         const profile = buildModelProfile(provider, modelId, base, modelConfig);
         profiles.set(profile.id, profile);
+        for (const variant of getVariantNames(modelConfig)) {
+          const variantProfile = buildModelProfile(
+            provider,
+            modelId,
+            base,
+            modelConfig,
+            variant,
+            getVariantConfig(modelConfig, variant),
+          );
+          profiles.set(variantProfile.id, variantProfile);
+        }
       }
       continue;
     }
@@ -402,8 +416,8 @@ export function findModelProfile(
     return profiles.find(
       (profile) =>
         profile.provider === parsed.provider &&
-        (profile.id === `${parsed.provider}/${parsed.model}` ||
-          profile.model === parsed.model),
+        profile.variant === parsed.variant &&
+        (profile.id === profileId(parsed) || profile.model === parsed.model),
     );
   }
 
@@ -413,12 +427,14 @@ export function findModelProfile(
       profile.id.endsWith(`/${normalized}`) ||
       profile.name === normalized,
   );
+  const baseModel = byModel.find((profile) => profile.variant === undefined);
+  if (baseModel) return baseModel;
   return byModel.length === 1 ? byModel[0] : undefined;
 }
 
 export function defaultModelProfileId(config: Config): string {
   const parsed = parseModelProfileId(config.model);
-  if (parsed) return `${parsed.provider}/${parsed.model}`;
+  if (parsed) return profileId(parsed);
   const provider = legacyProviderName(config) ?? firstConfiguredProvider(config) ?? "openai";
   return `${provider}/${modelNameFromConfig(config, provider)}`;
 }
@@ -426,7 +442,7 @@ export function defaultModelProfileId(config: Config): string {
 function resolveProviderBaseConfig(
   config: Config,
   provider: ProviderName,
-): ProviderModelConfig & { adapter: ProviderAdapter } {
+): ProviderModelConfig & { adapter: ProviderAdapter; options?: Record<string, unknown> } {
   const providerConfig = getProviderConfig(config, provider);
   const options = getProviderOptions(providerConfig);
   return {
@@ -454,14 +470,17 @@ function resolveProviderBaseConfig(
       config.maxOutputTokens,
     ),
     mode: resolveConfigValue(getMode(options), getMode(providerConfig)),
+    ...withRuntimeOptions(runtimeOptions(options)),
   };
 }
 
 function buildModelProfile(
   provider: ProviderName,
   modelId: string,
-  base: ProviderModelConfig & { adapter: ProviderAdapter },
+  base: ProviderModelConfig & { adapter: ProviderAdapter; options?: Record<string, unknown> },
   modelConfig: ProviderModelConfig | OpenCodeModelConfig,
+  variant?: string,
+  variantConfig?: unknown,
 ): ModelProfile {
   const options = getProviderOptions(modelConfig);
   const model = getString(modelConfig, "model") ?? modelId;
@@ -470,39 +489,63 @@ function buildModelProfile(
     getAdapter(modelConfig, "npm"),
     base.adapter,
   )!;
+  const variantOptions = mergeRuntimeOptions(
+    inferredVariantOptions(variant),
+    getVariantRuntimeOptions(variantConfig),
+  );
+  const profileOptions = mergeRuntimeOptions(base.options, runtimeOptions(options), variantOptions);
+  const variants = getVariantNames(modelConfig);
   const mode = normalizeModelMode(
     adapter,
-    resolveConfigValue(getMode(options), getMode(modelConfig), base.mode),
+    resolveConfigValue(
+      getMode(getProviderOptions(variantConfig)),
+      getMode(variantConfig),
+      getMode(options),
+      getMode(modelConfig),
+      base.mode,
+    ),
   );
   return {
-    id: `${provider}/${modelId}`,
+    id: variant ? `${provider}/${modelId}/${variant}` : `${provider}/${modelId}`,
     provider,
     adapter,
     model,
     name: getString(modelConfig, "name"),
+    ...(variant ? { variant } : {}),
+    ...(variants.length > 0 ? { variants } : {}),
     baseUrl: resolveConfigValue(
+      getString(getProviderOptions(variantConfig), "baseURL"),
+      getString(getProviderOptions(variantConfig), "baseUrl"),
+      getString(variantConfig, "baseUrl"),
       getString(options, "baseURL"),
       getString(options, "baseUrl"),
       getString(modelConfig, "baseUrl"),
       base.baseUrl,
     ),
     apiKey: resolveConfigValue(
+      getString(getProviderOptions(variantConfig), "apiKey"),
+      getString(variantConfig, "apiKey"),
       getString(options, "apiKey"),
       getString(modelConfig, "apiKey"),
       base.apiKey,
     ),
     authToken: resolveConfigValue(
+      getString(getProviderOptions(variantConfig), "authToken"),
+      getString(variantConfig, "authToken"),
       getString(options, "authToken"),
       getString(modelConfig, "authToken"),
       base.authToken,
     ),
     maxOutputTokens: resolveConfigValue(
+      getPositiveInt(getProviderOptions(variantConfig), "maxOutputTokens"),
+      getPositiveInt(variantConfig, "maxOutputTokens"),
       getPositiveInt(options, "maxOutputTokens"),
       getPositiveInt(modelConfig, "maxOutputTokens"),
       getOutputLimit(modelConfig),
       base.maxOutputTokens,
     ),
     mode,
+    ...withRuntimeOptions(profileOptions),
   };
 }
 
@@ -522,13 +565,14 @@ function modelNameFromConfig(config: Config, provider: ProviderName): string {
 
 function parseModelProfileId(
   value: string | undefined,
-): { provider: ProviderName; model: string } | undefined {
+): { provider: ProviderName; model: string; variant?: string } | undefined {
   if (!value) return undefined;
-  const slash = value.indexOf("/");
-  if (slash <= 0 || slash === value.length - 1) return undefined;
-  const provider = value.slice(0, slash);
+  const parts = value.split("/");
+  if (parts.length < 2 || parts.length > 3) return undefined;
+  const [provider, model, variant] = parts;
+  if (!provider || !model) return undefined;
   if (!ProviderIdSchema.safeParse(provider).success) return undefined;
-  return { provider, model: value.slice(slash + 1) };
+  return { provider, model, ...(variant ? { variant } : {}) };
 }
 
 function normalizeModelProfileId(value: string): string {
@@ -589,6 +633,66 @@ function getProviderOptions(value: unknown): Record<string, unknown> | undefined
   return isRecord(value.options) ? value.options : undefined;
 }
 
+function runtimeOptions(value: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!value) return undefined;
+  const {
+    baseURL: _baseURL,
+    baseUrl: _baseUrl,
+    apiKey: _apiKey,
+    authToken: _authToken,
+    maxOutputTokens: _maxOutputTokens,
+    mode: _mode,
+    ...rest
+  } = value;
+  return Object.keys(rest).length > 0 ? rest : undefined;
+}
+
+function withRuntimeOptions(value: Record<string, unknown> | undefined): { options?: Record<string, unknown> } {
+  return value && Object.keys(value).length > 0 ? { options: value } : {};
+}
+
+function mergeRuntimeOptions(
+  ...values: Array<Record<string, unknown> | undefined>
+): Record<string, unknown> | undefined {
+  const merged: Record<string, unknown> = {};
+  for (const value of values) {
+    if (!value) continue;
+    Object.assign(merged, value);
+  }
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function getVariantConfig(value: unknown, variant: string): unknown {
+  if (!isRecord(value) || !isRecord(value.variants)) return undefined;
+  return value.variants[variant];
+}
+
+function getVariantNames(value: unknown): string[] {
+  if (!isRecord(value) || !isRecord(value.variants)) return [];
+  return Object.entries(value.variants)
+    .filter((entry): entry is [string, unknown] => entry[0].trim().length > 0)
+    .map(([variant]) => variant);
+}
+
+function getVariantRuntimeOptions(value: unknown): Record<string, unknown> | undefined {
+  return mergeRuntimeOptions(runtimeOptions(getProviderOptions(value)), runtimeOptions(isRecord(value) ? value : undefined));
+}
+
+function inferredVariantOptions(variant: string | undefined): Record<string, unknown> | undefined {
+  if (!variant) return undefined;
+  if (
+    variant === "none" ||
+    variant === "minimal" ||
+    variant === "low" ||
+    variant === "medium" ||
+    variant === "high" ||
+    variant === "xhigh"
+  ) {
+    return { reasoningEffort: variant };
+  }
+  return undefined;
+}
+
 function getModels(value: unknown): Record<string, ProviderModelConfig | OpenCodeModelConfig> | undefined {
   if (!isRecord(value) || !isRecord(value.models)) return undefined;
   return value.models as Record<string, ProviderModelConfig | OpenCodeModelConfig>;
@@ -619,4 +723,10 @@ function getMode(value: unknown): ModelMode | undefined {
 function getOutputLimit(value: unknown): number | undefined {
   if (!isRecord(value) || !isRecord(value.limit)) return undefined;
   return getPositiveInt(value.limit, "output");
+}
+
+function profileId(input: { provider: ProviderName; model: string; variant?: string }): string {
+  return input.variant
+    ? `${input.provider}/${input.model}/${input.variant}`
+    : `${input.provider}/${input.model}`;
 }

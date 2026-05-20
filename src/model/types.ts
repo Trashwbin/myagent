@@ -154,4 +154,5 @@ export type ProviderConfig = {
   authToken?: string;
   maxOutputTokens?: number;
   mode?: ProviderMode;
+  options?: Record<string, unknown>;
 };

@@ -17,6 +17,7 @@ export function createProviderFromProfile(profile: ModelProfile): Provider {
       apiKey: profile.apiKey,
       maxOutputTokens: profile.maxOutputTokens,
       mode: profile.mode,
+      options: profile.options,
     });
   }
 
@@ -33,6 +34,8 @@ export function createProviderFromProfile(profile: ModelProfile): Provider {
     apiKey: profile.apiKey,
     authToken: profile.authToken,
     maxOutputTokens: profile.maxOutputTokens,
+    mode: profile.mode,
+    options: profile.options,
   });
 }
 
@@ -44,18 +47,20 @@ export function publicModelProfile(profile: ModelProfile): {
   adapter: string;
   model: string;
   name?: string;
+  variant?: string;
+  variants?: string[];
   mode?: string;
 } {
-  const slash = profile.id.indexOf("/");
-  const modelID = slash >= 0 ? profile.id.slice(slash + 1) : profile.model;
   return {
     id: profile.id,
     provider: profile.provider,
     providerID: profile.provider,
-    modelID,
+    modelID: profile.model,
     adapter: profile.adapter,
     model: profile.model,
     name: profile.name ?? profile.model,
+    variant: profile.variant,
+    variants: profile.variants,
     mode: profile.mode,
   };
 }

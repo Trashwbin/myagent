@@ -81,7 +81,7 @@ export function App() {
     "";
   const selectedModel = state.providerConfig?.models.find((model) => model.id === selectedModelId);
   const modelLabel = selectedModel
-    ? `${selectedModel.providerID}/${selectedModel.modelID}`
+    ? `${selectedModel.providerID}/${selectedModel.modelID}${selectedModel.variant ? ` · ${selectedModel.variant}` : ""}`
     : selectedModelId || "model";
   const status = !state.wsOpen
     ? "connecting"
@@ -616,8 +616,8 @@ function modelChoices(
   return providerConfig.models.map((model) => ({
     type: "model" as const,
     id: model.id,
-    label: model.model || model.modelID || model.id,
-    description: `${model.providerID || model.provider}${model.name ? ` · ${model.name}` : ""}`,
+    label: `${model.model || model.modelID || model.id}${model.variant ? ` · ${model.variant}` : ""}`,
+    description: `${model.providerID || model.provider}${model.name ? ` · ${model.name}` : ""}${model.mode ? ` · ${model.mode}` : ""}`,
     active: model.id === selectedModelId,
   }));
 }

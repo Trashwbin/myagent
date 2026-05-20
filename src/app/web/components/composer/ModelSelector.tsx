@@ -122,12 +122,14 @@ function ProviderGroup({
 }
 
 function modelPrimaryLabel(model: ProviderModelSummary): string {
-  return model.model || model.modelID || model.id;
+  const label = model.model || model.modelID || model.id;
+  return model.variant ? `${label} · ${model.variant}` : label;
 }
 
 function modelDisplayName(model: ProviderModelSummary): string | undefined {
   const name = model.name?.trim();
-  return name && name !== modelPrimaryLabel(model) ? name : undefined;
+  const base = model.model || model.modelID || model.id;
+  return name && name !== base ? name : undefined;
 }
 
 function adapterLabel(adapter: string): string {

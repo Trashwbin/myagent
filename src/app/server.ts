@@ -89,7 +89,7 @@ function publicProviders(profiles: ModelProfile[]) {
     if (!provider.adapters.includes(profile.adapter)) {
       provider.adapters.push(profile.adapter);
     }
-    provider.defaultModel ??= publicModelProfile(profile).modelID;
+    provider.defaultModel ??= publicModelProfile(profile).id;
     provider.models.push(publicModelProfile(profile));
     providers.set(profile.provider, provider);
   }

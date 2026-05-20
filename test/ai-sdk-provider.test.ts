@@ -210,7 +210,18 @@ describe("AI SDK provider adapter", () => {
   it("builds OpenAI Responses continuation options", () => {
     expect(
       providerOptions({
-        config: { provider: "openai", model: "gpt-5" },
+        config: {
+          provider: "openai",
+          model: "gpt-5",
+          options: {
+            store: false,
+            reasoningEffort: "high",
+            reasoningSummary: "auto",
+            textVerbosity: "medium",
+            systemMessageMode: "developer",
+            apiKey: "sk-ignored",
+          },
+        },
         mode: "responses",
         messages: [
           {
@@ -222,10 +233,34 @@ describe("AI SDK provider adapter", () => {
       }),
     ).toEqual({
       openai: {
-        store: true,
+        store: false,
+        reasoningEffort: "high",
+        reasoningSummary: "auto",
+        textVerbosity: "medium",
+        systemMessageMode: "developer",
         previousResponseId: "resp_1",
       },
     });
+  });
+
+  it("does not send Responses-only provider options in chat mode", () => {
+    expect(
+      providerOptions({
+        config: {
+          provider: "openai",
+          model: "mimo-v2.5-pro",
+          options: {
+            store: false,
+            reasoningEffort: "high",
+            reasoningSummary: "auto",
+            textVerbosity: "high",
+            systemMessageMode: "developer",
+          },
+        },
+        mode: "chat",
+        messages: [],
+      }),
+    ).toEqual({});
   });
 
   it("maps AI SDK stream boundaries into model events", () => {

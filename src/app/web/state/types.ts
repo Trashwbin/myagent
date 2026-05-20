@@ -9,6 +9,8 @@ export type ProviderModelSummary = {
   adapter: string;
   model: string;
   name?: string;
+  variant?: string;
+  variants?: string[];
   mode?: string;
 };
 
