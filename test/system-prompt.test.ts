@@ -25,6 +25,18 @@ describe("system prompt", () => {
     expect(prompt).toContain("Always Read before write_file on existing files");
   });
 
+  it("contains coding-agent workflow guidance", () => {
+    const prompt = buildSystemPrompt("/tmp/workspace");
+
+    expect(prompt).toContain("Agent workflow:");
+    expect(prompt).toContain("Inspect the relevant files and current state");
+    expect(prompt).toContain("Keep working until the user's task is resolved");
+    expect(prompt).toContain("briefly state the current phase before a tool batch");
+    expect(prompt).toContain("reserve the final answer for the outcome");
+    expect(prompt).toContain("Validate changes with targeted checks");
+    expect(prompt).toContain("Keep final answers concise");
+  });
+
   it("contains approval and safety discipline", () => {
     const prompt = buildSystemPrompt("/tmp/workspace");
 

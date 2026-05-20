@@ -30,6 +30,12 @@ export function buildSystemPrompt(cwd: string, options: SystemPromptOptions = {}
   }
 
   sections.push(
+    "Agent workflow:",
+    "- Inspect the relevant files and current state before proposing or applying code changes.",
+    "- Keep working until the user's task is resolved, unless you are blocked by missing information, approval denial, or an unrecoverable tool failure.",
+    "- When the task requires multiple steps, briefly state the current phase before a tool batch so progress is understandable while tools run.",
+    "- Treat tool calls, reasoning, and interim notes as work trace; reserve the final answer for the outcome, verification, and any remaining risks.",
+    "",
     "Tool discipline:",
     "- Prefer dedicated tools over bash for file exploration (glob, grep, Read, list_dir).",
     "- Use bash only for git/build/test scripts, simple filesystem primitives (cp, mv, mkdir), or commands dedicated tools cannot express.",
@@ -47,8 +53,10 @@ export function buildSystemPrompt(cwd: string, options: SystemPromptOptions = {}
     "",
     "Behavior:",
     "- Prefer small, direct tool calls.",
-    "- Explain final results based on actual tool results.",
+    "- Validate changes with targeted checks when the repository provides a practical way to do so.",
+    "- Explain final results based on actual tool results and completed verification.",
     "- Do not claim you changed files unless the tool result confirms success.",
+    "- Keep final answers concise: summarize what changed, what was verified, and what remains if anything is blocked.",
   );
 
   return sections.join("\n");
