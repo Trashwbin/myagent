@@ -336,8 +336,9 @@ export function resolveProviderName(config: Config): ProviderName {
 export function resolveModelName(
   config: Config,
   provider: ProviderName,
-): string {
+): string | undefined {
   const model = modelNameFromConfig(config, provider);
+  if (!model) return undefined;
   return findModelProfile(resolveModelProfiles(config), `${provider}/${model}`)?.model ?? model;
 }
 
@@ -371,6 +372,7 @@ export function resolveModelProfiles(config: Config): ModelProfile[] {
     }
 
     const model = modelNameFromConfig(config, provider);
+    if (!model) continue;
     const profile = buildModelProfile(provider, model, base, { model });
     profiles.set(profile.id, profile);
   }
@@ -378,6 +380,7 @@ export function resolveModelProfiles(config: Config): ModelProfile[] {
   if (profiles.size === 0) {
     const provider = resolveProviderName(config);
     const model = modelNameFromConfig(config, provider);
+    if (!model) return [];
     const profile = buildModelProfile(
       provider,
       model,
@@ -390,7 +393,7 @@ export function resolveModelProfiles(config: Config): ModelProfile[] {
   return [...profiles.values()];
 }
 
-export function resolveModelProfile(config: Config, requestedId?: string): ModelProfile {
+export function resolveModelProfile(config: Config, requestedId?: string): ModelProfile | undefined {
   const profiles = resolveModelProfiles(config);
   const selectedId = requestedId ?? defaultModelProfileId(config);
   const selected = findModelProfile(profiles, selectedId);
@@ -399,7 +402,7 @@ export function resolveModelProfile(config: Config, requestedId?: string): Model
   const fallback = findModelProfile(profiles, defaultModelProfileId(config));
   if (fallback) return fallback;
 
-  return profiles[0]!;
+  return profiles[0];
 }
 
 export function findModelProfile(
@@ -432,11 +435,12 @@ export function findModelProfile(
   return byModel.length === 1 ? byModel[0] : undefined;
 }
 
-export function defaultModelProfileId(config: Config): string {
+export function defaultModelProfileId(config: Config): string | undefined {
   const parsed = parseModelProfileId(config.model);
   if (parsed) return profileId(parsed);
   const provider = legacyProviderName(config) ?? firstConfiguredProvider(config) ?? "openai";
-  return `${provider}/${modelNameFromConfig(config, provider)}`;
+  const model = modelNameFromConfig(config, provider);
+  return model ? `${provider}/${model}` : undefined;
 }
 
 function resolveProviderBaseConfig(
@@ -549,7 +553,7 @@ function buildModelProfile(
   };
 }
 
-function modelNameFromConfig(config: Config, provider: ProviderName): string {
+function modelNameFromConfig(config: Config, provider: ProviderName): string | undefined {
   const parsed = parseModelProfileId(config.model);
   if (parsed?.provider === provider) return parsed.model;
   const providerModel = getString(getProviderConfig(config, provider), "model");
@@ -558,9 +562,7 @@ function modelNameFromConfig(config: Config, provider: ProviderName): string {
     return stripProviderPrefix(config.model, provider);
   }
   if (!legacyProviderName(config) && config.model && !config.model.includes("/")) return config.model;
-  return isOpenAIAdapter(resolveProviderAdapter(config, provider))
-    ? "gpt-4o"
-    : "claude-sonnet-4-5";
+  return undefined;
 }
 
 function parseModelProfileId(

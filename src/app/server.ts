@@ -33,7 +33,7 @@ import type { DiscoverSkillsOptions } from "../skill/discovery.js";
 type AppServerDeps = {
   provider: Provider;
   providerName: string;
-  modelName: string;
+  modelName?: string;
   modelProfileId?: string;
   modelProfiles?: ModelProfile[];
   createProvider?: (profile: ModelProfile) => Provider;
@@ -50,8 +50,8 @@ type AppServerDeps = {
 type ResolvedAppRuntime = {
   provider: Provider;
   providerName: string;
-  modelName: string;
-  modelProfileId: string;
+  modelName?: string;
+  modelProfileId?: string;
   modelProfiles: ModelProfile[];
   createProvider: (profile: ModelProfile) => Provider;
   registry: ToolRegistry;
@@ -136,7 +136,7 @@ export function createAppServer(deps: AppServerDeps): Server {
         provider: runtime.provider,
         providerName: profile?.provider ?? session.provider ?? deps.providerName,
         modelName: profile?.model ?? session.model ?? deps.modelName,
-        modelProfileId: profile?.id ?? session.modelProfileId ?? deps.modelProfileId ?? `${deps.providerName}/${deps.modelName}`,
+        modelProfileId: profile?.id ?? session.modelProfileId ?? deps.modelProfileId,
         modelProfiles: runtime.modelProfiles,
         createProvider: runtime.createProvider,
         registry: runtime.registry,
@@ -163,9 +163,9 @@ export function createAppServer(deps: AppServerDeps): Server {
       const profile = resolveModelProfile(config, session.modelProfileId);
       return {
         provider: deps.provider,
-        providerName: profile.provider,
-        modelName: profile.model,
-        modelProfileId: profile.id,
+        providerName: profile?.provider ?? deps.providerName,
+        modelName: profile?.model ?? deps.modelName,
+        modelProfileId: profile?.id ?? deps.modelProfileId,
         modelProfiles,
         createProvider,
         approval: resolveApprovalMode(config),
@@ -346,7 +346,7 @@ export function createAppServer(deps: AppServerDeps): Server {
       if (path === "/config/providers" && req.method === "GET") {
         const providers = publicProviders(deps.modelProfiles ?? []);
         json(res, {
-          current: deps.modelProfileId ?? `${deps.providerName}/${deps.modelName}`,
+          current: deps.modelProfileId,
           providers,
           default: Object.fromEntries(
             providers

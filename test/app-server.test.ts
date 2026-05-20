@@ -772,6 +772,38 @@ describe("WebSocket", () => {
     expect(store.getSession(session.id)?.messages.some((m) => m.role === "user")).toBe(true);
   });
 
+  it("reports model configuration errors instead of using a fallback model", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/test" });
+    const port = await findAvailablePort(43200);
+    const server = createAppServer({
+      provider: throwingProvider(
+        new Error("No model configured. Add `model` or `provider.<name>.models` to your myAgent config."),
+      ),
+      providerName: "anthropic",
+      registry: new ToolRegistry(),
+      approval: "auto",
+      store,
+      cwd: "/test",
+    });
+    activeServers.push(server);
+    await new Promise<void>((resolve) => {
+      server.listen(port, "127.0.0.1", () => resolve());
+    });
+
+    const messages = await wsCollect(port, (ws) => {
+      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+      ws.send(JSON.stringify({ type: "user_message", sessionId: session.id, text: "hi" }));
+    }, (msg) => msg.type === "error" && msg.code === "TURN_ERROR");
+
+    expect(messages.find((msg) => msg.type === "error")).toMatchObject({
+      type: "error",
+      code: "TURN_ERROR",
+      message: "Turn failed: No model configured. Add `model` or `provider.<name>.models` to your myAgent config.",
+    });
+  });
+
   it("refreshes project skills on the next turn without rebuilding the provider", async () => {
     const base = await tmpBaseDir();
     const workspace = await mkdtemp(join(tmpdir(), "myagent-app-skill-refresh-"));

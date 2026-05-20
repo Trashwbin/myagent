@@ -281,9 +281,10 @@ describe("config resolution helpers", () => {
     });
   });
 
-  it("falls back to provider-specific defaults for model names", () => {
-    expect(resolveModelName({}, "openai")).toBe("gpt-4o");
-    expect(resolveModelName({}, "anthropic")).toBe("claude-sonnet-4-5");
+  it("does not synthesize provider model defaults when no model is configured", () => {
+    expect(resolveModelName({}, "openai")).toBeUndefined();
+    expect(resolveModelName({}, "anthropic")).toBeUndefined();
+    expect(resolveModelProfiles({ provider: { anthropic: { npm: "@ai-sdk/anthropic" } } })).toEqual([]);
   });
 
   it("defaults approval mode to auto", () => {

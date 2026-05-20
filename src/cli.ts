@@ -295,14 +295,14 @@ async function handleSessionCommand(
 }
 
 function createProvider(config: Config): Provider {
-  return createProviderForProfile(resolveModelProfile(config));
+  return createProviderForProfile(requireModelProfile(config));
 }
 
 function createAppBootstrapProvider(): Provider {
   return {
     name: "app-bootstrap",
     async *stream() {
-      throw new Error("No project session runtime is available for this request.");
+      throw new Error("No model configured. Add `model` or `provider.<name>.models` to your myAgent config.");
     },
   };
 }
@@ -316,12 +316,19 @@ function createProviderForProfile(profile: ModelProfile): Provider {
   }
 }
 
+function requireModelProfile(config: Config, requestedId?: string): ModelProfile {
+  const profile = resolveModelProfile(config, requestedId);
+  if (profile) return profile;
+  console.error("No model configured. Add `model` or `provider.<name>.models` to your myAgent config.");
+  process.exit(1);
+}
+
 function resolveSessionProvider(config: Config): {
   provider: ProviderName;
   model: string;
   modelProfileId: string;
 } {
-  const profile = resolveModelProfile(config);
+  const profile = requireModelProfile(config);
   return {
     provider: profile.provider,
     model: profile.model,
@@ -497,7 +504,7 @@ async function handleResume(sessionId: string, options: { cwd: string }): Promis
     cwd = session.cwd;
     config = loadConfig({ workspaceRoot: cwd });
     const modelProfiles = resolveModelProfiles(config);
-    const activeProfile = resolveModelProfile(config, session.modelProfileId);
+    const activeProfile = requireModelProfile(config, session.modelProfileId);
     const provider = createProviderForProfile(activeProfile);
     await chatMode(
       provider,
@@ -577,8 +584,8 @@ async function handleInputDebug(): Promise<void> {
 async function handleApp(options: { cwd: string }): Promise<void> {
   const fallbackProjectPath = canonicalWorkspaceRoot(options.cwd);
   const config = loadGlobalConfig();
-  const resolved = resolveSessionProvider(config);
   const modelProfiles = resolveModelProfiles(config);
+  const activeProfile = resolveModelProfile(config);
   const provider = createAppBootstrapProvider();
   const registry = buildDefaultRegistry();
   const store = openStore();
@@ -587,9 +594,9 @@ async function handleApp(options: { cwd: string }): Promise<void> {
   const port = await findAvailablePort(43110);
   const server = createAppServer({
     provider,
-    providerName: resolved.provider,
-    modelName: resolved.model,
-    modelProfileId: resolved.modelProfileId,
+    providerName: activeProfile?.provider ?? "openai",
+    modelName: activeProfile?.model,
+    modelProfileId: activeProfile?.id,
     modelProfiles,
     createProvider: createProviderForProfile,
     registry,
