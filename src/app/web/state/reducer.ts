@@ -158,7 +158,7 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
         ),
         timelines: {
           ...state.timelines,
-          [message.sessionId]: finalizeStreamingText(
+          [message.sessionId]: finishTimelineTurn(
             state.timelines[message.sessionId] ?? [],
           ),
         },
@@ -390,24 +390,23 @@ export function applyTurnEvent(
   switch (event.type) {
     case "provider_stream_started":
     case "provider_step_started":
-      return ensureTimelineTurn(timeline);
     case "provider_step_finished":
-      return timeline;
+      return ensureActiveTimelineTurn(timeline);
     case "assistant_text_started":
-      return removeStatus(ensureTimelineTurn(timeline), "provider:reasoning");
+      return removeStatus(ensureActiveTimelineTurn(timeline), "provider:reasoning");
     case "assistant_text_finished":
-      return finalizeStreamingText(ensureTimelineTurn(timeline));
+      return finalizeStreamingText(ensureActiveTimelineTurn(timeline));
     case "assistant_reasoning_started":
       return appendOrReplaceStatus(
-        ensureTimelineTurn(timeline),
+        ensureActiveTimelineTurn(timeline),
         "info",
         "Thinking...",
         "provider:reasoning",
       );
     case "assistant_reasoning_finished":
-      return removeStatus(ensureTimelineTurn(timeline), "provider:reasoning");
+      return removeStatus(ensureActiveTimelineTurn(timeline), "provider:reasoning");
     case "assistant_text_delta":
-      return updateLastTurn(ensureTimelineTurn(timeline), (turn) => {
+      return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => {
         const parts = [...turn.assistantParts];
         const last = parts[parts.length - 1];
         if (last?.kind === "text" && last.streaming) {
@@ -423,7 +422,7 @@ export function applyTurnEvent(
         return { ...turn, assistantParts: parts };
       });
     case "assistant_message":
-      return updateLastTurn(ensureTimelineTurn(timeline), (turn) => {
+      return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => {
         let parts = [...turn.assistantParts];
         const streamIndexes = parts
           .map((part, index) =>
@@ -465,7 +464,7 @@ export function applyTurnEvent(
         return { ...turn, assistantParts: parts };
       });
     case "tool_call":
-      return updateLastTurn(ensureTimelineTurn(timeline), (turn) => ({
+      return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => ({
         ...turn,
         assistantParts: upsertToolPart(
           [...turn.assistantParts],
@@ -473,7 +472,7 @@ export function applyTurnEvent(
         ),
       }));
     case "tool_started":
-      return updateLastTurn(ensureTimelineTurn(timeline), (turn) => ({
+      return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => ({
         ...turn,
         assistantParts: upsertToolPart(
           [...turn.assistantParts],
@@ -481,7 +480,7 @@ export function applyTurnEvent(
         ),
       }));
     case "tool_approval_required":
-      return updateLastTurn(ensureTimelineTurn(timeline), (turn) => ({
+      return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => ({
         ...turn,
         assistantParts: upsertToolPart([...turn.assistantParts], {
           ...createToolPart(
@@ -498,7 +497,7 @@ export function applyTurnEvent(
         }),
       }));
     case "tool_approval_decision":
-      return updateLastTurn(ensureTimelineTurn(timeline), (turn) => ({
+      return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => ({
         ...turn,
         assistantParts: upsertToolPartDecision(
           [...turn.assistantParts],
@@ -518,12 +517,12 @@ export function applyTurnEvent(
       );
     case "turn_truncated":
       return appendStatus(
-        ensureTimelineTurn(timeline),
+        ensureActiveTimelineTurn(timeline),
         "warning",
         "Turn stopped because the model hit its output token limit.",
       );
     case "turn_finished":
-      return finalizeStreamingText(timeline);
+      return finishTimelineTurn(timeline);
     default:
       return timeline;
   }
@@ -579,14 +578,28 @@ function ensureTimelineTurn(timeline: TimelineTurn[]): TimelineTurn[] {
   return [createTurn("synthetic:0", "")];
 }
 
+function ensureActiveTimelineTurn(timeline: TimelineTurn[]): TimelineTurn[] {
+  return updateLastTurn(ensureTimelineTurn(timeline), (turn) => ({
+    ...turn,
+    completed: false,
+    completedAt: undefined,
+  }));
+}
+
 function finalizeStreamingText(timeline: TimelineTurn[]): TimelineTurn[] {
   return updateLastTurn(timeline, (turn) => ({
     ...turn,
-    completed: true,
-    completedAt: turn.completedAt ?? Date.now(),
     assistantParts: turn.assistantParts.map((part) =>
       part.kind === "text" && part.streaming ? { ...part, streaming: false } : part,
     ),
+  }));
+}
+
+function finishTimelineTurn(timeline: TimelineTurn[]): TimelineTurn[] {
+  return updateLastTurn(finalizeStreamingText(timeline), (turn) => ({
+    ...turn,
+    completed: true,
+    completedAt: turn.completedAt ?? Date.now(),
   }));
 }
 

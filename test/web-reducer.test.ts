@@ -163,6 +163,26 @@ describe("web timeline reducer", () => {
     expect("streaming" in textParts[0]!).toBe(false);
   });
 
+  it("does not mark a turn complete when only assistant text streaming finishes", () => {
+    const initial = buildTimelineFromMessages([{ role: "user", content: "hi" }]);
+    const streamingFinished = [
+      { type: "assistant_text_started" },
+      { type: "assistant_text_delta", text: "I will inspect this." },
+      { type: "assistant_text_finished" },
+    ].reduce(
+      (timeline, event) => applyTurnEvent(timeline, event as TurnEvent),
+      initial,
+    );
+
+    expect(streamingFinished[0]?.completed).toBe(false);
+    expect(streamingFinished[0]?.completedAt).toBeUndefined();
+
+    const turnFinished = applyTurnEvent(streamingFinished, { type: "turn_finished" });
+
+    expect(turnFinished[0]?.completed).toBe(true);
+    expect(turnFinished[0]?.completedAt).toBeTypeOf("number");
+  });
+
   it("consumes stream boundary events without leaving status noise", () => {
     const initial = buildTimelineFromMessages([{ role: "user", content: "hi" }]);
     const events: TurnEvent[] = [
