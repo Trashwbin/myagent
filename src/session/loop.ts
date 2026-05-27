@@ -3,6 +3,7 @@ import type {
   CanonicalModelEvent,
   MessagePhase,
   ModelEvent,
+  ModelUsage,
   ProviderMetadata,
   ToolSchema,
 } from "../model/types.js";
@@ -93,6 +94,7 @@ export type TurnEvent =
   | { type: "provider_stream_started" }
   | { type: "provider_step_started" }
   | { type: "provider_step_finished" }
+  | { type: "provider_usage"; usage: ModelUsage }
   | { type: "assistant_text_started"; phase?: MessagePhase }
   | { type: "assistant_text_finished"; phase?: MessagePhase }
   | { type: "assistant_reasoning_started" }
@@ -199,6 +201,7 @@ async function runAgentLoop(
     let reasoningMetadata: ProviderMetadata | undefined;
     let assistantRaw: unknown;
     let providerMetadata: ProviderMetadata | undefined;
+    let latestUsage: ModelUsage | undefined;
     const toolCalls: Array<{
       id: string;
       name: string;
@@ -219,6 +222,10 @@ async function runAgentLoop(
           break;
         case "step-finish":
           if (onEvent) await onEvent({ type: "provider_step_finished" });
+          if (onEvent && canonical.usage) {
+            latestUsage = canonical.usage;
+            await onEvent({ type: "provider_usage", usage: canonical.usage });
+          }
           providerMetadata = canonical.providerMetadata;
           lastStopReason =
             canonical.reason === "tool-calls"
@@ -279,6 +286,10 @@ async function runAgentLoop(
         case "tool-result":
           break;
         case "finish":
+          if (onEvent && canonical.usage) {
+            latestUsage = canonical.usage;
+            await onEvent({ type: "provider_usage", usage: canonical.usage });
+          }
           providerMetadata = canonical.providerMetadata;
           lastStopReason =
             canonical.reason === "tool-calls"
@@ -293,8 +304,7 @@ async function runAgentLoop(
       }
     }
 
-    const messagePhase: MessagePhase =
-      toolCalls.length > 0 ? "commentary" : "final";
+    const messagePhase: MessagePhase = toolCalls.length > 0 ? "commentary" : "final";
     const parts = [
       ...(reasoningText
         ? [
@@ -324,6 +334,7 @@ async function runAgentLoop(
       content: assistantText,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       parts: parts.length > 0 ? parts : undefined,
+      usage: latestUsage,
       providerMetadata,
       providerRaw: assistantRaw ?? providerRawFromMetadata(providerMetadata),
     };

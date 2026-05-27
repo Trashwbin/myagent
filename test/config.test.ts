@@ -109,7 +109,10 @@ describe("loadConfig", () => {
     await mkdir(homeDir, { recursive: true });
     await writeFile(
       join(homeDir, "config.json"),
-      JSON.stringify({ provider: { openai: { models: { "gpt-4o": {} } } }, model: "openai/gpt-4o" }),
+      JSON.stringify({
+        provider: { openai: { models: { "gpt-4o": {} } } },
+        model: "openai/gpt-4o",
+      }),
     );
 
     const original = process.env.MYAGENT_HOME;
@@ -149,8 +152,14 @@ describe("loadConfig", () => {
   it("prefers config.json over legacy settings.json in the same layer", async () => {
     const myagentDir = join(tmp, ".myagent");
     await mkdir(myagentDir, { recursive: true });
-    await writeFile(join(myagentDir, "settings.json"), JSON.stringify({ provider: "anthropic" }));
-    await writeFile(join(myagentDir, "config.json"), JSON.stringify({ provider: "openai" }));
+    await writeFile(
+      join(myagentDir, "settings.json"),
+      JSON.stringify({ provider: "anthropic" }),
+    );
+    await writeFile(
+      join(myagentDir, "config.json"),
+      JSON.stringify({ provider: "openai" }),
+    );
 
     const original = process.env.MYAGENT_HOME;
     process.env.MYAGENT_HOME = join(tmp, "empty-home");
@@ -195,7 +204,10 @@ describe("loadConfig", () => {
     await mkdir(myagentDir, { recursive: true });
     await writeFile(
       join(myagentDir, "config.json"),
-      JSON.stringify({ approval: "auto", provider: { openai: { models: { "gpt-4o": {} } } } }),
+      JSON.stringify({
+        approval: "auto",
+        provider: { openai: { models: { "gpt-4o": {} } } },
+      }),
     );
     await writeFile(
       join(myagentDir, "config.local.json"),
@@ -284,7 +296,9 @@ describe("config resolution helpers", () => {
   it("does not synthesize provider model defaults when no model is configured", () => {
     expect(resolveModelName({}, "openai")).toBeUndefined();
     expect(resolveModelName({}, "anthropic")).toBeUndefined();
-    expect(resolveModelProfiles({ provider: { anthropic: { npm: "@ai-sdk/anthropic" } } })).toEqual([]);
+    expect(
+      resolveModelProfiles({ provider: { anthropic: { npm: "@ai-sdk/anthropic" } } }),
+    ).toEqual([]);
   });
 
   it("defaults approval mode to auto", () => {
@@ -339,6 +353,7 @@ describe("config resolution helpers", () => {
         apiKey: "sk-openai",
         authToken: undefined,
         maxOutputTokens: 2048,
+        contextWindow: undefined,
         mode: "chat",
       },
       {
@@ -351,6 +366,7 @@ describe("config resolution helpers", () => {
         apiKey: "sk-openai",
         authToken: undefined,
         maxOutputTokens: undefined,
+        contextWindow: undefined,
         mode: "responses",
       },
       {
@@ -363,6 +379,7 @@ describe("config resolution helpers", () => {
         apiKey: undefined,
         authToken: "sk-ant",
         maxOutputTokens: undefined,
+        contextWindow: undefined,
         mode: "messages",
       },
     ]);
@@ -393,6 +410,7 @@ describe("config resolution helpers", () => {
           models: {
             "gpt-5.4": {
               name: "GPT-5.4",
+              limit: { context: 1050000, output: 128000 },
               options: {
                 reasoningSummary: "auto",
                 textVerbosity: "medium",
@@ -412,6 +430,8 @@ describe("config resolution helpers", () => {
         id: "mimo/gpt-5.4",
         model: "gpt-5.4",
         variants: ["low", "high"],
+        contextWindow: 1050000,
+        maxOutputTokens: 128000,
         options: {
           store: false,
           systemMessageMode: "developer",
@@ -423,6 +443,8 @@ describe("config resolution helpers", () => {
         id: "mimo/gpt-5.4/low",
         model: "gpt-5.4",
         variant: "low",
+        contextWindow: 1050000,
+        maxOutputTokens: 128000,
         options: {
           store: false,
           systemMessageMode: "developer",
@@ -435,6 +457,8 @@ describe("config resolution helpers", () => {
         id: "mimo/gpt-5.4/high",
         model: "gpt-5.4",
         variant: "high",
+        contextWindow: 1050000,
+        maxOutputTokens: 128000,
         options: {
           store: false,
           systemMessageMode: "developer",

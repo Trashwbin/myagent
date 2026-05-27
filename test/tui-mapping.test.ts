@@ -143,6 +143,14 @@ describe("eventToRows", () => {
     expect(eventToRows(event)).toEqual([]);
   });
 
+  it("maps provider_usage to no rows", () => {
+    const event: TurnEvent = {
+      type: "provider_usage",
+      usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+    };
+    expect(eventToRows(event)).toEqual([]);
+  });
+
   it("maps approval with sensitive metadata", () => {
     const event: TurnEvent = {
       type: "tool_approval_required",

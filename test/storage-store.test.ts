@@ -272,6 +272,30 @@ describe("appendMessages + getSession", () => {
     await cleanup();
   });
 
+  it("roundtrips assistant token usage", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/tmp/ws" });
+    store.appendMessages(session.id, [
+      {
+        role: "assistant",
+        content: "done",
+        usage: {
+          inputTokens: 1200,
+          outputTokens: 80,
+          totalTokens: 1280,
+        },
+      },
+    ]);
+    const restored = store.getSession(session.id)!;
+    expect(restored.messages[0]?.usage).toEqual({
+      inputTokens: 1200,
+      outputTokens: 80,
+      totalTokens: 1280,
+    });
+    await cleanup();
+  });
+
   it("roundtrips tool_result toolCallId and toolName", async () => {
     const base = await tmpBaseDir();
     const store = openTestStore(base);
@@ -368,13 +392,39 @@ describe("appendMessages + getSession", () => {
     const store = openTestStore(base);
     const session = store.createSession({ workspaceRoot: "/tmp/ws" });
     store.appendMessages(session.id, [
-      { role: "summary", content: "Older context summary." },
+      {
+        role: "summary",
+        content: "Older context summary.",
+        parts: [
+          {
+            type: "compaction",
+            summary: "Older context summary.",
+            compactedCount: 5,
+            retainedCount: 2,
+            beforeTokens: 10_000,
+            afterTokens: 2_000,
+          },
+        ],
+      },
       { role: "user", content: "continue" },
     ]);
 
     const restored = store.getSession(session.id)!;
     expect(restored.messages).toEqual([
-      { role: "summary", content: "Older context summary." },
+      {
+        role: "summary",
+        content: "Older context summary.",
+        parts: [
+          {
+            type: "compaction",
+            summary: "Older context summary.",
+            compactedCount: 5,
+            retainedCount: 2,
+            beforeTokens: 10_000,
+            afterTokens: 2_000,
+          },
+        ],
+      },
       { role: "user", content: "continue" },
     ]);
     await cleanup();

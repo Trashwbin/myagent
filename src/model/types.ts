@@ -10,6 +10,19 @@ export type ModelUsage = {
   providerMetadata?: ProviderMetadata;
 };
 
+export type SessionContextUsageSource = "provider" | "estimate" | "unknown";
+
+export type SessionContextUsage = {
+  contextWindow?: number;
+  lastUsage?: ModelUsage;
+  totalUsage?: ModelUsage;
+  usedTokens?: number;
+  remainingTokens?: number;
+  percentFull?: number;
+  source: SessionContextUsageSource;
+  updatedAt?: number;
+};
+
 export type ModelFinishReason = "stop" | "tool-calls" | "length" | "error";
 
 export type CanonicalModelEvent =
@@ -107,6 +120,18 @@ export type MessagePart =
       isError?: boolean;
       display?: ToolDisplay;
       providerMetadata?: ProviderMetadata;
+    }
+  | {
+      type: "compaction";
+      summary: string;
+      compactedCount?: number;
+      retainedCount?: number;
+      previousSummaryUsed?: boolean;
+      transcriptTruncated?: boolean;
+      beforeTokens?: number;
+      afterTokens?: number;
+      createdAt?: number;
+      providerMetadata?: ProviderMetadata;
     };
 
 export type MessageToolCall = {
@@ -126,6 +151,7 @@ export type Message = {
   toolDisplay?: ToolDisplay;
   checkpointId?: string;
   parts?: MessagePart[];
+  usage?: ModelUsage;
   providerMetadata?: ProviderMetadata;
   providerRaw?: unknown;
 };

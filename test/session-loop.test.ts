@@ -649,10 +649,16 @@ describe("TurnEvent ordering", () => {
     ]);
 
     const { events, onEvent } = captureEvents();
-    await runTurn(provider, new ToolRegistry(), makeSession(process.cwd()), "hi", {
-      approval: "auto",
-      onEvent,
-    });
+    const result = await runTurn(
+      provider,
+      new ToolRegistry(),
+      makeSession(process.cwd()),
+      "hi",
+      {
+        approval: "auto",
+        onEvent,
+      },
+    );
 
     const types = events.map((e) => e.type);
     const firstDelta = types.indexOf("assistant_text_delta");
@@ -711,6 +717,53 @@ describe("TurnEvent ordering", () => {
         { type: "reasoning", text: "Need answer." },
         { type: "text", text: "Hello" },
       ],
+    });
+  });
+
+  it("emits provider usage events from stream finish events", async () => {
+    const provider = new FakeProvider([
+      [
+        { type: "text", delta: "Hello" },
+        {
+          type: "finish",
+          reason: "stop",
+          usage: {
+            inputTokens: 10,
+            outputTokens: 3,
+            totalTokens: 13,
+          },
+        },
+      ],
+    ]);
+
+    const { events, onEvent } = captureEvents();
+    const result = await runTurn(
+      provider,
+      new ToolRegistry(),
+      makeSession(process.cwd()),
+      "hi",
+      {
+        approval: "auto",
+        onEvent,
+      },
+    );
+
+    expect(events).toContainEqual({
+      type: "provider_usage",
+      usage: {
+        inputTokens: 10,
+        outputTokens: 3,
+        totalTokens: 13,
+      },
+    });
+    expect(result.newMessages[1]).toMatchObject({
+      role: "assistant",
+      content: "Hello",
+      usage: {
+        inputTokens: 10,
+        outputTokens: 3,
+        totalTokens: 13,
+      },
     });
   });
 
@@ -937,10 +990,16 @@ describe("TurnEvent ordering", () => {
     registry.register(createSkillTool([skill]));
 
     const { events, onEvent } = captureEvents();
-    const { newMessages } = await runTurn(provider, registry, makeSession(tmp), "review", {
-      approval: "auto",
-      onEvent,
-    });
+    const { newMessages } = await runTurn(
+      provider,
+      registry,
+      makeSession(tmp),
+      "review",
+      {
+        approval: "auto",
+        onEvent,
+      },
+    );
 
     const call = events.find((event) => event.type === "tool_call") as Extract<
       TurnEvent,

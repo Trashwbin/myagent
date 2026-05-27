@@ -3,7 +3,10 @@ import { AiSdkProvider } from "./ai-sdk-provider.js";
 import type { Provider } from "./provider.js";
 
 export function createProviderFromProfile(profile: ModelProfile): Provider {
-  if (profile.adapter === "@ai-sdk/openai" || profile.adapter === "@ai-sdk/openai-compatible") {
+  if (
+    profile.adapter === "@ai-sdk/openai" ||
+    profile.adapter === "@ai-sdk/openai-compatible"
+  ) {
     if (!profile.apiKey) {
       throw new Error(
         `Model ${profile.id} requires apiKey in config.provider.${profile.provider}.options or the model profile.`,
@@ -49,6 +52,7 @@ export function publicModelProfile(profile: ModelProfile): {
   name?: string;
   variant?: string;
   variants?: string[];
+  contextWindow?: number;
   mode?: string;
 } {
   return {
@@ -61,6 +65,7 @@ export function publicModelProfile(profile: ModelProfile): {
     name: profile.name ?? profile.model,
     variant: profile.variant,
     variants: profile.variants,
+    contextWindow: profile.contextWindow,
     mode: profile.mode,
   };
 }

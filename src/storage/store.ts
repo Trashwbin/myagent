@@ -29,10 +29,7 @@ export type SessionRow = {
 };
 
 export type TranscriptStore = {
-  upsertProject(input: {
-    path: string;
-    name?: string;
-  }): ProjectRow;
+  upsertProject(input: { path: string; name?: string }): ProjectRow;
   getProject(path: string): ProjectRow | undefined;
   listProjects(): ProjectRow[];
   deleteProject(path: string): void;
@@ -107,6 +104,7 @@ function serializeMessage(msg: Message): Record<string, unknown> {
     tool_calls_json: msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
     tool_display_json: msg.toolDisplay ? JSON.stringify(msg.toolDisplay) : null,
     parts_json: msg.parts ? JSON.stringify(msg.parts) : null,
+    usage_json: msg.usage ? JSON.stringify(msg.usage) : null,
     provider_metadata_json: msg.providerMetadata
       ? JSON.stringify(msg.providerMetadata)
       : null,
@@ -124,12 +122,15 @@ function deserializeMessage(row: Record<string, unknown>): Message {
   if (row.tool_call_id) msg.toolCallId = row.tool_call_id as string;
   if (row.tool_name) msg.toolName = row.tool_name as string;
   if (row.tool_calls_json) msg.toolCalls = JSON.parse(row.tool_calls_json as string);
-  if (row.tool_display_json) msg.toolDisplay = JSON.parse(row.tool_display_json as string);
+  if (row.tool_display_json)
+    msg.toolDisplay = JSON.parse(row.tool_display_json as string);
   if (row.parts_json) msg.parts = JSON.parse(row.parts_json as string);
+  if (row.usage_json) msg.usage = JSON.parse(row.usage_json as string);
   if (row.provider_metadata_json) {
     msg.providerMetadata = JSON.parse(row.provider_metadata_json as string);
   }
-  if (row.provider_raw_json) msg.providerRaw = JSON.parse(row.provider_raw_json as string);
+  if (row.provider_raw_json)
+    msg.providerRaw = JSON.parse(row.provider_raw_json as string);
   if (row.checkpoint_id) msg.checkpointId = row.checkpoint_id as string;
   return msg;
 }
@@ -185,6 +186,7 @@ export function openStore(options?: StoreOptions): TranscriptStore {
     tool_calls_json TEXT,
     tool_display_json TEXT,
     parts_json TEXT,
+    usage_json TEXT,
     provider_metadata_json TEXT,
     provider_raw_json TEXT,
     checkpoint_id TEXT,
@@ -211,6 +213,12 @@ export function openStore(options?: StoreOptions): TranscriptStore {
 
   try {
     db.exec("ALTER TABLE messages ADD COLUMN parts_json TEXT");
+  } catch {
+    // Existing databases already have the column.
+  }
+
+  try {
+    db.exec("ALTER TABLE messages ADD COLUMN usage_json TEXT");
   } catch {
     // Existing databases already have the column.
   }
@@ -243,9 +251,10 @@ export function openStore(options?: StoreOptions): TranscriptStore {
   }
 
   function projectRows(): ProjectRow[] {
-    const explicitRows = db
-      .prepare("SELECT * FROM projects")
-      .all() as Record<string, unknown>[];
+    const explicitRows = db.prepare("SELECT * FROM projects").all() as Record<
+      string,
+      unknown
+    >[];
     const sessionRows = db
       .prepare(
         `SELECT
@@ -299,10 +308,7 @@ export function openStore(options?: StoreOptions): TranscriptStore {
     return projectRows().find((project) => project.path === path);
   }
 
-  function upsertProject(input: {
-    path: string;
-    name?: string;
-  }): ProjectRow {
+  function upsertProject(input: { path: string; name?: string }): ProjectRow {
     const ts = now();
     const requestedName = input.name?.trim() || null;
     const name = requestedName ?? projectName(input.path);
@@ -346,7 +352,7 @@ export function openStore(options?: StoreOptions): TranscriptStore {
   function insertMessages(sessionId: string, messages: Message[], startSeq: number) {
     let seq = startSeq;
     const stmt = db.prepare(
-      "INSERT INTO messages (id, session_id, seq, role, content, tool_call_id, tool_name, tool_calls_json, tool_display_json, parts_json, provider_metadata_json, provider_raw_json, checkpoint_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO messages (id, session_id, seq, role, content, tool_call_id, tool_name, tool_calls_json, tool_display_json, parts_json, usage_json, provider_metadata_json, provider_raw_json, checkpoint_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
 
     for (const msg of messages) {
@@ -363,6 +369,7 @@ export function openStore(options?: StoreOptions): TranscriptStore {
         r.tool_calls_json,
         r.tool_display_json,
         r.parts_json,
+        r.usage_json,
         r.provider_metadata_json,
         r.provider_raw_json,
         r.checkpoint_id,

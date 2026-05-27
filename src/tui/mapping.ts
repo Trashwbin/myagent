@@ -18,6 +18,7 @@ export function eventToRows(
     case "provider_stream_started":
     case "provider_step_started":
     case "provider_step_finished":
+    case "provider_usage":
     case "assistant_text_started":
     case "assistant_text_finished":
     case "assistant_reasoning_started":
