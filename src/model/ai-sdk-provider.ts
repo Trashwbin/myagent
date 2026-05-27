@@ -30,7 +30,9 @@ import * as ProviderTransform from "./provider-transform.js";
 
 type AiSdkMode = ProviderMode;
 
-function toProviderMetadata(metadata: AiProviderMetadata | undefined): ProviderMetadata | undefined {
+function toProviderMetadata(
+  metadata: AiProviderMetadata | undefined,
+): ProviderMetadata | undefined {
   return metadata as ProviderMetadata | undefined;
 }
 
@@ -240,12 +242,9 @@ export class AiSdkProvider implements Provider {
     this.adapter =
       config.adapter ??
       (config.provider === "anthropic" ? "@ai-sdk/anthropic" : "@ai-sdk/openai");
-    const mode =
-      this.adapter === "@ai-sdk/openai-compatible" ? "chat" : config.mode;
+    const mode = this.adapter === "@ai-sdk/openai-compatible" ? "chat" : config.mode;
     this.mode =
-      config.provider === "anthropic"
-        ? "messages"
-        : mode ?? defaultOpenAIMode(config);
+      config.provider === "anthropic" ? "messages" : (mode ?? defaultOpenAIMode(config));
   }
 
   async *stream(
@@ -256,6 +255,7 @@ export class AiSdkProvider implements Provider {
     let result: ReturnType<typeof streamText<ToolSet, never>>;
     try {
       const aiTools = ProviderTransform.tools(tools);
+      const summaryPrompt = ProviderTransform.conversationSummarySystemPrompt(messages);
       result = streamText({
         model: createLanguageModel({ ...this.config, mode: this.mode }),
         messages: await ProviderTransform.messages({
@@ -264,7 +264,9 @@ export class AiSdkProvider implements Provider {
           tools: aiTools,
         }),
         tools: aiTools,
-        system: options?.systemPrompt,
+        system:
+          [options?.systemPrompt, summaryPrompt].filter(Boolean).join("\n\n") ||
+          undefined,
         maxOutputTokens: this.config.maxOutputTokens,
         providerOptions: ProviderTransform.providerOptions({
           config: this.config,
@@ -289,5 +291,4 @@ export class AiSdkProvider implements Provider {
       throw normalizeProviderError(this.name, err);
     }
   }
-
 }

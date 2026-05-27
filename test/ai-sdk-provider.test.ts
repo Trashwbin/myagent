@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { AiSdkProvider, mapStreamPartToModelEvent } from "../src/model/ai-sdk-provider.js";
+import {
+  AiSdkProvider,
+  mapStreamPartToModelEvent,
+} from "../src/model/ai-sdk-provider.js";
 import {
   convertMessages,
   convertMessagesToUI,
+  conversationSummarySystemPrompt,
   messages,
   providerOptions,
 } from "../src/model/provider-transform.js";
@@ -41,20 +45,9 @@ describe("AI SDK provider adapter", () => {
     ]);
 
     expect(messages).toEqual([
+      { id: "user-0", role: "user", parts: [{ type: "text", text: "read file" }] },
       {
-        id: "summary-0",
-        role: "system",
-        parts: [
-          {
-            type: "text",
-            text:
-              "<conversation_summary>\nAlready inspected package.json.\n</conversation_summary>",
-          },
-        ],
-      },
-      { id: "user-1", role: "user", parts: [{ type: "text", text: "read file" }] },
-      {
-        id: "assistant-2",
+        id: "assistant-1",
         role: "assistant",
         parts: [
           {
@@ -75,6 +68,17 @@ describe("AI SDK provider adapter", () => {
         metadata: { openai: { responseId: "resp_1" } },
       },
     ]);
+  });
+
+  it("moves summary messages into the system prompt instead of messages", () => {
+    expect(
+      conversationSummarySystemPrompt([
+        { role: "summary", content: "Already inspected package.json." },
+        { role: "user", content: "continue" },
+      ]),
+    ).toBe(
+      "<conversation_summary>\nAlready inspected package.json.\n</conversation_summary>",
+    );
   });
 
   it("uses AI SDK convertToModelMessages for final model messages", async () => {
@@ -183,7 +187,7 @@ describe("AI SDK provider adapter", () => {
     expect(provider.mode).toBe("messages");
   });
 
-  it("keeps Anthropic prompt history free of empty text parts", async () => {
+  it("keeps Anthropic prompt history free of empty text and reasoning parts", async () => {
     const result = await messages({
       config: { provider: "anthropic", model: "claude-test" },
       messages: [
@@ -194,6 +198,7 @@ describe("AI SDK provider adapter", () => {
           parts: [
             { type: "text", text: "" },
             { type: "reasoning", text: "thinking" },
+            { type: "text", text: "final" },
           ],
         },
       ],
@@ -202,7 +207,7 @@ describe("AI SDK provider adapter", () => {
     expect(result).toEqual([
       {
         role: "assistant",
-        content: [{ type: "reasoning", text: "thinking" }],
+        content: [{ type: "text", text: "final" }],
       },
     ]);
   });
@@ -269,7 +274,11 @@ describe("AI SDK provider adapter", () => {
     });
     expect(
       mapStreamPartToModelEvent(
-        { type: "text-start", id: "txt_1", providerMetadata: { openai: { itemId: "msg_1" } } },
+        {
+          type: "text-start",
+          id: "txt_1",
+          providerMetadata: { openai: { itemId: "msg_1" } },
+        },
         "openai",
       ),
     ).toEqual({

@@ -13,7 +13,12 @@ export type ClientMessage =
 export type ServerMessage =
   | { type: "ready"; sessionId?: string }
   | { type: "turn_event"; sessionId: string; event: TurnEvent }
-  | { type: "approval_required"; sessionId: string; approvalId: string; request: ApprovalRequest }
+  | {
+      type: "approval_required";
+      sessionId: string;
+      approvalId: string;
+      request: ApprovalRequest;
+    }
   | {
       type: "session_rewound";
       sessionId: string;
@@ -27,6 +32,14 @@ export type ServerMessage =
       compactedCount: number;
       retainedCount: number;
       message: string;
+      summary?: string;
+      previousSummaryUsed?: boolean;
+      transcriptTruncated?: boolean;
+      beforeTokens?: number;
+      afterTokens?: number;
+      createdAt?: number;
+      auto?: boolean;
+      reason?: "context_limit";
     }
   | {
       type: "session_model_changed";
@@ -39,7 +52,9 @@ export type ServerMessage =
   | { type: "turn_finished"; sessionId: string }
   | { type: "error"; sessionId?: string; message: string; code?: string };
 
-export function parseClientMessage(raw: unknown): ClientMessage | { type: "error"; message: string } {
+export function parseClientMessage(
+  raw: unknown,
+): ClientMessage | { type: "error"; message: string } {
   if (typeof raw !== "object" || raw === null) {
     return { type: "error", message: "Invalid message: not an object" };
   }
@@ -61,8 +76,16 @@ export function parseClientMessage(raw: unknown): ClientMessage | { type: "error
 
     case "approval_decision": {
       if (typeof msg.approvalId !== "string" || typeof msg.decision !== "string")
-        return { type: "error", message: "approval_decision requires approvalId and decision" };
-      const valid: ApprovalResponse[] = ["allow_once", "allow_for_session", "allow_for_workspace", "abort"];
+        return {
+          type: "error",
+          message: "approval_decision requires approvalId and decision",
+        };
+      const valid: ApprovalResponse[] = [
+        "allow_once",
+        "allow_for_session",
+        "allow_for_workspace",
+        "abort",
+      ];
       if (!valid.includes(msg.decision as ApprovalResponse))
         return { type: "error", message: `Invalid decision: ${msg.decision}` };
       return {
@@ -74,7 +97,10 @@ export function parseClientMessage(raw: unknown): ClientMessage | { type: "error
 
     case "rewind_session":
       if (typeof msg.sessionId !== "string" || typeof msg.checkpointId !== "string")
-        return { type: "error", message: "rewind_session requires sessionId and checkpointId" };
+        return {
+          type: "error",
+          message: "rewind_session requires sessionId and checkpointId",
+        };
       return {
         type: "rewind_session",
         sessionId: msg.sessionId,

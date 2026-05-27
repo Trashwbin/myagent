@@ -12,11 +12,9 @@ import { randomUUID } from "node:crypto";
 import type { Message } from "../model/types.js";
 import type { SkillSummary } from "../skill/types.js";
 import { compactSession } from "../session/compact.js";
-import {
-  formatRewindMessage,
-  revertLast,
-  rewindSession,
-} from "../session/revert.js";
+import type { CompactResult } from "../session/compact.js";
+import { decideAutoCompact } from "../session/auto-compact.js";
+import { formatRewindMessage, revertLast, rewindSession } from "../session/revert.js";
 import type { ModelProfile } from "../config/config.js";
 import { findModelProfile } from "../config/config.js";
 import {
@@ -146,16 +144,11 @@ export class SessionManager {
   handleUserMessage(sessionId: string, text: string): { ok: boolean; error?: string } {
     const active = this.ensureSession(sessionId);
     if (!active) return { ok: false, error: "Session not found" };
-    if (active.activeTurn) return { ok: false, error: "Turn already active for this session" };
+    if (active.activeTurn)
+      return { ok: false, error: "Turn already active for this session" };
 
     const isModelCommand = isModelSwitchCommand(text);
     const persistedUserMessage: Message = { role: "user", content: text };
-    const sessionForRun: SessionState | null = isModelCommand
-      ? null
-      : {
-          ...active.session,
-          messages: [...active.session.messages],
-        };
     if (!isModelCommand) {
       this.store.appendMessages(sessionId, [persistedUserMessage]);
       active.session.messages.push(persistedUserMessage);
@@ -189,10 +182,16 @@ export class SessionManager {
         const modelCommand = await this.handleModelCommand(active, text);
         if (modelCommand) return;
 
+        await this.compactBeforeTurnIfNeeded(active);
+        const sessionForRun: SessionState = {
+          ...active.session,
+          messages: messagesBeforeCurrentUser(active.session.messages),
+        };
+
         const { session: updated, newMessages } = await runTurn(
           active.provider,
           active.registry,
-          sessionForRun!,
+          sessionForRun,
           text,
           {
             approval: active.approval,
@@ -232,7 +231,8 @@ export class SessionManager {
   ): Promise<{ ok: boolean; error?: string }> {
     const active = this.ensureSession(sessionId);
     if (!active) return { ok: false, error: "Session not found" };
-    if (active.activeTurn) return { ok: false, error: "Turn already active for this session" };
+    if (active.activeTurn)
+      return { ok: false, error: "Turn already active for this session" };
 
     const result = await rewindSession(active.session, checkpointId);
     const message = formatRewindMessage("rewind", result);
@@ -252,7 +252,8 @@ export class SessionManager {
   async revertLast(sessionId: string): Promise<{ ok: boolean; error?: string }> {
     const active = this.ensureSession(sessionId);
     if (!active) return { ok: false, error: "Session not found" };
-    if (active.activeTurn) return { ok: false, error: "Turn already active for this session" };
+    if (active.activeTurn)
+      return { ok: false, error: "Turn already active for this session" };
 
     const result = await revertLast(active.session);
     const message = formatRewindMessage("revert-last", result);
@@ -272,20 +273,14 @@ export class SessionManager {
   async compactSession(sessionId: string): Promise<{ ok: boolean; error?: string }> {
     const active = this.ensureSession(sessionId);
     if (!active) return { ok: false, error: "Session not found" };
-    if (active.activeTurn) return { ok: false, error: "Turn already active for this session" };
+    if (active.activeTurn)
+      return { ok: false, error: "Turn already active for this session" };
 
     await this.refreshRuntime(active);
     const result = await compactSession(active.provider, active.session);
     active.session.messages = result.messages;
     this.store.replaceMessages(sessionId, result.messages);
-    const message = formatCompactMessage(result);
-    this.sendEvent(sessionId, {
-      type: "session_compacted",
-      sessionId,
-      compactedCount: result.compactedCount,
-      retainedCount: result.retainedCount,
-      message,
-    });
+    this.emitCompaction(sessionId, result);
     return { ok: true };
   }
 
@@ -301,7 +296,8 @@ export class SessionManager {
   }> {
     const active = this.ensureSession(sessionId);
     if (!active) return { ok: false, error: "Session not found" };
-    if (active.activeTurn) return { ok: false, error: "Turn already active for this session" };
+    if (active.activeTurn)
+      return { ok: false, error: "Turn already active for this session" };
 
     await this.refreshRuntime(active);
     const result = this.applyModelSwitch(active, requestedId);
@@ -335,12 +331,18 @@ export class SessionManager {
 
     const requestedId = trimmed.slice("/model".length).trim();
     if (!requestedId) {
-      const message = formatModelList(active.modelProfiles, active.session.modelProfileId);
+      const message = formatModelList(
+        active.modelProfiles,
+        active.session.modelProfileId,
+      );
       this.appendAssistantStatus(active, message);
       this.sendEvent(active.session.id, {
         type: "turn_event",
         sessionId: active.session.id,
-        event: { type: "assistant_message", message: { role: "assistant", content: message } },
+        event: {
+          type: "assistant_message",
+          message: { role: "assistant", content: message },
+        },
       });
       return { ok: true };
     }
@@ -352,7 +354,10 @@ export class SessionManager {
       this.sendEvent(active.session.id, {
         type: "turn_event",
         sessionId: active.session.id,
-        event: { type: "assistant_message", message: { role: "assistant", content: message } },
+        event: {
+          type: "assistant_message",
+          message: { role: "assistant", content: message },
+        },
       });
       return { ok: true };
     }
@@ -429,6 +434,58 @@ export class SessionManager {
     }
   }
 
+  private async compactBeforeTurnIfNeeded(active: ActiveSession): Promise<void> {
+    const profile = this.resolveSessionProfile(active.session, active.modelProfiles);
+    const decision = decideAutoCompact({
+      session: active.session,
+      profile,
+    });
+    if (!decision.shouldCompact) return;
+    try {
+      const result = await compactSession(active.provider, active.session);
+      active.session.messages = result.messages;
+      this.store.replaceMessages(active.session.id, result.messages);
+      this.emitCompaction(active.session.id, result, {
+        auto: true,
+        reason: decision.reason,
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error && err.message.trim()
+          ? `Auto compact skipped: ${err.message}`
+          : "Auto compact skipped.";
+      this.sendEvent(active.session.id, {
+        type: "error",
+        sessionId: active.session.id,
+        message,
+        code: "AUTO_COMPACT_SKIPPED",
+      });
+    }
+  }
+
+  private emitCompaction(
+    sessionId: string,
+    result: CompactResult,
+    options?: { auto?: boolean; reason?: "context_limit" },
+  ): void {
+    const message = formatCompactMessage(result);
+    this.sendEvent(sessionId, {
+      type: "session_compacted",
+      sessionId,
+      compactedCount: result.compactedCount,
+      retainedCount: result.retainedCount,
+      message,
+      summary: result.summary,
+      previousSummaryUsed: result.previousSummaryUsed,
+      transcriptTruncated: result.transcriptTruncated,
+      beforeTokens: result.beforeTokens,
+      afterTokens: result.afterTokens,
+      createdAt: result.createdAt,
+      auto: options?.auto,
+      reason: options?.reason,
+    });
+  }
+
   private resolveSessionProfile(
     session: SessionState,
     modelProfiles: ModelProfile[],
@@ -437,7 +494,9 @@ export class SessionManager {
       findModelProfile(modelProfiles, session.modelProfileId) ??
       findModelProfile(
         modelProfiles,
-        session.provider && session.model ? `${session.provider}/${session.model}` : undefined,
+        session.provider && session.model
+          ? `${session.provider}/${session.model}`
+          : undefined,
       ) ??
       modelProfiles[0]
     );
@@ -460,4 +519,10 @@ function formatCompactMessage(result: {
 function isModelSwitchCommand(text: string): boolean {
   const trimmed = text.trim();
   return trimmed === "/model" || trimmed.startsWith("/model ");
+}
+
+function messagesBeforeCurrentUser(messages: Message[]): Message[] {
+  const last = messages[messages.length - 1];
+  if (last?.role !== "user") return [...messages];
+  return messages.slice(0, -1);
 }

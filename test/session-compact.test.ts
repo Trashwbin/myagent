@@ -57,16 +57,29 @@ describe("compactSession", () => {
     expect(result.retainedCount).toBe(4);
     expect(result.previousSummaryUsed).toBe(false);
     expect(result.transcriptTruncated).toBe(false);
+    expect(result.beforeTokens).toBeGreaterThan(result.afterTokens);
     expect(result.messages).toEqual([
       expect.objectContaining({
         role: "summary",
         content: "User wants the bug fixed. Checkpoint cp1 can restore auth.ts.",
+        parts: [
+          expect.objectContaining({
+            type: "compaction",
+            summary: "User wants the bug fixed. Checkpoint cp1 can restore auth.ts.",
+            compactedCount: 3,
+            retainedCount: 4,
+            previousSummaryUsed: false,
+            transcriptTruncated: false,
+          }),
+        ],
         providerMetadata: expect.objectContaining({
           compaction: expect.objectContaining({
             compactedCount: 3,
             retainedCount: 4,
             previousSummaryUsed: false,
             transcriptTruncated: false,
+            beforeTokens: result.beforeTokens,
+            afterTokens: result.afterTokens,
           }),
         }),
       }),

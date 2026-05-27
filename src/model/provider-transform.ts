@@ -15,7 +15,13 @@ import type {
   ToolSchema,
 } from "./types.js";
 
-type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 type AiToolResultOutput =
   | { type: "text"; value: string }
   | { type: "json"; value: JsonValue };
@@ -28,7 +34,9 @@ const RESPONSE_OPTION_KEYS = [
   "systemMessageMode",
 ] as const;
 
-function toAiProviderMetadata(metadata: ProviderMetadata | undefined): AiProviderMetadata | undefined {
+function toAiProviderMetadata(
+  metadata: ProviderMetadata | undefined,
+): AiProviderMetadata | undefined {
   return metadata as AiProviderMetadata | undefined;
 }
 
@@ -52,9 +60,7 @@ function continuationResponseId(messages: Message[]): string | undefined {
     return undefined;
   }
   const responseId = (openai as Record<string, unknown>).responseId;
-  return typeof responseId === "string" && responseId.length > 0
-    ? responseId
-    : undefined;
+  return typeof responseId === "string" && responseId.length > 0 ? responseId : undefined;
 }
 
 export function tools(tools?: ToolSchema[]): ToolSet | undefined {
@@ -90,7 +96,9 @@ export function providerOptions(input: {
   };
 }
 
-function pickResponseOptions(options: Record<string, unknown> | undefined): Record<string, JsonValue | undefined> {
+function pickResponseOptions(
+  options: Record<string, unknown> | undefined,
+): Record<string, JsonValue | undefined> {
   if (!options) return {};
   const result: Record<string, JsonValue | undefined> = {};
   for (const key of RESPONSE_OPTION_KEYS) {
@@ -129,16 +137,6 @@ export function convertMessagesToUI(messages: Message[]): UIMessage[] {
   for (const msg of messages) {
     switch (msg.role) {
       case "summary":
-        result.push({
-          id: `summary-${result.length}`,
-          role: "system",
-          parts: [
-            {
-              type: "text",
-              text: `<conversation_summary>\n${msg.content}\n</conversation_summary>`,
-            },
-          ],
-        });
         break;
 
       case "user":
@@ -226,6 +224,17 @@ export async function convertMessages(
   return convertToModelMessages(convertMessagesToUI(messages), { tools });
 }
 
+export function conversationSummarySystemPrompt(messages: Message[]): string | undefined {
+  const summaries = messages
+    .filter((message) => message.role === "summary")
+    .map((message) => message.content.trim())
+    .filter(Boolean);
+  if (summaries.length === 0) return undefined;
+  return summaries
+    .map((summary) => `<conversation_summary>\n${summary}\n</conversation_summary>`)
+    .join("\n\n");
+}
+
 function normalizeModelMessages(
   messages: ModelMessage[],
   config: ProviderConfig,
@@ -235,16 +244,40 @@ function normalizeModelMessages(
   return messages
     .map((message) => {
       const content = message.content;
-      if (typeof content === "string") return content ? message : undefined;
+      if (typeof content === "string") {
+        return content ? stripProviderOptions(message) : undefined;
+      }
       if (!Array.isArray(content)) return message;
 
       const filtered = content.filter((part) => {
-        if (part.type === "text" || part.type === "reasoning") return part.text !== "";
+        if (part.type === "reasoning") return false;
+        if (part.type === "text") return part.text !== "";
         return true;
       });
-      return filtered.length > 0 ? ({ ...message, content: filtered } as ModelMessage) : undefined;
+      return filtered.length > 0
+        ? ({ ...stripProviderOptions(message), content: filtered } as ModelMessage)
+        : undefined;
     })
     .filter((message): message is ModelMessage => message !== undefined);
+}
+
+function stripProviderOptions(message: ModelMessage): ModelMessage {
+  if (message.role === "system") return message;
+  if (typeof message.content === "string") return message;
+  if (!Array.isArray(message.content)) return message;
+  return {
+    ...message,
+    content: message.content.map((part) => {
+      if (typeof part !== "object" || part === null) return part;
+      const {
+        providerOptions: _providerOptions,
+        callProviderOptions: _callProviderOptions,
+        resultProviderOptions: _resultProviderOptions,
+        ...rest
+      } = part as Record<string, unknown>;
+      return rest;
+    }) as ModelMessage["content"],
+  } as ModelMessage;
 }
 
 export async function messages(input: {

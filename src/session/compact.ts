@@ -1,6 +1,7 @@
 import type { Provider } from "../model/provider.js";
 import type { Message } from "../model/types.js";
 import type { SessionState } from "./loop.js";
+import { estimateMessagesTokens } from "./context-usage.js";
 
 export type CompactOptions = {
   retainUserTurns?: number;
@@ -17,6 +18,9 @@ export type CompactResult = {
   retainedCount: number;
   previousSummaryUsed: boolean;
   transcriptTruncated: boolean;
+  beforeTokens: number;
+  afterTokens: number;
+  createdAt: number;
 };
 
 type CompactConfig = Required<CompactOptions>;
@@ -61,18 +65,47 @@ export async function compactSession(
 
   const promptInput = buildCompactPrompt(selection, config);
   const summary = await generateSummary(provider, promptInput.text);
-  const summaryMessage: Message = {
+  const createdAt = Date.now();
+  const beforeTokens = estimateMessagesTokens(session.messages);
+  const compactionBase = {
+    compactedCount: selection.compacted.length,
+    retainedCount: selection.retained.length,
+    previousSummaryUsed: Boolean(selection.previousSummary),
+    tailStartIndex: selection.tailStartIndex,
+    transcriptTruncated: promptInput.truncated,
+    createdAt,
+    beforeTokens,
+  };
+  const initialSummaryMessage: Message = {
     role: "summary",
     content: summary,
     providerMetadata: {
-      compaction: {
-        compactedCount: selection.compacted.length,
-        retainedCount: selection.retained.length,
-        previousSummaryUsed: Boolean(selection.previousSummary),
-        tailStartIndex: selection.tailStartIndex,
-        transcriptTruncated: promptInput.truncated,
-        createdAt: Date.now(),
+      compaction: compactionBase,
+    },
+  };
+  const nextMessages = [initialSummaryMessage, ...selection.retained];
+  const afterTokens = estimateMessagesTokens(nextMessages);
+  const compaction = {
+    ...compactionBase,
+    afterTokens,
+  };
+  const summaryMessage: Message = {
+    ...initialSummaryMessage,
+    parts: [
+      {
+        type: "compaction",
+        summary,
+        compactedCount: compaction.compactedCount,
+        retainedCount: compaction.retainedCount,
+        previousSummaryUsed: compaction.previousSummaryUsed,
+        transcriptTruncated: compaction.transcriptTruncated,
+        beforeTokens: compaction.beforeTokens,
+        afterTokens: compaction.afterTokens,
+        createdAt: compaction.createdAt,
       },
+    ],
+    providerMetadata: {
+      compaction,
     },
   };
 
@@ -83,6 +116,9 @@ export async function compactSession(
     retainedCount: selection.retained.length,
     previousSummaryUsed: Boolean(selection.previousSummary),
     transcriptTruncated: promptInput.truncated,
+    beforeTokens,
+    afterTokens,
+    createdAt,
   };
 }
 

@@ -29,7 +29,8 @@ afterEach(async () => {
   activeServers = [];
   for (const s of activeStores) s.close();
   activeStores = [];
-  for (const d of activeTmpDirs) await rm(d, { recursive: true, force: true }).catch(() => {});
+  for (const d of activeTmpDirs)
+    await rm(d, { recursive: true, force: true }).catch(() => {});
   activeTmpDirs = [];
 });
 
@@ -84,7 +85,9 @@ function skillProbeProvider(): Provider {
       const prompt = options?.systemPrompt ?? "";
       const lastToolResult = [...messages]
         .reverse()
-        .find((message) => message.role === "tool_result" && message.toolName === "skill");
+        .find(
+          (message) => message.role === "tool_result" && message.toolName === "skill",
+        );
       if (lastToolResult?.content.includes('<skill_content name="changed-skill">')) {
         yield { type: "text" as const, delta: "loaded changed-skill" };
         yield { type: "finish" as const, reason: "stop" as const };
@@ -123,6 +126,26 @@ function summaryProvider(summary: string): Provider {
     name: "test",
     async *stream() {
       yield { type: "text" as const, delta: summary };
+      yield { type: "finish" as const, reason: "stop" as const };
+    },
+  };
+}
+
+function recordingSummaryProvider(
+  summary: string,
+  finalText: string,
+): Provider & { calls: string[][] } {
+  const calls: string[][] = [];
+  return {
+    name: "test",
+    calls,
+    async *stream(messages) {
+      calls.push(messages.map((message) => `${message.role}:${message.content}`));
+      if (calls.length === 1) {
+        yield { type: "text" as const, delta: summary };
+      } else {
+        yield { type: "text" as const, delta: finalText };
+      }
       yield { type: "finish" as const, reason: "stop" as const };
     },
   };
@@ -197,13 +220,25 @@ describe("parseClientMessage", () => {
   });
 
   it("parses valid user_message", () => {
-    const msg = parseClientMessage({ type: "user_message", sessionId: "s1", text: "hello" });
+    const msg = parseClientMessage({
+      type: "user_message",
+      sessionId: "s1",
+      text: "hello",
+    });
     expect(msg).toEqual({ type: "user_message", sessionId: "s1", text: "hello" });
   });
 
   it("parses valid approval_decision", () => {
-    const msg = parseClientMessage({ type: "approval_decision", approvalId: "a1", decision: "allow_once" });
-    expect(msg).toEqual({ type: "approval_decision", approvalId: "a1", decision: "allow_once" });
+    const msg = parseClientMessage({
+      type: "approval_decision",
+      approvalId: "a1",
+      decision: "allow_once",
+    });
+    expect(msg).toEqual({
+      type: "approval_decision",
+      approvalId: "a1",
+      decision: "allow_once",
+    });
   });
 
   it("parses rewind_session, revert_last, and compact_session", () => {
@@ -225,7 +260,11 @@ describe("parseClientMessage", () => {
   });
 
   it("rejects invalid decision", () => {
-    const msg = parseClientMessage({ type: "approval_decision", approvalId: "a1", decision: "bad" });
+    const msg = parseClientMessage({
+      type: "approval_decision",
+      approvalId: "a1",
+      decision: "bad",
+    });
     expect(msg.type).toBe("error");
   });
 
@@ -578,7 +617,9 @@ describe("HTTP API", () => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
     activeWs.push(ws);
     await new Promise<void>((resolve) => ws.once("open", resolve));
-    ws.send(JSON.stringify({ type: "user_message", sessionId: session.id, text: "hello" }));
+    ws.send(
+      JSON.stringify({ type: "user_message", sessionId: session.id, text: "hello" }),
+    );
     await waitForCondition(
       () => store.getSession(session.id)!.messages.length > 0,
       "turn did not start",
@@ -590,7 +631,10 @@ describe("HTTP API", () => {
 
     release();
     await waitForCondition(
-      () => store.getSession(session.id)!.messages.some((message) => message.role === "assistant"),
+      () =>
+        store
+          .getSession(session.id)!
+          .messages.some((message) => message.role === "assistant"),
       "turn did not finish",
     );
   });
@@ -678,7 +722,9 @@ describe("HTTP API", () => {
     const base = await tmpBaseDir();
     const store = openTestStore(base);
     const { port } = await startTestServer(store);
-    const client = await fetch(`http://127.0.0.1:${port}/assets/client.js`).then((r) => r.text());
+    const client = await fetch(`http://127.0.0.1:${port}/assets/client.js`).then((r) =>
+      r.text(),
+    );
     const chunks = Array.from(client.matchAll(/["']\.\/(chunks\/[^"']+\.js)["']/g)).map(
       (match) => `/assets/${match[1]}`,
     );
@@ -747,7 +793,9 @@ describe("WebSocket", () => {
     const store = openTestStore(base);
     const { port } = await startTestServer(store);
     const msg = await wsRoundTrip(port, (ws) =>
-      ws.send(JSON.stringify({ type: "user_message", sessionId: "nonexistent", text: "hi" })),
+      ws.send(
+        JSON.stringify({ type: "user_message", sessionId: "nonexistent", text: "hi" }),
+      ),
     );
     expect(msg.type).toBe("error");
     expect(msg.message).toContain("Session not found");
@@ -758,10 +806,16 @@ describe("WebSocket", () => {
     const store = openTestStore(base);
     const session = store.createSession({ workspaceRoot: "/test" });
     const { port } = await startTestServer(store);
-    const messages = await wsCollect(port, (ws) => {
-      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
-      ws.send(JSON.stringify({ type: "user_message", sessionId: session.id, text: "hi" }));
-    }, (msg) => msg.type === "turn_finished");
+    const messages = await wsCollect(
+      port,
+      (ws) => {
+        ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+        ws.send(
+          JSON.stringify({ type: "user_message", sessionId: session.id, text: "hi" }),
+        );
+      },
+      (msg) => msg.type === "turn_finished",
+    );
 
     expect(messages.some((msg) => msg.type === "ready")).toBe(true);
     expect(
@@ -769,7 +823,9 @@ describe("WebSocket", () => {
         (msg) => msg.type === "turn_event" && msg.event.type === "assistant_text_delta",
       ),
     ).toBe(true);
-    expect(store.getSession(session.id)?.messages.some((m) => m.role === "user")).toBe(true);
+    expect(store.getSession(session.id)?.messages.some((m) => m.role === "user")).toBe(
+      true,
+    );
   });
 
   it("reports model configuration errors instead of using a fallback model", async () => {
@@ -779,7 +835,9 @@ describe("WebSocket", () => {
     const port = await findAvailablePort(43200);
     const server = createAppServer({
       provider: throwingProvider(
-        new Error("No model configured. Add `model` or `provider.<name>.models` to your myAgent config."),
+        new Error(
+          "No model configured. Add `model` or `provider.<name>.models` to your myAgent config.",
+        ),
       ),
       providerName: "anthropic",
       registry: new ToolRegistry(),
@@ -792,15 +850,22 @@ describe("WebSocket", () => {
       server.listen(port, "127.0.0.1", () => resolve());
     });
 
-    const messages = await wsCollect(port, (ws) => {
-      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
-      ws.send(JSON.stringify({ type: "user_message", sessionId: session.id, text: "hi" }));
-    }, (msg) => msg.type === "error" && msg.code === "TURN_ERROR");
+    const messages = await wsCollect(
+      port,
+      (ws) => {
+        ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+        ws.send(
+          JSON.stringify({ type: "user_message", sessionId: session.id, text: "hi" }),
+        );
+      },
+      (msg) => msg.type === "error" && msg.code === "TURN_ERROR",
+    );
 
     expect(messages.find((msg) => msg.type === "error")).toMatchObject({
       type: "error",
       code: "TURN_ERROR",
-      message: "Turn failed: No model configured. Add `model` or `provider.<name>.models` to your myAgent config.",
+      message:
+        "Turn failed: No model configured. Add `model` or `provider.<name>.models` to your myAgent config.",
     });
   });
 
@@ -844,20 +909,30 @@ describe("WebSocket", () => {
       server.listen(port, "127.0.0.1", () => resolve());
     });
 
-    const firstTurn = await wsCollect(port, (ws) => {
-      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
-      ws.send(JSON.stringify({ type: "user_message", sessionId: session.id, text: "before" }));
-    }, (msg) => msg.type === "turn_finished");
+    const firstTurn = await wsCollect(
+      port,
+      (ws) => {
+        ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+        ws.send(
+          JSON.stringify({ type: "user_message", sessionId: session.id, text: "before" }),
+        );
+      },
+      (msg) => msg.type === "turn_finished",
+    );
     expect(
       firstTurn.some(
         (msg) =>
           msg.type === "turn_event" &&
           msg.event.type === "assistant_text_delta" &&
-          msg.event.text.includes("tools:Read,grep,edit_file,write_file,bash,list_dir,apply_patch,glob"),
+          msg.event.text.includes(
+            "tools:Read,grep,edit_file,write_file,bash,list_dir,apply_patch,glob",
+          ),
       ),
     ).toBe(true);
     const firstText = firstTurn
-      .filter((msg) => msg.type === "turn_event" && msg.event.type === "assistant_text_delta")
+      .filter(
+        (msg) => msg.type === "turn_event" && msg.event.type === "assistant_text_delta",
+      )
       .map((msg) => msg.event.text)
       .join("");
     expect(firstText.split(",")).not.toContain("skill");
@@ -870,10 +945,16 @@ describe("WebSocket", () => {
     );
     const providerCallsBeforeSkillRefreshTurn = createProviderCalls;
 
-    const secondTurn = await wsCollect(port, (ws) => {
-      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
-      ws.send(JSON.stringify({ type: "user_message", sessionId: session.id, text: "after" }));
-    }, (msg) => msg.type === "turn_finished");
+    const secondTurn = await wsCollect(
+      port,
+      (ws) => {
+        ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+        ws.send(
+          JSON.stringify({ type: "user_message", sessionId: session.id, text: "after" }),
+        );
+      },
+      (msg) => msg.type === "turn_finished",
+    );
 
     expect(
       secondTurn.some(
@@ -962,16 +1043,20 @@ describe("WebSocket", () => {
       server.listen(port, "127.0.0.1", () => resolve());
     });
 
-    const switchMessages = await wsCollect(port, (ws) => {
-      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
-      ws.send(
-        JSON.stringify({
-          type: "user_message",
-          sessionId: session.id,
-          text: "/model mimo-claude/second",
-        }),
-      );
-    }, (msg) => msg.type === "session_model_changed");
+    const switchMessages = await wsCollect(
+      port,
+      (ws) => {
+        ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+        ws.send(
+          JSON.stringify({
+            type: "user_message",
+            sessionId: session.id,
+            text: "/model mimo-claude/second",
+          }),
+        );
+      },
+      (msg) => msg.type === "session_model_changed",
+    );
 
     const switched = switchMessages.find((msg) => msg.type === "session_model_changed");
     expect(switched).toMatchObject({
@@ -986,10 +1071,16 @@ describe("WebSocket", () => {
       model: "second",
     });
 
-    const runMessages = await wsCollect(port, (ws) => {
-      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
-      ws.send(JSON.stringify({ type: "user_message", sessionId: session.id, text: "hi" }));
-    }, (msg) => msg.type === "turn_finished");
+    const runMessages = await wsCollect(
+      port,
+      (ws) => {
+        ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+        ws.send(
+          JSON.stringify({ type: "user_message", sessionId: session.id, text: "hi" }),
+        );
+      },
+      (msg) => msg.type === "turn_finished",
+    );
 
     expect(
       runMessages.some(
@@ -1087,10 +1178,16 @@ describe("WebSocket", () => {
       model: "second",
     });
 
-    const runMessages = await wsCollect(port, (ws) => {
-      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
-      ws.send(JSON.stringify({ type: "user_message", sessionId: session.id, text: "hi" }));
-    }, (msg) => msg.type === "turn_finished");
+    const runMessages = await wsCollect(
+      port,
+      (ws) => {
+        ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+        ws.send(
+          JSON.stringify({ type: "user_message", sessionId: session.id, text: "hi" }),
+        );
+      },
+      (msg) => msg.type === "turn_finished",
+    );
 
     expect(
       runMessages.some(
@@ -1112,21 +1209,27 @@ describe("WebSocket", () => {
     const session = store.createSession({ workspaceRoot: workspace });
     const { port } = await startTestServer(store);
 
-    const messages = await wsCollect(port, (ws) => {
-      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
-      ws.send(
-        JSON.stringify({
-          type: "rewind_session",
-          sessionId: session.id,
-          checkpointId: checkpoint.id,
-        }),
-      );
-    }, (msg) => msg.type === "session_rewound");
+    const messages = await wsCollect(
+      port,
+      (ws) => {
+        ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+        ws.send(
+          JSON.stringify({
+            type: "rewind_session",
+            sessionId: session.id,
+            checkpointId: checkpoint.id,
+          }),
+        );
+      },
+      (msg) => msg.type === "session_rewound",
+    );
 
     const rewound = messages.find((msg) => msg.type === "session_rewound");
     expect(rewound.checkpointId).toBe(checkpoint.id);
     expect(await readFile(join(workspace, "a.txt"), "utf-8")).toBe("before");
-    expect(store.getSession(session.id)?.messages.at(-1)?.content).toContain(checkpoint.id);
+    expect(store.getSession(session.id)?.messages.at(-1)?.content).toContain(
+      checkpoint.id,
+    );
   });
 
   it("rejects revert while a turn is active", async () => {
@@ -1154,13 +1257,19 @@ describe("WebSocket", () => {
       server.listen(port, "127.0.0.1", () => resolve());
     });
 
-    const messages = await wsCollect(port, (ws) => {
-      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
-      ws.send(JSON.stringify({ type: "user_message", sessionId: session.id, text: "hi" }));
-      setTimeout(() => {
-        ws.send(JSON.stringify({ type: "revert_last", sessionId: session.id }));
-      }, 20);
-    }, (msg) => msg.type === "error" && msg.code === "REVERT_REJECTED");
+    const messages = await wsCollect(
+      port,
+      (ws) => {
+        ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+        ws.send(
+          JSON.stringify({ type: "user_message", sessionId: session.id, text: "hi" }),
+        );
+        setTimeout(() => {
+          ws.send(JSON.stringify({ type: "revert_last", sessionId: session.id }));
+        }, 20);
+      },
+      (msg) => msg.type === "error" && msg.code === "REVERT_REJECTED",
+    );
 
     expect(messages.at(-1)?.message).toContain("Turn already active");
     release();
@@ -1194,19 +1303,37 @@ describe("WebSocket", () => {
       server.listen(port, "127.0.0.1", () => resolve());
     });
 
-    const messages = await wsCollect(port, (ws) => {
-      ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
-      ws.send(JSON.stringify({ type: "compact_session", sessionId: session.id }));
-    }, (msg) => msg.type === "session_compacted");
+    const messages = await wsCollect(
+      port,
+      (ws) => {
+        ws.send(JSON.stringify({ type: "subscribe_session", sessionId: session.id }));
+        ws.send(JSON.stringify({ type: "compact_session", sessionId: session.id }));
+      },
+      (msg) => msg.type === "session_compacted",
+    );
 
     const compacted = messages.find((msg) => msg.type === "session_compacted");
     expect(compacted).toMatchObject({
       compactedCount: 2,
       retainedCount: 3,
       message: "Compacted 2 messages; retained 3 messages.",
+      summary: "Summary of first turn",
+      beforeTokens: expect.any(Number),
+      afterTokens: expect.any(Number),
     });
     expect(store.getSession(session.id)?.messages).toEqual([
-      expect.objectContaining({ role: "summary", content: "Summary of first turn" }),
+      expect.objectContaining({
+        role: "summary",
+        content: "Summary of first turn",
+        parts: [
+          expect.objectContaining({
+            type: "compaction",
+            summary: "Summary of first turn",
+            compactedCount: 2,
+            retainedCount: 3,
+          }),
+        ],
+      }),
       { role: "user", content: "second" },
       { role: "assistant", content: "second reply" },
       { role: "user", content: "third" },
@@ -1362,6 +1489,82 @@ describe("SessionManager", () => {
     expect(error?.message).toContain("Hint: check credentials");
     expect(error?.message).toContain("Status: 401");
     expect(error?.message).toContain("Request ID: req_1");
+  });
+
+  it("auto-compacts before a turn when stored context usage exceeds the usable window", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({
+      workspaceRoot: "/test",
+      modelProfileId: "openai/test-model",
+      provider: "openai",
+      model: "test-model",
+    });
+    store.appendMessages(session.id, [
+      { role: "user", content: "old one" },
+      {
+        role: "assistant",
+        content: "old answer",
+        usage: { totalTokens: 95_000 },
+      },
+      { role: "user", content: "recent one" },
+      { role: "assistant", content: "recent answer" },
+      { role: "user", content: "recent two" },
+    ]);
+    const restored = store.getSession(session.id)!;
+    const provider = recordingSummaryProvider(
+      "Compacted old context",
+      "final after compact",
+    );
+    const events: Array<{ type?: string; auto?: boolean; reason?: string }> = [];
+    const manager = new SessionManager({
+      provider,
+      modelProfiles: [
+        {
+          id: "openai/test-model",
+          provider: "openai",
+          adapter: "@ai-sdk/openai",
+          model: "test-model",
+          contextWindow: 100_000,
+          maxOutputTokens: 8_000,
+        },
+      ],
+      createProvider: () => provider,
+      registry: new ToolRegistry(),
+      approval: "auto",
+      store,
+      sendEvent: (_sessionId, event) => events.push(event),
+    });
+    manager.registerSession(restored);
+
+    expect(manager.handleUserMessage(session.id, "continue")).toEqual({ ok: true });
+    await waitForCondition(
+      () => !manager.hasActiveTurn(session.id),
+      "turn did not finish",
+    );
+
+    const compacted = events.find((event) => event.type === "session_compacted");
+    expect(compacted).toMatchObject({
+      type: "session_compacted",
+      auto: true,
+      reason: "context_limit",
+    });
+    expect(provider.calls).toHaveLength(2);
+    expect(provider.calls[0]?.some((entry) => entry.includes("old one"))).toBe(true);
+    expect(provider.calls[1]?.[0]).toBe("summary:Compacted old context");
+    expect(provider.calls[1]?.at(-1)).toBe("user:continue");
+    expect(store.getSession(session.id)?.messages).toEqual([
+      expect.objectContaining({
+        role: "summary",
+        content: "Compacted old context",
+      }),
+      { role: "user", content: "recent two" },
+      { role: "user", content: "continue" },
+      expect.objectContaining({
+        role: "assistant",
+        content: "final after compact",
+      }),
+    ]);
   });
 });
 
