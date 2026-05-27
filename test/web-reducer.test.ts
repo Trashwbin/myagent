@@ -163,20 +163,105 @@ describe("web timeline reducer", () => {
     expect("streaming" in textParts[0]!).toBe(false);
   });
 
+  it("stores context usage by session from provider usage events", () => {
+    const result = appReducer(initialAppState, {
+      type: "server_message",
+      message: {
+        type: "turn_event",
+        sessionId: "s1",
+        event: {
+          type: "provider_usage",
+          usage: {
+            inputTokens: 78000,
+            outputTokens: 1200,
+            totalTokens: 79200,
+          },
+        },
+      },
+    });
+
+    expect(result.sessionContextUsage.s1).toMatchObject({
+      source: "provider",
+      usedTokens: 79200,
+      lastUsage: {
+        inputTokens: 78000,
+        outputTokens: 1200,
+        totalTokens: 79200,
+      },
+    });
+  });
+
+  it("rebuilds context usage from stored assistant usage", () => {
+    const result = appReducer(
+      {
+        ...initialAppState,
+        providerConfig: {
+          current: "mimo/mimo-v2.5-pro",
+          providers: [],
+          models: [
+            {
+              id: "mimo/mimo-v2.5-pro",
+              provider: "mimo",
+              providerID: "mimo",
+              modelID: "mimo-v2.5-pro",
+              adapter: "@ai-sdk/openai-compatible",
+              model: "mimo-v2.5-pro",
+              contextWindow: 1048576,
+            },
+          ],
+        },
+        sessions: [
+          {
+            id: "s1",
+            projectPath: "/tmp/ws",
+            modelProfileId: "mimo/mimo-v2.5-pro",
+            createdAt: 1,
+            updatedAt: 2,
+          },
+        ],
+      },
+      {
+        type: "timeline_loaded",
+        sessionId: "s1",
+        messages: [
+          { role: "user", content: "hi" },
+          {
+            role: "assistant",
+            content: "hello",
+            usage: {
+              inputTokens: 200000,
+              outputTokens: 1000,
+              totalTokens: 201000,
+            },
+          },
+        ],
+      },
+    );
+
+    expect(result.sessionContextUsage.s1).toMatchObject({
+      contextWindow: 1048576,
+      source: "provider",
+      usedTokens: 201000,
+      percentFull: 19,
+    });
+  });
+
   it("uses explicit assistant phases instead of guessing final text from position", () => {
     const initial = buildTimelineFromMessages([{ role: "user", content: "inspect" }]);
     const events: TurnEvent[] = [
       { type: "assistant_text_started", phase: "commentary" },
-      { type: "assistant_text_delta", text: "I will inspect first.", phase: "commentary" },
+      {
+        type: "assistant_text_delta",
+        text: "I will inspect first.",
+        phase: "commentary",
+      },
       { type: "assistant_text_finished", phase: "commentary" },
       {
         type: "assistant_message",
         message: {
           role: "assistant",
           content: "I will inspect first.",
-          parts: [
-            { type: "text", text: "I will inspect first.", phase: "commentary" },
-          ],
+          parts: [{ type: "text", text: "I will inspect first.", phase: "commentary" }],
           toolCalls: [{ id: "read1", name: "Read", input: { path: "src/cli.ts" } }],
         },
       },
@@ -186,7 +271,7 @@ describe("web timeline reducer", () => {
           role: "tool_result",
           toolCallId: "read1",
           toolName: "Read",
-          content: "1: import React from \"react\";",
+          content: '1: import React from "react";',
         },
       },
       {
@@ -218,10 +303,7 @@ describe("web timeline reducer", () => {
       { type: "assistant_text_started" },
       { type: "assistant_text_delta", text: "I will inspect this." },
       { type: "assistant_text_finished" },
-    ].reduce(
-      (timeline, event) => applyTurnEvent(timeline, event as TurnEvent),
-      initial,
-    );
+    ].reduce((timeline, event) => applyTurnEvent(timeline, event as TurnEvent), initial);
 
     expect(streamingFinished[0]?.completed).toBe(false);
     expect(streamingFinished[0]?.completedAt).toBeUndefined();
@@ -397,7 +479,7 @@ describe("web timeline reducer", () => {
     });
   });
 
-  it("appends a status part when a session is compacted", () => {
+  it("appends a compaction boundary when a session is compacted", () => {
     const loaded = appReducer(initialAppState, {
       type: "timeline_loaded",
       sessionId: "s1",
@@ -417,15 +499,88 @@ describe("web timeline reducer", () => {
         compactedCount: 4,
         retainedCount: 2,
         message: "Compacted 4 messages; retained 2 messages.",
+        summary: "Older context summary",
+        beforeTokens: 12_000,
+        afterTokens: 4_000,
+        previousSummaryUsed: false,
+        transcriptTruncated: false,
+        createdAt: 123,
       },
     });
 
     expect(next.timelines.s1?.[0]?.assistantParts.at(-1)).toMatchObject({
-      kind: "status",
-      level: "info",
-      text: "Compacted 4 messages; retained 2 messages.",
+      kind: "compaction",
+      summary: "Older context summary",
+      compactedCount: 4,
+      retainedCount: 2,
+      beforeTokens: 12_000,
+      afterTokens: 4_000,
     });
     expect(next.runningSessionIds).not.toContain("s1");
+  });
+
+  it("keeps a session running when auto compaction fires before a turn", () => {
+    const state = {
+      ...initialAppState,
+      timelines: {
+        s1: buildTimelineFromMessages([{ role: "user", content: "continue" }]),
+      },
+      runningSessionIds: ["s1"],
+    };
+
+    const next = appReducer(state, {
+      type: "server_message",
+      message: {
+        type: "session_compacted",
+        sessionId: "s1",
+        compactedCount: 4,
+        retainedCount: 2,
+        message: "Compacted 4 messages; retained 2 messages.",
+        summary: "Older context summary",
+        auto: true,
+        reason: "context_limit",
+      },
+    });
+
+    expect(next.runningSessionIds).toContain("s1");
+    expect(next.timelines.s1?.[0]?.assistantParts.at(-1)).toMatchObject({
+      kind: "compaction",
+      auto: true,
+      reason: "context_limit",
+    });
+  });
+
+  it("rebuilds compaction boundaries from stored summary messages", () => {
+    const timeline = buildTimelineFromMessages([
+      {
+        role: "summary",
+        content: "Older context summary",
+        parts: [
+          {
+            type: "compaction",
+            summary: "Older context summary",
+            compactedCount: 6,
+            retainedCount: 3,
+            beforeTokens: 20_000,
+            afterTokens: 6_000,
+            createdAt: 456,
+          },
+        ],
+      },
+      { role: "user", content: "continue" },
+      { role: "assistant", content: "final" },
+    ]);
+
+    expect(timeline[0]?.assistantParts[0]).toMatchObject({
+      kind: "compaction",
+      summary: "Older context summary",
+      compactedCount: 6,
+      retainedCount: 3,
+      beforeTokens: 20_000,
+      afterTokens: 6_000,
+    });
+    expect(timeline[0]?.userMessage.text).toBe("");
+    expect(timeline[1]?.userMessage.text).toBe("continue");
   });
 
   it("updates session metadata when the model changes", () => {

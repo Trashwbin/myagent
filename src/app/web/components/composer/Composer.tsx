@@ -5,24 +5,17 @@ import {
   slashCommandQuery,
   type SlashCommand,
 } from "../../slash-commands.js";
+import type { SessionContextUsage } from "../../../../model/types.js";
 import type { ProviderConfig } from "../../state/types.js";
 import { Icon } from "../icons/Icon.js";
 import { ModelSelector } from "./ModelSelector.js";
 
-export type SlashChoice =
-  | {
-      type: "model";
-      id: string;
-      label: string;
-      description: string;
-      active?: boolean;
-    }
-  | {
-      type: "checkpoint";
-      id: string;
-      label: string;
-      description: string;
-    };
+export type SlashChoice = {
+  type: "checkpoint";
+  id: string;
+  label: string;
+  description: string;
+};
 
 export function Composer({
   value,
@@ -32,6 +25,7 @@ export function Composer({
   onCommandError,
   providerConfig,
   selectedModelId,
+  selectedContextUsage,
   onSelectModel,
   slashChoices,
   onSlashChoice,
@@ -43,6 +37,7 @@ export function Composer({
   onCommandError?: (message: string) => void;
   providerConfig: ProviderConfig | null;
   selectedModelId: string;
+  selectedContextUsage?: SessionContextUsage;
   onSelectModel: (modelProfileId: string) => void;
   slashChoices: SlashChoice[];
   onSlashChoice: (choice: SlashChoice) => void;
@@ -63,15 +58,13 @@ export function Composer({
       ? parsed.message
       : showChoices && choices.length > 0
         ? "Choose an item with ↑/↓, then press Enter."
-      : showChoices
-        ? activePicker === "checkpoint"
+        : showChoices
           ? "No checkpoints found in this session."
-          : "No configured models found."
-      : parsed.type === "valid"
-        ? `Enter runs ${parsed.command.name}.`
-      : query !== null
-        ? "Use ↑/↓ to choose a command. Enter inserts it."
-        : "Type / for commands. Enter sends. Shift+Enter inserts a new line.";
+          : parsed.type === "valid"
+            ? `Enter runs ${parsed.command.name}.`
+            : query !== null
+              ? "Use ↑/↓ to choose a command. Enter inserts it."
+              : "Type / for commands. Enter sends. Shift+Enter inserts a new line.";
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   useEffect(() => {
@@ -84,7 +77,11 @@ export function Composer({
 
   function submit() {
     const command = parseSlashCommand(value);
-    if (command.type === "incomplete" || command.type === "invalid" || command.type === "unknown") {
+    if (
+      command.type === "incomplete" ||
+      command.type === "invalid" ||
+      command.type === "unknown"
+    ) {
       onCommandError?.(command.message);
       return;
     }
@@ -94,11 +91,7 @@ export function Composer({
         onSlashChoice(choice);
         return;
       }
-      onCommandError?.(
-        command.command.picker === "checkpoint"
-          ? "No checkpoints found in this session."
-          : "No configured models found.",
-      );
+      onCommandError?.("No checkpoints found in this session.");
       return;
     }
     onSend();
@@ -127,7 +120,11 @@ export function Composer({
         </div>
       ) : null}
       {showChoices ? (
-        <div className="slash-menu slash-choice-menu" role="listbox" aria-label="Command options">
+        <div
+          className="slash-menu slash-choice-menu"
+          role="listbox"
+          aria-label="Command options"
+        >
           {choices.length > 0 ? (
             choices.map((choice, index) => (
               <button
@@ -149,11 +146,7 @@ export function Composer({
               </button>
             ))
           ) : (
-            <div className="slash-empty">
-              {activePicker === "checkpoint"
-                ? "No checkpoints found in this session."
-                : "No configured models found."}
-            </div>
+            <div className="slash-empty">No checkpoints found in this session.</div>
           )}
         </div>
       ) : null}
@@ -172,7 +165,8 @@ export function Composer({
               if ((showCommands || showChoices) && event.key === "ArrowUp") {
                 event.preventDefault();
                 const length = showChoices ? choices.length : commands.length;
-                if (length > 0) setSelectedIndex((index) => (index + length - 1) % length);
+                if (length > 0)
+                  setSelectedIndex((index) => (index + length - 1) % length);
                 return;
               }
               if (showCommands && event.key === "Tab") {
@@ -213,6 +207,7 @@ export function Composer({
             <ModelSelector
               config={providerConfig}
               selectedModelId={selectedModelId}
+              contextUsage={selectedContextUsage}
               disabled={disabled}
               onSelect={onSelectModel}
             />
@@ -222,7 +217,9 @@ export function Composer({
           </div>
         </div>
       </div>
-      <div className="hint"><span>{commandHint}</span></div>
+      <div className="hint">
+        <span>{commandHint}</span>
+      </div>
     </section>
   );
 }

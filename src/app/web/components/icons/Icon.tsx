@@ -6,6 +6,7 @@ export type IconName =
   | "chevron-down"
   | "chevron-right"
   | "chevron-up"
+  | "compact"
   | "folder"
   | "folder-open"
   | "folder-plus"
@@ -21,6 +22,7 @@ const symbols: Record<IconName, string> = {
   "chevron-down": "icon-direction-down",
   "chevron-right": "icon-direction-right",
   "chevron-up": "icon-direction-up",
+  compact: "icon-prompt",
   folder: "icon-folder-close",
   "folder-open": "icon-folder-filling",
   "folder-plus": "icon-file-add",
@@ -31,13 +33,7 @@ const symbols: Record<IconName, string> = {
   terminal: "icon-code",
 };
 
-export function Icon({
-  name,
-  className,
-}: {
-  name: IconName;
-  className?: string;
-}) {
+export function Icon({ name, className }: { name: IconName; className?: string }) {
   const symbol = `#${symbols[name]}`;
   return (
     <svg

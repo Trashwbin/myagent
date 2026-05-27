@@ -12,7 +12,6 @@ describe("web slash commands", () => {
       "/compact",
       "/revert-last",
       "/rewind",
-      "/model",
     ]);
   });
 
@@ -47,20 +46,11 @@ describe("web slash commands", () => {
     });
   });
 
-  it("opens a second-level picker for model selection", () => {
-    expect(parseSlashCommand("/model")).toMatchObject({
-      type: "valid",
-      command: { id: "model" },
-      args: "",
-    });
-    expect(parseSlashCommand("/model anthropic/sonnet")).toMatchObject({
-      type: "invalid",
-      command: { id: "model" },
-    });
-  });
-
   it("rejects unknown commands and extra compact arguments", () => {
     expect(parseSlashCommand("/missing")).toMatchObject({
+      type: "unknown",
+    });
+    expect(parseSlashCommand("/model")).toMatchObject({
       type: "unknown",
     });
     expect(parseSlashCommand("/compact now")).toMatchObject({

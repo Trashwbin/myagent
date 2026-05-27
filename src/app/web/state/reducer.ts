@@ -2,6 +2,7 @@ import type { Message, MessagePart, MessagePhase } from "../../../model/types.js
 import type { ServerMessage } from "../../protocol.js";
 import type { TurnEvent } from "../../../session/loop.js";
 import type { ToolDisplay } from "../../../session/tool-display.js";
+import { deriveSessionContextUsage } from "../../../session/context-usage.js";
 import {
   buildToolInputDisplay,
   buildToolResultDisplay,
@@ -19,6 +20,7 @@ import type {
   MutationDiffFile,
   ProjectSummary,
   SessionSummary,
+  TimelineCompactionPart,
   TimelinePart,
   TimelineToolPart,
   TimelineToolStatus,
@@ -49,6 +51,7 @@ export const initialAppState: AppState = {
   sessions: [],
   activeSessionId: null,
   timelines: {},
+  sessionContextUsage: {},
   loadedSessionIds: [],
   runningSessionIds: [],
   wsOpen: false,
@@ -58,7 +61,24 @@ export const initialAppState: AppState = {
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "provider_config_loaded":
-      return { ...state, providerConfig: action.config };
+      return {
+        ...state,
+        providerConfig: action.config,
+        sessionContextUsage: Object.fromEntries(
+          Object.entries(state.sessionContextUsage).map(([sessionId, usage]) => [
+            sessionId,
+            usage.contextWindow
+              ? usage
+              : {
+                  ...usage,
+                  contextWindow: contextWindowForSession(
+                    { ...state, providerConfig: action.config },
+                    sessionSummary(state, sessionId),
+                  ),
+                },
+          ]),
+        ),
+      };
     case "projects_loaded":
       return {
         ...state,
@@ -72,12 +92,23 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const loadedSessionIds = state.loadedSessionIds.includes(action.sessionId)
         ? state.loadedSessionIds
         : [...state.loadedSessionIds, action.sessionId];
+      const contextWindow = contextWindowForSession(
+        state,
+        sessionSummary(state, action.sessionId),
+      );
       return {
         ...state,
         loadedSessionIds,
         timelines: {
           ...state.timelines,
           [action.sessionId]: buildTimelineFromMessages(action.messages),
+        },
+        sessionContextUsage: {
+          ...state.sessionContextUsage,
+          [action.sessionId]: deriveSessionContextUsage({
+            messages: action.messages,
+            contextWindow,
+          }),
         },
       };
     }
@@ -136,6 +167,30 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
         },
       };
     case "turn_event":
+      if (message.event.type === "provider_usage") {
+        const contextWindow = contextWindowForSession(
+          state,
+          sessionSummary(state, message.sessionId),
+        );
+        return {
+          ...state,
+          sessionContextUsage: {
+            ...state.sessionContextUsage,
+            [message.sessionId]: deriveSessionContextUsage({
+              messages: [],
+              latestUsage: message.event.usage,
+              contextWindow,
+            }),
+          },
+          timelines: {
+            ...state.timelines,
+            [message.sessionId]: applyTurnEvent(
+              state.timelines[message.sessionId] ?? [],
+              message.event,
+            ),
+          },
+        };
+      }
       return {
         ...state,
         timelines: {
@@ -181,15 +236,17 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
     case "session_compacted":
       return {
         ...state,
-        runningSessionIds: state.runningSessionIds.filter(
-          (id) => id !== message.sessionId,
-        ),
+        runningSessionIds: message.auto
+          ? state.runningSessionIds
+          : state.runningSessionIds.filter((id) => id !== message.sessionId),
         timelines: {
           ...state.timelines,
-          [message.sessionId]: appendStatus(
+          [message.sessionId]: appendCompactionBoundary(
             state.timelines[message.sessionId] ?? [],
-            "info",
-            message.message,
+            compactionPartFromEvent(
+              message,
+              state.timelines[message.sessionId]?.length ?? 0,
+            ),
           ),
         },
       };
@@ -206,6 +263,13 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
               }
             : session,
         ),
+        sessionContextUsage: {
+          ...state.sessionContextUsage,
+          [message.sessionId]: deriveSessionContextUsage({
+            messages: [],
+            contextWindow: contextWindowForModelId(state, message.modelProfileId),
+          }),
+        },
         runningSessionIds: state.runningSessionIds.filter(
           (id) => id !== message.sessionId,
         ),
@@ -244,6 +308,31 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
   }
 }
 
+function sessionSummary(state: AppState, sessionId: string): SessionSummary | undefined {
+  return state.sessions.find((session) => session.id === sessionId);
+}
+
+function contextWindowForSession(
+  state: AppState,
+  session: SessionSummary | undefined,
+): number | undefined {
+  const modelId =
+    session?.modelProfileId ||
+    (session?.provider && session.model
+      ? `${session.provider}/${session.model}`
+      : undefined);
+  return contextWindowForModelId(state, modelId);
+}
+
+function contextWindowForModelId(
+  state: AppState,
+  modelProfileId: string | undefined,
+): number | undefined {
+  if (!modelProfileId) return undefined;
+  return state.providerConfig?.models.find((model) => model.id === modelProfileId)
+    ?.contextWindow;
+}
+
 export function buildTimelineFromMessages(messages: Message[]): TimelineTurn[] {
   let timeline: TimelineTurn[] = [];
   const toolInputs = new Map<string, unknown>();
@@ -280,7 +369,10 @@ export function buildTimelineFromMessages(messages: Message[]): TimelineTurn[] {
     }
 
     if (message.role === "summary") {
-      timeline = appendStatus(timeline, "info", "Conversation compacted.");
+      timeline = appendCompactionBoundary(
+        timeline,
+        compactionPartFromMessage(message, index),
+      );
     }
   }
 
@@ -329,7 +421,8 @@ function replayDisplayFromToolInput(
   const diff = computeDiff("", input.content, input.path);
   if (!diff.diff) return message.toolDisplay;
   return {
-    ...(message.toolDisplay ?? buildToolResultDisplay("write_file", input, message.content)),
+    ...(message.toolDisplay ??
+      buildToolResultDisplay("write_file", input, message.content)),
     kind: "mutation",
     title: message.toolDisplay?.title ?? toolDisplayTitle("write_file"),
     subtitle: input.path,
@@ -407,6 +500,7 @@ export function applyTurnEvent(
     case "provider_stream_started":
     case "provider_step_started":
     case "provider_step_finished":
+    case "provider_usage":
       return ensureActiveTimelineTurn(timeline);
     case "assistant_text_started":
       return removeStatus(ensureActiveTimelineTurn(timeline), "provider:reasoning");
@@ -672,6 +766,63 @@ function appendStatus(
   }));
 }
 
+function appendCompactionBoundary(
+  timeline: TimelineTurn[],
+  part: TimelineCompactionPart,
+): TimelineTurn[] {
+  return updateLastTurn(ensureTimelineTurn(timeline), (turn) => ({
+    ...turn,
+    assistantParts: [...turn.assistantParts, part],
+  }));
+}
+
+function compactionPartFromMessage(
+  message: Message,
+  index: number,
+): TimelineCompactionPart {
+  const part = message.parts?.find(
+    (candidate): candidate is Extract<MessagePart, { type: "compaction" }> =>
+      candidate.type === "compaction",
+  );
+  const metadata = isRecord(message.providerMetadata?.compaction)
+    ? message.providerMetadata.compaction
+    : undefined;
+  return {
+    id: `history:${index}:compaction`,
+    kind: "compaction",
+    summary: part?.summary ?? message.content,
+    compactedCount: part?.compactedCount ?? numberFrom(metadata?.compactedCount),
+    retainedCount: part?.retainedCount ?? numberFrom(metadata?.retainedCount),
+    previousSummaryUsed:
+      part?.previousSummaryUsed ?? booleanFrom(metadata?.previousSummaryUsed),
+    transcriptTruncated:
+      part?.transcriptTruncated ?? booleanFrom(metadata?.transcriptTruncated),
+    beforeTokens: part?.beforeTokens ?? numberFrom(metadata?.beforeTokens),
+    afterTokens: part?.afterTokens ?? numberFrom(metadata?.afterTokens),
+    createdAt: part?.createdAt ?? numberFrom(metadata?.createdAt),
+  };
+}
+
+function compactionPartFromEvent(
+  message: Extract<ServerMessage, { type: "session_compacted" }>,
+  index: number,
+): TimelineCompactionPart {
+  return {
+    id: `${message.sessionId}:compaction:${message.createdAt ?? index}`,
+    kind: "compaction",
+    summary: message.summary ?? message.message,
+    compactedCount: message.compactedCount,
+    retainedCount: message.retainedCount,
+    previousSummaryUsed: message.previousSummaryUsed,
+    transcriptTruncated: message.transcriptTruncated,
+    beforeTokens: message.beforeTokens,
+    afterTokens: message.afterTokens,
+    createdAt: message.createdAt,
+    auto: message.auto,
+    reason: message.reason,
+  };
+}
+
 function appendOrReplaceStatus(
   timeline: TimelineTurn[],
   level: "info" | "warning" | "error",
@@ -781,4 +932,16 @@ function resultStatus(content: string): TimelineToolStatus {
   if (content.startsWith("Tool call denied and was not executed:")) return "denied";
   if (content.startsWith("Error:")) return "failed";
   return "ok";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function numberFrom(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function booleanFrom(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
 }

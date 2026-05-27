@@ -1,4 +1,4 @@
-export type SlashCommandId = "compact" | "revert-last" | "rewind" | "model";
+export type SlashCommandId = "compact" | "revert-last" | "rewind";
 
 export type SlashCommand = {
   id: SlashCommandId;
@@ -8,7 +8,7 @@ export type SlashCommand = {
   insertText: string;
   requiresArgument?: boolean;
   argumentLabel?: string;
-  picker?: "model" | "checkpoint";
+  picker?: "checkpoint";
   pendingMessage: (args: string) => string;
 };
 
@@ -37,15 +37,6 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     insertText: "/rewind",
     picker: "checkpoint",
     pendingMessage: () => "Choose a checkpoint to restore.",
-  },
-  {
-    id: "model",
-    name: "/model",
-    usage: "/model",
-    description: "Choose a configured model for this session.",
-    insertText: "/model",
-    picker: "model",
-    pendingMessage: () => "Choose a model.",
   },
 ];
 

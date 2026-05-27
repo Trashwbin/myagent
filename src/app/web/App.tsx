@@ -30,7 +30,9 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const data = text ? JSON.parse(text) : null;
   if (!response.ok) {
     throw new Error(
-      data && (data.error || data.message) ? data.error || data.message : "Request failed",
+      data && (data.error || data.message)
+        ? data.error || data.message
+        : "Request failed",
     );
   }
   return data as T;
@@ -38,8 +40,7 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 function isActiveRunning(state: AppState) {
   return !!(
-    state.activeSessionId &&
-    state.runningSessionIds.includes(state.activeSessionId)
+    state.activeSessionId && state.runningSessionIds.includes(state.activeSessionId)
   );
 }
 
@@ -60,7 +61,7 @@ export function App() {
     [state.sessions, state.activeSessionId],
   );
   const activeTimeline = state.activeSessionId
-    ? state.timelines[state.activeSessionId] ?? []
+    ? (state.timelines[state.activeSessionId] ?? [])
     : [];
   const selectedProjectPath =
     draftProjectPath ||
@@ -79,7 +80,9 @@ export function App() {
     state.providerConfig?.current ||
     state.providerConfig?.models[0]?.id ||
     "";
-  const selectedModel = state.providerConfig?.models.find((model) => model.id === selectedModelId);
+  const selectedModel = state.providerConfig?.models.find(
+    (model) => model.id === selectedModelId,
+  );
   const modelLabel = selectedModel
     ? `${selectedModel.providerID}/${selectedModel.modelID}${selectedModel.variant ? ` · ${selectedModel.variant}` : ""}`
     : selectedModelId || "model";
@@ -88,10 +91,7 @@ export function App() {
     : isActiveRunning(state)
       ? "running"
       : "connected";
-  const slashChoices = useMemo(
-    () => buildSlashChoices(state.providerConfig, selectedModelId, activeTimeline),
-    [state.providerConfig, selectedModelId, activeTimeline],
-  );
+  const slashChoices = useMemo(() => buildSlashChoices(activeTimeline), [activeTimeline]);
 
   useEffect(() => {
     setApprovalIndex(0);
@@ -155,10 +155,16 @@ export function App() {
         return;
       }
 
-      if (rememberedProject && projects.some((project) => project.path === rememberedProject)) {
+      if (
+        rememberedProject &&
+        projects.some((project) => project.path === rememberedProject)
+      ) {
         setDraftProjectPath(rememberedProject);
       }
-      if (rememberedModel && config.models.some((model) => model.id === rememberedModel)) {
+      if (
+        rememberedModel &&
+        config.models.some((model) => model.id === rememberedModel)
+      ) {
         setDraftModelProfileId(rememberedModel);
       }
     };
@@ -321,9 +327,12 @@ export function App() {
   }
 
   async function addProject() {
-    const result = await fetchJson<ProjectSummary & { canceled?: boolean }>("/project/pick", {
-      method: "POST",
-    });
+    const result = await fetchJson<ProjectSummary & { canceled?: boolean }>(
+      "/project/pick",
+      {
+        method: "POST",
+      },
+    );
     if (result.canceled) return;
     await loadProjects();
     setDraftProjectPath(result.path);
@@ -383,11 +392,6 @@ export function App() {
   }
 
   async function handleSlashChoice(choice: SlashChoice) {
-    if (choice.type === "model") {
-      await selectModel(choice.id);
-      setInput("");
-      return;
-    }
     await rewindToCheckpoint(choice.id);
   }
 
@@ -466,14 +470,6 @@ export function App() {
           JSON.stringify({
             type: "compact_session",
             sessionId: activeSessionId,
-          }),
-        );
-      } else if (command.id === "model") {
-        wsRef.current.send(
-          JSON.stringify({
-            type: "user_message",
-            sessionId: activeSessionId,
-            text,
           }),
         );
       }
@@ -574,6 +570,11 @@ export function App() {
             }}
             providerConfig={state.providerConfig}
             selectedModelId={selectedModelId}
+            selectedContextUsage={
+              state.activeSessionId
+                ? state.sessionContextUsage[state.activeSessionId]
+                : undefined
+            }
             onSelectModel={(modelProfileId) => {
               void selectModel(modelProfileId);
             }}
@@ -597,29 +598,8 @@ export function App() {
   );
 }
 
-function buildSlashChoices(
-  providerConfig: ProviderConfig | null,
-  selectedModelId: string,
-  timeline: AppState["timelines"][string],
-): SlashChoice[] {
-  return [
-    ...modelChoices(providerConfig, selectedModelId),
-    ...checkpointChoices(timeline),
-  ];
-}
-
-function modelChoices(
-  providerConfig: ProviderConfig | null,
-  selectedModelId: string,
-): SlashChoice[] {
-  if (!providerConfig) return [];
-  return providerConfig.models.map((model) => ({
-    type: "model" as const,
-    id: model.id,
-    label: `${model.model || model.modelID || model.id}${model.variant ? ` · ${model.variant}` : ""}`,
-    description: `${model.providerID || model.provider}${model.name ? ` · ${model.name}` : ""}${model.mode ? ` · ${model.mode}` : ""}`,
-    active: model.id === selectedModelId,
-  }));
+function buildSlashChoices(timeline: AppState["timelines"][string]): SlashChoice[] {
+  return checkpointChoices(timeline);
 }
 
 function checkpointChoices(timeline: AppState["timelines"][string]): SlashChoice[] {
@@ -643,7 +623,9 @@ function checkpointChoices(timeline: AppState["timelines"][string]): SlashChoice
 }
 
 function checkpointLabel(part: TimelineToolPart): string {
-  return part.subtitle || part.title || part.toolName || part.checkpointId || "checkpoint";
+  return (
+    part.subtitle || part.title || part.toolName || part.checkpointId || "checkpoint"
+  );
 }
 
 function checkpointDescription(part: TimelineToolPart): string {

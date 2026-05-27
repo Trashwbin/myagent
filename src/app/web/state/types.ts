@@ -1,4 +1,5 @@
 import type { ApprovalRequest } from "../../../session/loop.js";
+import type { SessionContextUsage } from "../../../model/types.js";
 import type { ToolDisplay } from "../../../session/tool-display.js";
 
 export type ProviderModelSummary = {
@@ -11,6 +12,7 @@ export type ProviderModelSummary = {
   name?: string;
   variant?: string;
   variants?: string[];
+  contextWindow?: number;
   mode?: string;
 };
 
@@ -75,6 +77,21 @@ export type TimelineStatusPart = {
   text: string;
 };
 
+export type TimelineCompactionPart = {
+  id: string;
+  kind: "compaction";
+  summary: string;
+  compactedCount?: number;
+  retainedCount?: number;
+  previousSummaryUsed?: boolean;
+  transcriptTruncated?: boolean;
+  beforeTokens?: number;
+  afterTokens?: number;
+  createdAt?: number;
+  auto?: boolean;
+  reason?: "context_limit";
+};
+
 export type TimelineToolKind = "context" | "shell" | "mutation" | "skill" | "generic";
 
 export type TimelineToolStatus =
@@ -104,6 +121,7 @@ export type TimelineToolPart = {
 export type TimelinePart =
   | TimelineTextPart
   | TimelineStatusPart
+  | TimelineCompactionPart
   | TimelineToolPart;
 
 export type TimelineUserMessage = {
@@ -133,6 +151,7 @@ export type AppState = {
   sessions: SessionSummary[];
   activeSessionId: string | null;
   timelines: Record<string, TimelineTurn[]>;
+  sessionContextUsage: Record<string, SessionContextUsage>;
   loadedSessionIds: string[];
   runningSessionIds: string[];
   wsOpen: boolean;
