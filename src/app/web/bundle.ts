@@ -16,16 +16,21 @@ let cachedAssets: Promise<Map<string, BundledAsset>> | undefined;
 export function getAppClientBundle(): Promise<string> {
   return getAppClientAsset("/assets/client.js").then((asset) => {
     if (!asset) throw new Error("esbuild produced no client bundle");
-    return typeof asset.content === "string" ? asset.content : new TextDecoder().decode(asset.content);
+    return typeof asset.content === "string"
+      ? asset.content
+      : new TextDecoder().decode(asset.content);
   });
 }
 
-export async function getAppClientAsset(pathname: string): Promise<ClientAsset | undefined> {
+export async function getAppClientAsset(
+  pathname: string,
+): Promise<ClientAsset | undefined> {
   const assets = await getBundledAssets();
   return assets.get(pathname);
 }
 
 function getBundledAssets(): Promise<Map<string, BundledAsset>> {
+  if (process.env.MYAGENT_WEB_BUNDLE_CACHE === "0") return buildClientAssets();
   cachedAssets ??= buildClientAssets();
   return cachedAssets;
 }
@@ -58,7 +63,8 @@ async function buildClientAssets(): Promise<Map<string, BundledAsset>> {
         contentType: contentTypeFor(output.path),
       });
     }
-    if (!assets.has("/assets/client.js")) throw new Error("esbuild produced no client bundle");
+    if (!assets.has("/assets/client.js"))
+      throw new Error("esbuild produced no client bundle");
     return assets;
   } catch (err) {
     throw err;
