@@ -95,6 +95,12 @@ export type SessionResult = {
 export type TurnEvent =
   | { type: "turn_started" }
   | {
+      type: "turn_finished";
+      stopReason?: "end_turn" | "tool_use" | "length";
+    }
+  | { type: "turn_failed"; error: string }
+  | { type: "turn_usage_updated"; usage: ModelUsage }
+  | {
       type: "message_started";
       messageId: string;
       role: Message["role"];
@@ -133,17 +139,6 @@ export type TurnEvent =
       display?: ToolDisplay;
       metadata?: ProviderMetadata;
     }
-  | { type: "provider_stream_started" }
-  | { type: "provider_step_started" }
-  | { type: "provider_step_finished" }
-  | { type: "provider_usage"; usage: ModelUsage }
-  | { type: "assistant_text_started"; phase?: MessagePhase }
-  | { type: "assistant_text_finished"; phase?: MessagePhase }
-  | { type: "assistant_reasoning_started" }
-  | { type: "assistant_reasoning_finished" }
-  | { type: "assistant_text_delta"; text: string; phase?: MessagePhase }
-  | { type: "tool_call"; id: string; name: string; input: unknown; display?: ToolDisplay }
-  | { type: "assistant_message"; message: Message }
   | {
       type: "tool_approval_required";
       id: string;
@@ -158,18 +153,7 @@ export type TurnEvent =
       id: string;
       name: string;
       decision: "allow" | "deny";
-    }
-  | {
-      type: "tool_started";
-      id: string;
-      name: string;
-      input: unknown;
-      display?: ToolDisplay;
-    }
-  | { type: "tool_result"; message: Message; display?: ToolDisplay }
-  | { type: "turn_truncated" }
-  | { type: "turn_failed"; error: string }
-  | { type: "turn_finished" };
+    };
 
 export type DurableTurnSink = {
   messageStarted(input: {
@@ -177,10 +161,7 @@ export type DurableTurnSink = {
     content?: string;
     status?: MessageLifecycleStatus;
   }): Promise<string> | string;
-  messageFinished(
-    messageId: string,
-    message: Message,
-  ): Promise<void> | void;
+  messageFinished(messageId: string, message: Message): Promise<void> | void;
   messageFailed(
     messageId: string,
     input: { message: Message; error: string },
@@ -297,6 +278,42 @@ function mutationDisplayFiles(
   return display.kind === "mutation" ? display.files : undefined;
 }
 
+async function persistDurableToolResult(
+  durableSink: DurableTurnSink | undefined,
+  msg: Message,
+  display?: ToolDisplay,
+): Promise<void> {
+  if (!durableSink || msg.role !== "tool_result") return;
+  const messageId = await durableSink.messageStarted({
+    role: "tool_result",
+    content: msg.content,
+    status: msg.status ?? "completed",
+  });
+  const partId = await durableSink.partStarted({
+    messageId,
+    type: "tool-result",
+    status: msg.status ?? "completed",
+    toolCallId: msg.toolCallId,
+    toolName: msg.toolName,
+    output: msg.content,
+    display: display ?? msg.toolDisplay,
+    metadata: {
+      ...(msg.providerMetadata ?? {}),
+      ...(msg.checkpointId ? { checkpointId: msg.checkpointId } : {}),
+    },
+  });
+  await durableSink.partFinished(partId, {
+    status: msg.status ?? "completed",
+    output: msg.content,
+    display: display ?? msg.toolDisplay,
+    metadata: {
+      ...(msg.providerMetadata ?? {}),
+      ...(msg.checkpointId ? { checkpointId: msg.checkpointId } : {}),
+    },
+  });
+  await durableSink.messageFinished(messageId, msg);
+}
+
 async function runAgentLoop(
   provider: Provider,
   registry: ToolRegistry,
@@ -316,28 +333,8 @@ async function runAgentLoop(
   const sessionRules = options.sessionApprovalRules ?? [];
   const store = options.store;
   const readState = options.readState ?? new ReadStateTracker();
-  if (options.durableSink && onEvent) await onEvent({ type: "turn_started" });
-  const persistDurableToolResult = async (msg: Message, display?: ToolDisplay) => {
-    const durableSink = options.durableSink;
-    if (!durableSink || msg.role !== "tool_result") return;
-    const messageId = await durableSink.messageStarted({
-      role: "tool_result",
-      content: msg.content,
-      status: msg.status ?? "completed",
-    });
-    const partId = await durableSink.partStarted({
-      messageId,
-      type: "tool-result",
-      status: msg.status ?? "completed",
-      toolCallId: msg.toolCallId,
-      toolName: msg.toolName,
-      output: msg.content,
-      display: display ?? msg.toolDisplay,
-      metadata: msg.providerMetadata,
-    });
-    await durableSink.partFinished(partId, { status: msg.status ?? "completed" });
-    await durableSink.messageFinished(messageId, msg);
-  };
+  const durableSink = options.durableSink;
+  if (onEvent) await onEvent({ type: "turn_started" });
 
   let lastStopReason: "end_turn" | "tool_use" | "length" | undefined;
   // eslint-disable-next-line no-constant-condition
@@ -355,7 +352,6 @@ async function runAgentLoop(
       display?: ToolDisplay;
       providerMetadata?: ProviderMetadata;
     }> = [];
-    const durableSink = options.durableSink;
     let assistantMessageId: string | undefined;
     let activeTextPartId: string | undefined;
     let activeReasoningPartId: string | undefined;
@@ -403,82 +399,66 @@ async function runAgentLoop(
         systemPrompt,
       })) {
         switch (canonical.type) {
-        case "start":
-          if (onEvent) await onEvent({ type: "provider_stream_started" });
-          break;
-        case "step-start":
-          if (onEvent) await onEvent({ type: "provider_step_started" });
-          break;
-        case "step-finish":
-          if (onEvent) await onEvent({ type: "provider_step_finished" });
-          if (onEvent && canonical.usage) {
-            latestUsage = canonical.usage;
-            await onEvent({ type: "provider_usage", usage: canonical.usage });
-          }
-          providerMetadata = canonical.providerMetadata;
-          lastStopReason =
-            canonical.reason === "tool-calls"
-              ? "tool_use"
-              : canonical.reason === "length"
-                ? "length"
-                : "end_turn";
-          break;
-        case "text-start":
-          await startDurableTextPart("commentary");
-          if (onEvent)
-            await onEvent({ type: "assistant_text_started", phase: "commentary" });
-          break;
-        case "text":
-          await startDurableTextPart("commentary");
-          assistantText += canonical.delta;
-          if (durableSink && activeTextPartId) {
-            await durableSink.partDelta(activeTextPartId, canonical.delta);
-          }
-          if (onEvent)
-            await onEvent({
-              type: "assistant_text_delta",
-              text: canonical.delta,
-              phase: "commentary",
-            });
-          break;
-        case "text-end":
-          if (durableSink && activeTextPartId) {
-            await durableSink.partFinished(activeTextPartId, {
-              status: "completed",
-              phase: "commentary",
-            });
-          }
-          if (onEvent)
-            await onEvent({ type: "assistant_text_finished", phase: "commentary" });
-          break;
-        case "reasoning-start":
-          await startDurableReasoningPart();
-          if (onEvent) await onEvent({ type: "assistant_reasoning_started" });
-          break;
-        case "reasoning":
-          await startDurableReasoningPart();
-          reasoningText += canonical.delta;
-          if (durableSink && activeReasoningPartId) {
-            await durableSink.partDelta(activeReasoningPartId, canonical.delta);
-          }
-          reasoningMetadata = {
-            ...(reasoningMetadata ?? {}),
-            ...(canonical.providerMetadata ?? {}),
-          };
-          if (!assistantRaw)
-            assistantRaw = providerRawFromMetadata(canonical.providerMetadata);
-          break;
-        case "reasoning-end":
-          if (durableSink && activeReasoningPartId) {
-            await durableSink.partFinished(activeReasoningPartId, {
-              status: "completed",
-              metadata: reasoningMetadata,
-            });
-          }
-          if (onEvent) await onEvent({ type: "assistant_reasoning_finished" });
-          break;
-        case "tool-call":
-          {
+          case "start":
+            break;
+          case "step-start":
+            break;
+          case "step-finish":
+            if (onEvent && canonical.usage) {
+              latestUsage = canonical.usage;
+              await onEvent({ type: "turn_usage_updated", usage: canonical.usage });
+            }
+            providerMetadata = canonical.providerMetadata;
+            lastStopReason =
+              canonical.reason === "tool-calls"
+                ? "tool_use"
+                : canonical.reason === "length"
+                  ? "length"
+                  : "end_turn";
+            break;
+          case "text-start":
+            await startDurableTextPart("commentary");
+            break;
+          case "text":
+            await startDurableTextPart("commentary");
+            assistantText += canonical.delta;
+            if (durableSink && activeTextPartId) {
+              await durableSink.partDelta(activeTextPartId, canonical.delta);
+            }
+            break;
+          case "text-end":
+            if (durableSink && activeTextPartId) {
+              await durableSink.partFinished(activeTextPartId, {
+                status: "completed",
+                phase: "commentary",
+              });
+            }
+            break;
+          case "reasoning-start":
+            await startDurableReasoningPart();
+            break;
+          case "reasoning":
+            await startDurableReasoningPart();
+            reasoningText += canonical.delta;
+            if (durableSink && activeReasoningPartId) {
+              await durableSink.partDelta(activeReasoningPartId, canonical.delta);
+            }
+            reasoningMetadata = {
+              ...(reasoningMetadata ?? {}),
+              ...(canonical.providerMetadata ?? {}),
+            };
+            if (!assistantRaw)
+              assistantRaw = providerRawFromMetadata(canonical.providerMetadata);
+            break;
+          case "reasoning-end":
+            if (durableSink && activeReasoningPartId) {
+              await durableSink.partFinished(activeReasoningPartId, {
+                status: "completed",
+                metadata: reasoningMetadata,
+              });
+            }
+            break;
+          case "tool-call": {
             const display = buildToolInputDisplay(canonical.name, canonical.input);
             toolCalls.push({
               id: canonical.id,
@@ -503,34 +483,26 @@ async function runAgentLoop(
                 await durableSink.partFinished(partId, { status: "completed" });
               }
             }
-            if (onEvent)
-              await onEvent({
-                type: "tool_call",
-                id: canonical.id,
-                name: canonical.name,
-                input: canonical.input,
-                display,
-              });
             break;
           }
-        case "tool-result":
-          break;
-        case "finish":
-          if (onEvent && canonical.usage) {
-            latestUsage = canonical.usage;
-            await onEvent({ type: "provider_usage", usage: canonical.usage });
-          }
-          providerMetadata = canonical.providerMetadata;
-          lastStopReason =
-            canonical.reason === "tool-calls"
-              ? "tool_use"
-              : canonical.reason === "length"
-                ? "length"
-                : "end_turn";
-          break;
-        case "abort":
-          lastStopReason = "end_turn";
-          break;
+          case "tool-result":
+            break;
+          case "finish":
+            if (onEvent && canonical.usage) {
+              latestUsage = canonical.usage;
+              await onEvent({ type: "turn_usage_updated", usage: canonical.usage });
+            }
+            providerMetadata = canonical.providerMetadata;
+            lastStopReason =
+              canonical.reason === "tool-calls"
+                ? "tool_use"
+                : canonical.reason === "length"
+                  ? "length"
+                  : "end_turn";
+            break;
+          case "abort":
+            lastStopReason = "end_turn";
+            break;
         }
       }
     } catch (err) {
@@ -595,7 +567,8 @@ async function runAgentLoop(
         newMessages.push(failedMessage);
         if (durableSink) {
           const messageId =
-            assistantMessageId ?? (await durableSink.messageStarted({
+            assistantMessageId ??
+            (await durableSink.messageStarted({
               role: "assistant",
               content: assistantText,
               status: "failed",
@@ -605,20 +578,12 @@ async function runAgentLoop(
             error: failure,
           });
         }
-        if (onEvent)
-          await onEvent({ type: "assistant_message", message: failedMessage });
       }
       for (const tc of toolCalls) {
         const synthetic = interruptedToolResult(tc, failure);
         messages.push(synthetic);
         newMessages.push(synthetic);
-        await persistDurableToolResult(synthetic, synthetic.toolDisplay);
-        if (onEvent)
-          await onEvent({
-            type: "tool_result",
-            message: synthetic,
-            display: synthetic.toolDisplay,
-          });
+        await persistDurableToolResult(durableSink, synthetic, synthetic.toolDisplay);
       }
       if (onEvent) await onEvent({ type: "turn_failed", error: failure });
       throw err;
@@ -686,12 +651,8 @@ async function runAgentLoop(
     }
     messages.push(assistantMsg);
     newMessages.push(assistantMsg);
-    if (onEvent) await onEvent({ type: "assistant_message", message: assistantMsg });
 
     if (toolCalls.length === 0) {
-      if (lastStopReason === "length" && onEvent) {
-        await onEvent({ type: "turn_truncated" });
-      }
       break;
     }
 
@@ -713,13 +674,7 @@ async function runAgentLoop(
         };
         messages.push(msg);
         newMessages.push(msg);
-        await persistDurableToolResult(msg, toolDisplay);
-        if (onEvent)
-          await onEvent({
-            type: "tool_result",
-            message: msg,
-            display: toolDisplay,
-          });
+        await persistDurableToolResult(durableSink, msg, toolDisplay);
         continue;
       }
 
@@ -815,13 +770,7 @@ async function runAgentLoop(
           };
           messages.push(msg);
           newMessages.push(msg);
-          await persistDurableToolResult(msg, toolDisplay);
-          if (onEvent)
-            await onEvent({
-              type: "tool_result",
-              message: msg,
-              display: toolDisplay,
-            });
+          await persistDurableToolResult(durableSink, msg, toolDisplay);
           continue;
         } else {
           const display = buildApprovalDisplay(tc.name, tc.input, decision);
@@ -865,14 +814,9 @@ async function runAgentLoop(
             msg.toolDisplay = toolDisplay;
             messages.push(msg);
             newMessages.push(msg);
-            await persistDurableToolResult(msg, toolDisplay);
+            await persistDurableToolResult(durableSink, msg, toolDisplay);
             if (onEvent)
-              await onEvent({
-                type: "tool_result",
-                message: msg,
-                display: toolDisplay,
-              });
-            if (onEvent) await onEvent({ type: "turn_finished" });
+              await onEvent({ type: "turn_finished", stopReason: lastStopReason });
             return { aborted: true };
           }
 
@@ -949,13 +893,7 @@ async function runAgentLoop(
         };
         messages.push(msg);
         newMessages.push(msg);
-        await persistDurableToolResult(msg, toolDisplay);
-        if (onEvent)
-          await onEvent({
-            type: "tool_result",
-            message: msg,
-            display: toolDisplay,
-          });
+        await persistDurableToolResult(durableSink, msg, toolDisplay);
         continue;
       }
 
@@ -969,13 +907,7 @@ async function runAgentLoop(
         msg.toolDisplay = toolDisplay;
         messages.push(msg);
         newMessages.push(msg);
-        await persistDurableToolResult(msg, toolDisplay);
-        if (onEvent)
-          await onEvent({
-            type: "tool_result",
-            message: msg,
-            display: toolDisplay,
-          });
+        await persistDurableToolResult(durableSink, msg, toolDisplay);
         continue;
       }
 
@@ -1000,26 +932,11 @@ async function runAgentLoop(
             };
             messages.push(msg);
             newMessages.push(msg);
-            await persistDurableToolResult(msg, toolDisplay);
-            if (onEvent)
-              await onEvent({
-                type: "tool_result",
-                message: msg,
-                display: toolDisplay,
-              });
+            await persistDurableToolResult(durableSink, msg, toolDisplay);
             continue;
           }
         }
       }
-
-      if (onEvent)
-        await onEvent({
-          type: "tool_started",
-          id: tc.id,
-          name: tc.name,
-          input: toolInput,
-          display: buildToolInputDisplay(tc.name, toolInput),
-        });
 
       const result = await tool.execute(toolInput, {
         cwd,
@@ -1045,17 +962,11 @@ async function runAgentLoop(
       };
       messages.push(resultMsg);
       newMessages.push(resultMsg);
-      await persistDurableToolResult(resultMsg, toolDisplay);
-      if (onEvent)
-        await onEvent({
-          type: "tool_result",
-          message: resultMsg,
-          display: toolDisplay,
-        });
+      await persistDurableToolResult(durableSink, resultMsg, toolDisplay);
     }
   }
 
-  if (onEvent) await onEvent({ type: "turn_finished" });
+  if (onEvent) await onEvent({ type: "turn_finished", stopReason: lastStopReason });
   return { aborted: false, stopReason: lastStopReason };
 }
 

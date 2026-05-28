@@ -174,7 +174,6 @@ export class SessionManager {
     };
 
     const onEvent = (event: TurnEvent) => {
-      if (isDurableReplacedEvent(event)) return;
       this.sendEvent(sessionId, {
         type: "turn_event",
         sessionId,
@@ -345,35 +344,19 @@ export class SessionManager {
         active.modelProfiles,
         active.session.modelProfileId,
       );
-      this.appendAssistantStatus(active, message);
-      this.sendEvent(active.session.id, {
-        type: "turn_event",
-        sessionId: active.session.id,
-        event: {
-          type: "assistant_message",
-          message: { role: "assistant", content: message },
-        },
-      });
+      this.appendLifecycleAssistantStatus(active, message);
       return { ok: true };
     }
 
     const result = this.applyModelSwitch(active, requestedId);
     if (!result.ok) {
       const message = formatUnknownModel(requestedId, active.modelProfiles);
-      this.appendAssistantStatus(active, message);
-      this.sendEvent(active.session.id, {
-        type: "turn_event",
-        sessionId: active.session.id,
-        event: {
-          type: "assistant_message",
-          message: { role: "assistant", content: message },
-        },
-      });
+      this.appendLifecycleAssistantStatus(active, message);
       return { ok: true };
     }
 
     const message = formatModelSwitch(result.profile);
-    this.appendAssistantStatus(active, message);
+    this.appendLifecycleAssistantStatus(active, message);
     this.sendEvent(active.session.id, {
       type: "session_model_changed",
       sessionId: active.session.id,
@@ -407,10 +390,73 @@ export class SessionManager {
     return { ok: true, profile };
   }
 
-  private appendAssistantStatus(active: ActiveSession, content: string): void {
-    const message: Message = { role: "assistant", content };
+  private appendLifecycleAssistantStatus(active: ActiveSession, content: string): void {
+    const messageId = this.store.startMessage(active.session.id, {
+      role: "assistant",
+      content,
+      status: "completed",
+    });
+    const partId = this.store.startMessagePart({
+      sessionId: active.session.id,
+      messageId,
+      type: "text",
+      phase: "final",
+      status: "completed",
+      text: content,
+    });
+    const message: Message = {
+      role: "assistant",
+      content,
+      status: "completed",
+      parts: [{ type: "text", text: content, phase: "final", status: "completed" }],
+    };
+    this.store.finishMessagePart(partId, { status: "completed", text: content });
+    this.store.finishMessage(messageId, message);
     active.session.messages.push(message);
-    this.store.appendMessages(active.session.id, [message]);
+    this.sendEvent(active.session.id, {
+      type: "turn_event",
+      sessionId: active.session.id,
+      event: { type: "turn_started" },
+    });
+    this.sendEvent(active.session.id, {
+      type: "turn_event",
+      sessionId: active.session.id,
+      event: {
+        type: "message_started",
+        messageId,
+        role: "assistant",
+        status: "completed",
+      },
+    });
+    this.sendEvent(active.session.id, {
+      type: "turn_event",
+      sessionId: active.session.id,
+      event: {
+        type: "part_started",
+        messageId,
+        partId,
+        partType: "text",
+        phase: "final",
+        status: "completed",
+        text: content,
+      },
+    });
+    this.sendEvent(active.session.id, {
+      type: "turn_event",
+      sessionId: active.session.id,
+      event: {
+        type: "part_finished",
+        partId,
+        status: "completed",
+        phase: "final",
+        text: content,
+      },
+    });
+    this.sendEvent(active.session.id, {
+      type: "turn_event",
+      sessionId: active.session.id,
+      event: { type: "message_finished", messageId, message },
+    });
   }
 
   private createDurableSink(sessionId: string): DurableTurnSink {
@@ -636,20 +682,4 @@ function messagesBeforeCurrentUser(messages: Message[]): Message[] {
   const last = messages[messages.length - 1];
   if (last?.role !== "user") return [...messages];
   return messages.slice(0, -1);
-}
-
-function isDurableReplacedEvent(event: TurnEvent): boolean {
-  switch (event.type) {
-    case "assistant_text_started":
-    case "assistant_text_delta":
-    case "assistant_text_finished":
-    case "assistant_reasoning_started":
-    case "assistant_reasoning_finished":
-    case "tool_call":
-    case "tool_result":
-    case "assistant_message":
-      return true;
-    default:
-      return false;
-  }
 }

@@ -138,17 +138,20 @@ describe("web timeline reducer", () => {
     expect(turns[0]?.mutationDiffs).toHaveLength(0);
   });
 
-  it("turn events collapse streaming text into the final assistant message", () => {
+  it("turn events stream text through durable lifecycle parts", () => {
     const initial = buildTimelineFromMessages([{ role: "user", content: "hi" }]);
     const events: TurnEvent[] = [
-      { type: "assistant_text_started" },
-      { type: "assistant_text_delta", text: "Hello" },
-      { type: "assistant_text_delta", text: " there" },
-      { type: "assistant_text_finished" },
       {
-        type: "assistant_message",
-        message: { role: "assistant", content: "Hello there" },
+        type: "part_started",
+        messageId: "m1",
+        partId: "p1",
+        partType: "text",
+        phase: "commentary",
+        status: "running",
       },
+      { type: "part_delta", partId: "p1", delta: "Hello" },
+      { type: "part_delta", partId: "p1", delta: " there" },
+      { type: "part_finished", partId: "p1", status: "completed", phase: "final" },
     ];
 
     const result = events.reduce(
@@ -160,7 +163,7 @@ describe("web timeline reducer", () => {
 
     expect(textParts).toHaveLength(1);
     expect(textParts[0]).toMatchObject({ text: "Hello there" });
-    expect("streaming" in textParts[0]!).toBe(false);
+    expect(textParts[0]).toMatchObject({ streaming: false });
   });
 
   it("consumes durable part lifecycle events for streaming assistant text", () => {
@@ -207,14 +210,14 @@ describe("web timeline reducer", () => {
     ]);
   });
 
-  it("stores context usage by session from provider usage events", () => {
+  it("stores context usage by session from turn usage events", () => {
     const result = appReducer(initialAppState, {
       type: "server_message",
       message: {
         type: "turn_event",
         sessionId: "s1",
         event: {
-          type: "provider_usage",
+          type: "turn_usage_updated",
           usage: {
             inputTokens: 78000,
             outputTokens: 1200,
@@ -293,38 +296,39 @@ describe("web timeline reducer", () => {
   it("uses explicit assistant phases instead of guessing final text from position", () => {
     const initial = buildTimelineFromMessages([{ role: "user", content: "inspect" }]);
     const events: TurnEvent[] = [
-      { type: "assistant_text_started", phase: "commentary" },
       {
-        type: "assistant_text_delta",
-        text: "I will inspect first.",
+        type: "part_started",
+        messageId: "m1",
+        partId: "p1",
+        partType: "text",
         phase: "commentary",
-      },
-      { type: "assistant_text_finished", phase: "commentary" },
-      {
-        type: "assistant_message",
-        message: {
-          role: "assistant",
-          content: "I will inspect first.",
-          parts: [{ type: "text", text: "I will inspect first.", phase: "commentary" }],
-          toolCalls: [{ id: "read1", name: "Read", input: { path: "src/cli.ts" } }],
-        },
+        status: "completed",
+        text: "I will inspect first.",
       },
       {
-        type: "tool_result",
-        message: {
-          role: "tool_result",
-          toolCallId: "read1",
-          toolName: "Read",
-          content: '1: import React from "react";',
-        },
+        type: "part_started",
+        messageId: "m1",
+        partId: "read1",
+        partType: "tool-call",
+        status: "completed",
+        toolCallId: "read1",
+        toolName: "Read",
+        input: { path: "src/app-main.ts" },
       },
       {
-        type: "assistant_message",
-        message: {
-          role: "assistant",
-          content: "The final answer.",
-          parts: [{ type: "text", text: "The final answer.", phase: "final" }],
-        },
+        type: "part_finished",
+        partId: "read1",
+        status: "completed",
+        output: '1: import { createAppServer } from "./app/server.js";',
+      },
+      {
+        type: "part_started",
+        messageId: "m2",
+        partId: "p2",
+        partType: "text",
+        phase: "final",
+        status: "completed",
+        text: "The final answer.",
       },
     ];
 
@@ -378,9 +382,15 @@ describe("web timeline reducer", () => {
   it("does not mark a turn complete when only assistant text streaming finishes", () => {
     const initial = buildTimelineFromMessages([{ role: "user", content: "hi" }]);
     const streamingFinished = [
-      { type: "assistant_text_started" },
-      { type: "assistant_text_delta", text: "I will inspect this." },
-      { type: "assistant_text_finished" },
+      {
+        type: "part_started",
+        messageId: "m1",
+        partId: "p1",
+        partType: "text",
+        status: "running",
+      },
+      { type: "part_delta", partId: "p1", delta: "I will inspect this." },
+      { type: "part_finished", partId: "p1", status: "completed" },
     ].reduce((timeline, event) => applyTurnEvent(timeline, event as TurnEvent), initial);
 
     expect(streamingFinished[0]?.completed).toBe(false);
@@ -392,17 +402,28 @@ describe("web timeline reducer", () => {
     expect(turnFinished[0]?.completedAt).toBeTypeOf("number");
   });
 
-  it("consumes stream boundary events without leaving status noise", () => {
+  it("consumes reasoning and text lifecycle events without leaving status noise", () => {
     const initial = buildTimelineFromMessages([{ role: "user", content: "hi" }]);
     const events: TurnEvent[] = [
-      { type: "provider_stream_started" },
-      { type: "provider_step_started" },
-      { type: "assistant_reasoning_started" },
-      { type: "assistant_reasoning_finished" },
-      { type: "assistant_text_started" },
-      { type: "assistant_text_delta", text: "Hello" },
-      { type: "assistant_text_finished" },
-      { type: "provider_step_finished" },
+      {
+        type: "part_started",
+        messageId: "m1",
+        partId: "r1",
+        partType: "reasoning",
+        status: "running",
+      },
+      { type: "part_delta", partId: "r1", delta: "Think." },
+      { type: "part_finished", partId: "r1", status: "completed" },
+      {
+        type: "part_started",
+        messageId: "m1",
+        partId: "p1",
+        partType: "text",
+        phase: "commentary",
+        status: "running",
+      },
+      { type: "part_delta", partId: "p1", delta: "Hello" },
+      { type: "part_finished", partId: "p1", status: "completed" },
     ];
 
     const result = events.reduce(
@@ -413,6 +434,7 @@ describe("web timeline reducer", () => {
 
     expect(parts.filter((part) => part.kind === "status")).toHaveLength(0);
     expect(parts).toMatchObject([
+      { kind: "text", text: "Think.", streaming: false },
       { kind: "text", text: "Hello", streaming: false, phase: "commentary" },
     ]);
   });
@@ -422,26 +444,38 @@ describe("web timeline reducer", () => {
       { role: "user", content: "inspect and edit" },
     ]);
     const events: TurnEvent[] = [
-      { type: "tool_started", id: "read1", name: "Read", input: { path: "a.ts" } },
       {
-        type: "tool_result",
-        message: {
-          role: "tool_result",
-          toolCallId: "read1",
-          toolName: "Read",
-          content: "1: const a = 1;",
-        },
+        type: "part_started",
+        messageId: "m1",
+        partId: "read1",
+        partType: "tool-call",
+        status: "completed",
+        toolCallId: "read1",
+        toolName: "Read",
+        input: { path: "a.ts" },
       },
-      { type: "tool_started", id: "edit1", name: "edit_file", input: { path: "a.ts" } },
       {
-        type: "tool_result",
-        message: {
-          role: "tool_result",
-          toolCallId: "edit1",
-          toolName: "edit_file",
-          content:
-            "Edited a.ts (1 additions, 1 deletions)\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;",
-        },
+        type: "part_finished",
+        partId: "read1",
+        status: "completed",
+        output: "1: const a = 1;",
+      },
+      {
+        type: "part_started",
+        messageId: "m1",
+        partId: "edit1",
+        partType: "tool-call",
+        status: "completed",
+        toolCallId: "edit1",
+        toolName: "edit_file",
+        input: { path: "a.ts" },
+      },
+      {
+        type: "part_finished",
+        partId: "edit1",
+        status: "completed",
+        output:
+          "Edited a.ts (1 additions, 1 deletions)\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;",
       },
     ];
 
@@ -454,6 +488,54 @@ describe("web timeline reducer", () => {
     expect(tools[0]).toMatchObject({ displayKind: "context" });
     expect(tools[1]).toMatchObject({ displayKind: "mutation" });
     expect(result[0]?.mutationDiffs).toHaveLength(1);
+  });
+
+  it("keeps checkpoint ids from lifecycle tool-result parts", () => {
+    const initial = buildTimelineFromMessages([
+      { role: "user", content: "edit with checkpoint" },
+    ]);
+    const events: TurnEvent[] = [
+      {
+        type: "part_started",
+        messageId: "m1",
+        partId: "edit1",
+        partType: "tool-call",
+        status: "completed",
+        toolCallId: "edit1",
+        toolName: "edit_file",
+        input: { path: "a.ts" },
+      },
+      {
+        type: "part_started",
+        messageId: "m2",
+        partId: "stored-result-part-1",
+        partType: "tool-result",
+        status: "completed",
+        toolCallId: "edit1",
+        toolName: "edit_file",
+        output:
+          "Edited a.ts (1 additions, 1 deletions)\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;",
+        metadata: { checkpointId: "cp-live" },
+      },
+      {
+        type: "part_finished",
+        partId: "stored-result-part-1",
+        status: "completed",
+        output:
+          "Edited a.ts (1 additions, 1 deletions)\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;",
+        metadata: { checkpointId: "cp-live" },
+      },
+    ];
+
+    const result = events.reduce(
+      (timeline, event) => applyTurnEvent(timeline, event),
+      initial,
+    );
+    const tool = result[0]?.assistantParts.find(
+      (part) => part.kind === "tool" && part.id === "edit1",
+    );
+
+    expect(tool).toMatchObject({ checkpointId: "cp-live" });
   });
 
   it("does not duplicate approval dock messages as separate tool parts", () => {
@@ -490,32 +572,16 @@ describe("web timeline reducer", () => {
         },
       },
     });
-    const afterStarted = appReducer(withDock, {
+    const done = appReducer(withDock, {
       type: "server_message",
       message: {
         type: "turn_event",
         sessionId: "s1",
         event: {
-          type: "tool_started",
-          id: "tc1",
-          name: "bash",
-          input: { command: "python3 -m http.server 8000" },
-        },
-      },
-    });
-    const done = appReducer(afterStarted, {
-      type: "server_message",
-      message: {
-        type: "turn_event",
-        sessionId: "s1",
-        event: {
-          type: "tool_result",
-          message: {
-            role: "tool_result",
-            toolCallId: "tc1",
-            toolName: "bash",
-            content: "Command completed with no output: python3 -m http.server 8000",
-          },
+          type: "part_finished",
+          partId: "tc1",
+          status: "completed",
+          output: "Command completed with no output: python3 -m http.server 8000",
         },
       },
     });

@@ -1,4 +1,5 @@
 import type { Message, MessagePart, MessagePhase } from "../../../model/types.js";
+import { isToolResultMessage } from "../../../session/message.js";
 import type { ServerMessage } from "../../protocol.js";
 import type { TurnEvent } from "../../../session/loop.js";
 import type { ToolDisplay } from "../../../session/tool-display.js";
@@ -167,7 +168,7 @@ function reduceServerMessage(state: AppState, message: ServerMessage): AppState 
         },
       };
     case "turn_event":
-      if (message.event.type === "provider_usage") {
+      if (message.event.type === "turn_usage_updated") {
         const contextWindow = contextWindowForSession(
           state,
           sessionSummary(state, message.sessionId),
@@ -352,7 +353,7 @@ export function buildTimelineFromMessages(messages: Message[]): TimelineTurn[] {
       continue;
     }
 
-    if (message.role === "tool_result") {
+    if (isToolResultMessage(message)) {
       const display = replayDisplayFromToolInput(
         message,
         message.toolCallId ? toolInputs.get(message.toolCallId) : undefined,
@@ -383,7 +384,7 @@ function replayDisplayFromToolInput(
   message: Message,
   toolInput: unknown,
 ): ToolDisplay | undefined {
-  if (message.role !== "tool_result") return message.toolDisplay;
+  if (!isToolResultMessage(message)) return message.toolDisplay;
   if (message.toolDisplay?.files?.length) {
     return message.toolDisplay;
   }
@@ -524,114 +525,8 @@ export function applyTurnEvent(
       return applyPartDelta(timeline, event.partId, event.delta);
     case "part_finished":
       return applyPartFinished(timeline, event);
-    case "provider_stream_started":
-    case "provider_step_started":
-    case "provider_step_finished":
-    case "provider_usage":
+    case "turn_usage_updated":
       return ensureActiveTimelineTurn(timeline);
-    case "assistant_text_started":
-      return removeStatus(ensureActiveTimelineTurn(timeline), "provider:reasoning");
-    case "assistant_text_finished":
-      return finalizeStreamingText(ensureActiveTimelineTurn(timeline));
-    case "assistant_reasoning_started":
-      return appendOrReplaceStatus(
-        ensureActiveTimelineTurn(timeline),
-        "info",
-        "Thinking...",
-        "provider:reasoning",
-      );
-    case "assistant_reasoning_finished":
-      return removeStatus(ensureActiveTimelineTurn(timeline), "provider:reasoning");
-    case "assistant_text_delta":
-      return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => {
-        const parts = [...turn.assistantParts];
-        const last = parts[parts.length - 1];
-        if (last?.kind === "text" && last.streaming) {
-          parts[parts.length - 1] = {
-            ...last,
-            text: last.text + event.text,
-            phase: event.phase ?? last.phase,
-          };
-        } else {
-          parts.push({
-            id: `${turn.id}:stream`,
-            kind: "text",
-            text: event.text,
-            phase: event.phase ?? "commentary",
-            streaming: true,
-          });
-        }
-        return { ...turn, assistantParts: parts };
-      });
-    case "assistant_message":
-      return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => {
-        let parts = [...turn.assistantParts];
-        const streamIndexes = parts
-          .map((part, index) =>
-            part.kind === "text" &&
-            (part.streaming || part.id.startsWith(`${turn.id}:stream`))
-              ? index
-              : -1,
-          )
-          .filter((index) => index >= 0);
-        const textParts = assistantTextPartsFromMessage(event.message);
-        if (textParts.length > 0) {
-          if (streamIndexes.length > 0) {
-            const firstIndex = streamIndexes[0]!;
-            const streamIndexSet = new Set(streamIndexes);
-            parts = parts.filter((_, index) => !streamIndexSet.has(index));
-            parts.splice(
-              firstIndex,
-              0,
-              ...textParts.map((part, offset) => ({
-                id: `${turn.id}:assistant:${firstIndex + offset}`,
-                kind: "text" as const,
-                text: part.text,
-                phase: part.phase,
-                status: part.status,
-              })),
-            );
-          } else {
-            for (const part of textParts) {
-              parts.push({
-                id: `${turn.id}:assistant:${parts.length}`,
-                kind: "text",
-                text: part.text,
-                phase: part.phase,
-                status: part.status,
-              });
-            }
-          }
-        } else if (streamIndexes.length > 0) {
-          const streamIndexSet = new Set(streamIndexes);
-          parts = parts.filter((_, index) => !streamIndexSet.has(index));
-        }
-
-        for (const call of event.message.toolCalls ?? []) {
-          parts = upsertToolPart(
-            parts,
-            createToolPart(call.id, call.name, call.input, "queued"),
-          );
-        }
-
-        return { ...turn, assistantParts: parts };
-      });
-    case "tool_call":
-      return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => ({
-        ...turn,
-        assistantParts: upsertToolPart(
-          [...turn.assistantParts],
-          createToolPart(event.id, event.name, event.input, "queued", event.display),
-        ),
-      }));
-    case "tool_started":
-      return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => ({
-        ...turn,
-        assistantParts: upsertToolPart(
-          [...turn.assistantParts],
-          createToolPart(event.id, event.name, event.input, "running", event.display),
-        ),
-      }));
     case "tool_approval_required":
       return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => ({
         ...turn,
@@ -659,21 +554,6 @@ export function applyTurnEvent(
           event.decision === "deny" ? "denied" : "queued",
         ),
       }));
-    case "tool_result":
-      return appendToolResult(
-        ensureTimelineTurn(timeline),
-        event.message.toolCallId,
-        event.message.toolName,
-        event.message.content,
-        event.display,
-        event.message.checkpointId,
-      );
-    case "turn_truncated":
-      return appendStatus(
-        ensureActiveTimelineTurn(timeline),
-        "warning",
-        "Turn stopped because the model hit its output token limit.",
-      );
     case "turn_failed":
       return ensureActiveTimelineTurn(timeline);
     case "turn_finished":
@@ -729,6 +609,7 @@ function applyPartStarted(
       event.toolName,
       outputText(event.output),
       event.display,
+      checkpointIdFromMetadata(event.metadata),
     );
   }
 
@@ -763,6 +644,54 @@ function applyPartFinished(
   timeline: TimelineTurn[],
   event: Extract<TurnEvent, { type: "part_finished" }>,
 ): TimelineTurn[] {
+  if (event.output !== undefined || event.display !== undefined) {
+    return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => {
+      const existing = turn.assistantParts.find(
+        (part): part is TimelineToolPart =>
+          part.kind === "tool" && part.id === event.partId,
+      );
+      if (!existing) return turn;
+      const content = outputText(event.output);
+      const parsedDisplay = content
+        ? buildToolResultDisplay(existing.toolName, existing.input ?? {}, content)
+        : undefined;
+      const normalizedDisplay =
+        event.display ??
+        (parsedDisplay?.files?.length ? parsedDisplay : undefined) ??
+        existing.display ??
+        parsedDisplay ??
+        buildToolResultDisplay(existing.toolName, {}, content);
+      const details =
+        normalizedDisplay.details ??
+        (content ? stripCheckpointMarker(content) : existing.details);
+      const diffFiles = normalizedDisplay.files ?? existing.diffFiles ?? [];
+      const summary =
+        normalizedDisplay.summary ??
+        (content ? summarizeToolResult(existing.toolName, content) : existing.summary);
+      const checkpointId =
+        checkpointIdFromMetadata(event.metadata) ?? existing.checkpointId;
+      const parts = upsertToolPart([...turn.assistantParts], {
+        ...existing,
+        displayKind: normalizedDisplay.kind,
+        status:
+          event.status === "failed" || event.status === "interrupted"
+            ? "failed"
+            : content
+              ? resultStatus(content)
+              : toolStatusFromLifecycle(event.status, existing.status),
+        title: normalizedDisplay.title || existing.title,
+        subtitle: normalizedDisplay.subtitle ?? existing.subtitle,
+        summary,
+        details,
+        diffFiles,
+        display: normalizedDisplay,
+        checkpointId,
+      });
+      const mutationDiffs = mergeDiffFiles(turn.mutationDiffs, diffFiles);
+      return { ...turn, assistantParts: parts, mutationDiffs };
+    });
+  }
+
   return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => ({
     ...turn,
     assistantParts: turn.assistantParts.map((part) => {
@@ -1047,6 +976,7 @@ function createToolPart(
     details: nextDisplay.details,
     diffFiles: nextDisplay.files,
     display: nextDisplay,
+    input,
   };
 }
 
@@ -1079,6 +1009,11 @@ function outputText(output: unknown): string {
   } catch {
     return String(output);
   }
+}
+
+function checkpointIdFromMetadata(metadata: unknown): string | undefined {
+  if (!isRecord(metadata)) return undefined;
+  return typeof metadata.checkpointId === "string" ? metadata.checkpointId : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

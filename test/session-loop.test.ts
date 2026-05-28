@@ -11,7 +11,7 @@ import { applyPatchTool } from "../src/tools/apply-patch.js";
 import { createSkillTool } from "../src/tools/skill.js";
 import { ReadStateTracker } from "../src/tools/file-mutation.js";
 import { runSession, runTurn } from "../src/session/loop.js";
-import type { TurnEvent } from "../src/session/loop.js";
+import type { DurableTurnSink, TurnEvent } from "../src/session/loop.js";
 import type { Provider } from "../src/model/provider.js";
 import type { ModelEvent, Message, ToolSchema } from "../src/model/types.js";
 import type { ProviderStreamOptions } from "../src/model/provider.js";
@@ -622,9 +622,9 @@ describe("runTurn", () => {
   });
 });
 
-// --- TurnEvent ordering ---
+// --- Lifecycle event protocol ---
 
-describe("TurnEvent ordering", () => {
+describe("Lifecycle event protocol", () => {
   function makeSession(cwd: string, messages: Message[] = []): SessionState {
     return { id: randomUUID(), cwd, messages };
   }
@@ -639,7 +639,85 @@ describe("TurnEvent ordering", () => {
     };
   }
 
-  it("emits assistant_text_delta before assistant_message", async () => {
+  function lifecycleCapture(): {
+    events: TurnEvent[];
+    onEvent: (e: TurnEvent) => void;
+    durableSink: DurableTurnSink;
+  } {
+    const events: TurnEvent[] = [];
+    let nextMessage = 0;
+    let nextPart = 0;
+    const durableSink: DurableTurnSink = {
+      messageStarted(input) {
+        const messageId = `m${++nextMessage}`;
+        events.push({
+          type: "message_started",
+          messageId,
+          role: input.role,
+          status: input.status,
+        });
+        return messageId;
+      },
+      messageFinished(messageId, message) {
+        events.push({ type: "message_finished", messageId, message });
+      },
+      messageFailed(messageId, input) {
+        events.push({
+          type: "message_failed",
+          messageId,
+          message: input.message,
+          error: input.error,
+        });
+      },
+      partStarted(input) {
+        const partId = input.toolCallId ?? `p${++nextPart}`;
+        events.push({
+          type: "part_started",
+          messageId: input.messageId,
+          partId,
+          partType: input.type,
+          phase: input.phase,
+          status: input.status,
+          text: input.text,
+          toolCallId: input.toolCallId,
+          toolName: input.toolName,
+          input: input.input,
+          output: input.output,
+          display: input.display as Extract<
+            TurnEvent,
+            { type: "part_started" }
+          >["display"],
+          metadata: input.metadata,
+        });
+        return partId;
+      },
+      partDelta(partId, delta) {
+        events.push({ type: "part_delta", partId, delta });
+      },
+      partFinished(partId, input) {
+        events.push({
+          type: "part_finished",
+          partId,
+          status: input?.status,
+          phase: input?.phase,
+          text: input?.text,
+          output: input?.output,
+          display: input?.display as Extract<
+            TurnEvent,
+            { type: "part_finished" }
+          >["display"],
+          metadata: input?.metadata,
+        });
+      },
+    };
+    return {
+      events,
+      onEvent: (event) => events.push(event),
+      durableSink,
+    };
+  }
+
+  it("emits streamed assistant text as durable lifecycle parts", async () => {
     const provider = new FakeProvider([
       [
         { type: "text", delta: "Hello" },
@@ -648,29 +726,36 @@ describe("TurnEvent ordering", () => {
       ],
     ]);
 
-    const { events, onEvent } = captureEvents();
-    const result = await runTurn(
-      provider,
-      new ToolRegistry(),
-      makeSession(process.cwd()),
-      "hi",
-      {
-        approval: "auto",
-        onEvent,
-      },
-    );
+    const { events, onEvent, durableSink } = lifecycleCapture();
+    await runTurn(provider, new ToolRegistry(), makeSession(process.cwd()), "hi", {
+      approval: "auto",
+      onEvent,
+      durableSink,
+    });
 
-    const types = events.map((e) => e.type);
-    const firstDelta = types.indexOf("assistant_text_delta");
-    const firstMsg = types.indexOf("assistant_message");
-    expect(firstDelta).toBeLessThan(firstMsg);
-    expect(firstDelta).toBe(0);
-
-    const finished = types.indexOf("turn_finished");
-    expect(finished).toBe(types.length - 1);
+    expect(events.map((event) => event.type)).toEqual([
+      "turn_started",
+      "message_started",
+      "part_started",
+      "part_delta",
+      "part_delta",
+      "part_finished",
+      "message_finished",
+      "turn_finished",
+    ]);
+    expect(events).toContainEqual({
+      type: "part_finished",
+      partId: "p1",
+      status: "completed",
+      phase: "final",
+      text: "Hello world",
+      output: undefined,
+      display: undefined,
+      metadata: undefined,
+    });
   });
 
-  it("consumes AI SDK stream boundary events before assistant output", async () => {
+  it("keeps provider boundary events internal while preserving reasoning and text parts", async () => {
     const provider = new FakeProvider([
       [
         { type: "start" },
@@ -686,30 +771,17 @@ describe("TurnEvent ordering", () => {
       ],
     ]);
 
-    const { events, onEvent } = captureEvents();
+    const { events, onEvent, durableSink } = lifecycleCapture();
     const result = await runTurn(
       provider,
       new ToolRegistry(),
       makeSession(process.cwd()),
       "hi",
-      {
-        approval: "auto",
-        onEvent,
-      },
+      { approval: "auto", onEvent, durableSink },
     );
 
-    expect(events.map((event) => event.type)).toEqual([
-      "provider_stream_started",
-      "provider_step_started",
-      "assistant_reasoning_started",
-      "assistant_reasoning_finished",
-      "assistant_text_started",
-      "assistant_text_delta",
-      "assistant_text_finished",
-      "provider_step_finished",
-      "assistant_message",
-      "turn_finished",
-    ]);
+    expect(events.map((event) => event.type)).not.toContain("provider_stream_started");
+    expect(events.map((event) => event.type)).not.toContain("assistant_text_delta");
     expect(result.newMessages[1]).toMatchObject({
       role: "assistant",
       content: "Hello",
@@ -718,9 +790,10 @@ describe("TurnEvent ordering", () => {
         { type: "text", text: "Hello" },
       ],
     });
+    expect(events.some((event) => event.type === "message_finished")).toBe(true);
   });
 
-  it("emits provider usage events from stream finish events", async () => {
+  it("emits turn_usage_updated from stream finish events", async () => {
     const provider = new FakeProvider([
       [
         { type: "text", delta: "Hello" },
@@ -749,7 +822,7 @@ describe("TurnEvent ordering", () => {
     );
 
     expect(events).toContainEqual({
-      type: "provider_usage",
+      type: "turn_usage_updated",
       usage: {
         inputTokens: 10,
         outputTokens: 3,
@@ -806,45 +879,7 @@ describe("TurnEvent ordering", () => {
     await rm(tmp, { recursive: true });
   });
 
-  it("emits tool_started only after approval allow", async () => {
-    const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
-
-    const provider = new FakeProvider([
-      [
-        {
-          type: "tool-call",
-          id: "tc1",
-          name: "bash",
-          input: { command: "touch approved.txt" },
-        },
-        { type: "finish", reason: "tool-calls" },
-      ],
-      [
-        { type: "text", delta: "ok" },
-        { type: "finish", reason: "stop" },
-      ],
-    ]);
-
-    const registry = new ToolRegistry();
-    registry.register(bashTool);
-
-    const { events, onEvent } = captureEvents();
-    await runTurn(provider, registry, makeSession(tmp), "touch", {
-      approval: "auto",
-      approvalHandler: async () => "allow_once",
-      onEvent,
-    });
-
-    const types = events.map((e) => e.type);
-    const decIdx = types.indexOf("tool_approval_decision");
-    const startedIdx = types.indexOf("tool_started");
-    expect(decIdx).toBeGreaterThanOrEqual(0);
-    expect(decIdx).toBeLessThan(startedIdx);
-
-    await rm(tmp, { recursive: true });
-  });
-
-  it("emits tool_result immediately after tool execution", async () => {
+  it("emits tool calls and results through durable lifecycle parts", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
     await writeFile(join(tmp, "f.txt"), "hi");
 
@@ -862,30 +897,34 @@ describe("TurnEvent ordering", () => {
     const registry = new ToolRegistry();
     registry.register(readFileTool);
 
-    const { events, onEvent } = captureEvents();
+    const { events, onEvent, durableSink } = lifecycleCapture();
     await runTurn(provider, registry, makeSession(tmp), "read", {
       approval: "auto",
       onEvent,
+      durableSink,
     });
 
-    const types = events.map((e) => e.type);
-    const startedIdx = types.indexOf("tool_started");
-    const resultIdx = types.indexOf("tool_result");
-    expect(startedIdx).toBeLessThan(resultIdx);
-
-    const resultEvent = events[resultIdx] as Extract<TurnEvent, { type: "tool_result" }>;
-    expect(resultEvent.message.content).toBe("1: hi");
-    expect(resultEvent.display).toMatchObject({
-      kind: "context",
-      title: "Read",
-      subtitle: "f.txt",
-      summary: "1 lines",
-    });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "part_started",
+        partType: "tool-call",
+        toolCallId: "tc1",
+        toolName: "Read",
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "part_finished",
+        partId: "tc1",
+        status: "completed",
+        output: "1: hi",
+      }),
+    );
 
     await rm(tmp, { recursive: true });
   });
 
-  it("emits structured display on tool_call and tool_started", async () => {
+  it("stores structured display on transcript messages", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
 
     const provider = new FakeProvider([
@@ -907,32 +946,11 @@ describe("TurnEvent ordering", () => {
     const registry = new ToolRegistry();
     registry.register(writeFileTool);
 
-    const { events, onEvent } = captureEvents();
     const { newMessages } = await runTurn(provider, registry, makeSession(tmp), "write", {
       approval: "auto",
       approvalHandler: async () => "allow_once",
-      onEvent,
     });
 
-    const call = events.find((event) => event.type === "tool_call") as Extract<
-      TurnEvent,
-      { type: "tool_call" }
-    >;
-    const started = events.find((event) => event.type === "tool_started") as Extract<
-      TurnEvent,
-      { type: "tool_started" }
-    >;
-
-    expect(call.display).toMatchObject({
-      kind: "mutation",
-      title: "Write file",
-      subtitle: "note.txt",
-    });
-    expect(started.display).toMatchObject({
-      kind: "mutation",
-      title: "Write file",
-      subtitle: "note.txt",
-    });
     expect(newMessages[1]?.role).toBe("assistant");
     expect(newMessages[1]?.toolCalls?.[0]).toMatchObject({
       name: "write_file",
@@ -963,7 +981,7 @@ describe("TurnEvent ordering", () => {
     await rm(tmp, { recursive: true });
   });
 
-  it("emits skill-specific display for skill tool calls and results", async () => {
+  it("stores skill-specific display for skill tool calls and results", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-skill-display-"));
     const skill = {
       name: "reviewer",
@@ -989,7 +1007,6 @@ describe("TurnEvent ordering", () => {
     const registry = new ToolRegistry();
     registry.register(createSkillTool([skill]));
 
-    const { events, onEvent } = captureEvents();
     const { newMessages } = await runTurn(
       provider,
       registry,
@@ -997,29 +1014,13 @@ describe("TurnEvent ordering", () => {
       "review",
       {
         approval: "auto",
-        onEvent,
       },
     );
 
-    const call = events.find((event) => event.type === "tool_call") as Extract<
-      TurnEvent,
-      { type: "tool_call" }
-    >;
-    const result = events.find((event) => event.type === "tool_result") as Extract<
-      TurnEvent,
-      { type: "tool_result" }
-    >;
-
-    expect(call.display).toMatchObject({
+    expect(newMessages[1]?.toolCalls?.[0]?.display).toMatchObject({
       kind: "skill",
       title: "Load skill",
       subtitle: "reviewer",
-    });
-    expect(result.display).toMatchObject({
-      kind: "skill",
-      title: "Load skill",
-      subtitle: "reviewer",
-      summary: "loaded",
     });
     const resultMessage = newMessages.find(
       (message) => message.role === "tool_result" && message.toolName === "skill",
@@ -1068,7 +1069,7 @@ describe("TurnEvent ordering", () => {
     await rm(tmp, { recursive: true });
   });
 
-  it("denied tool emits tool_approval_decision and tool_result", async () => {
+  it("denied tool emits approval decision and durable result part", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
 
     const provider = new FakeProvider([
@@ -1090,27 +1091,32 @@ describe("TurnEvent ordering", () => {
     const registry = new ToolRegistry();
     registry.register(bashTool);
 
-    const { events, onEvent } = captureEvents();
+    const { events, onEvent, durableSink } = lifecycleCapture();
     await runTurn(provider, registry, makeSession(tmp), "touch", {
       approval: "auto",
       approvalHandler: async () => "abort",
       onEvent,
+      durableSink,
     });
 
     const types = events.map((e) => e.type);
     expect(types).toContain("tool_approval_required");
     expect(types).toContain("tool_approval_decision");
-    expect(types).toContain("tool_result");
+    expect(types).not.toContain("tool_result");
     expect(types).not.toContain("tool_started");
-
-    const decIdx = types.indexOf("tool_approval_decision");
-    const resultIdx = types.indexOf("tool_result");
-    expect(decIdx).toBeLessThan(resultIdx);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "part_finished",
+        partId: "tc1",
+        status: "completed",
+        output: "Tool call denied and was not executed: touch is a write-effect command",
+      }),
+    );
 
     await rm(tmp, { recursive: true });
   });
 
-  it("existing transcript still matches after events", async () => {
+  it("existing transcript still matches after lifecycle events", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
     await writeFile(join(tmp, "test.txt"), "hello");
 
@@ -1129,7 +1135,7 @@ describe("TurnEvent ordering", () => {
     const registry = new ToolRegistry();
     registry.register(readFileTool);
 
-    const { events, onEvent } = captureEvents();
+    const { events, onEvent, durableSink } = lifecycleCapture();
     const session = makeSession(tmp);
 
     const { session: updated, newMessages } = await runTurn(
@@ -1137,7 +1143,7 @@ describe("TurnEvent ordering", () => {
       registry,
       session,
       "read test.txt",
-      { approval: "auto", onEvent },
+      { approval: "auto", onEvent, durableSink },
     );
 
     // Transcript integrity
@@ -1149,12 +1155,11 @@ describe("TurnEvent ordering", () => {
     // newMessages is subset
     expect(newMessages).toHaveLength(4);
 
-    // Events were emitted
     const types = events.map((e) => e.type);
-    expect(types[0]).toBe("assistant_text_delta");
-    expect(types).toContain("tool_call");
-    expect(types).toContain("assistant_message");
-    expect(types).toContain("tool_result");
+    expect(types[0]).toBe("turn_started");
+    expect(types).toContain("part_started");
+    expect(types).toContain("part_finished");
+    expect(types).toContain("message_finished");
     expect(types[types.length - 1]).toBe("turn_finished");
 
     await rm(tmp, { recursive: true });
@@ -1185,11 +1190,12 @@ describe("TurnEvent ordering", () => {
     const registry = new ToolRegistry();
     registry.register(readFileTool);
 
-    const { events, onEvent } = captureEvents();
+    const { events, onEvent, durableSink } = lifecycleCapture();
     await runTurn(provider, registry, makeSession(tmp), "read", {
       approval: "auto",
       approvalHandler: async () => "allow_once",
       onEvent,
+      durableSink,
     });
 
     const approvalEvent = events.find((e) => e.type === "tool_approval_required");
@@ -1198,9 +1204,11 @@ describe("TurnEvent ordering", () => {
     expect((approvalEvent as any).metadata.insideWorkspace).toBe(false);
     expect((approvalEvent as any).metadata.realPath).toBeTruthy();
 
-    const toolResult = events.find((e) => e.type === "tool_result");
+    const toolResult = events.find(
+      (event): event is Extract<TurnEvent, { type: "part_finished" }> =>
+        event.type === "part_finished" && event.output === "1: sibling data",
+    );
     expect(toolResult).toBeDefined();
-    expect((toolResult as any).message.content).toContain("sibling data");
 
     await rm(tmp, { recursive: true, force: true });
     await rm(sibling, { recursive: true, force: true });
@@ -3576,7 +3584,7 @@ describe("Truncation handling", () => {
     expect(aborted).toBeFalsy();
   });
 
-  it("emits turn_truncated event when stop reason is length", async () => {
+  it("emits turn_finished with length stop reason", async () => {
     const provider = new FakeProvider([
       [
         { type: "text", delta: "partial" },
@@ -3593,12 +3601,11 @@ describe("Truncation handling", () => {
     });
 
     const types = events.map((e) => e.type);
-    expect(types).toContain("turn_truncated");
     expect(types).toContain("turn_finished");
-    expect(types.indexOf("turn_truncated")).toBeLessThan(types.indexOf("turn_finished"));
+    expect(events.at(-1)).toEqual({ type: "turn_finished", stopReason: "length" });
   });
 
-  it("does not emit turn_truncated on normal end_turn", async () => {
+  it("emits end_turn stop reason on normal completion", async () => {
     const provider = new FakeProvider([
       [
         { type: "text", delta: "complete" },
@@ -3621,11 +3628,10 @@ describe("Truncation handling", () => {
     );
 
     expect(stopReason).toBe("end_turn");
-    const types = events.map((e) => e.type);
-    expect(types).not.toContain("turn_truncated");
+    expect(events.at(-1)).toEqual({ type: "turn_finished", stopReason: "end_turn" });
   });
 
-  it("does not emit turn_truncated on tool_use", async () => {
+  it("does not finish with tool_use when the loop continues to final answer", async () => {
     const tmp = await mkdtemp(join(tmpdir(), "myagent-test-"));
     await writeFile(join(tmp, "f.txt"), "hi");
 
@@ -3652,8 +3658,7 @@ describe("Truncation handling", () => {
     });
 
     expect(stopReason).toBe("end_turn");
-    const types = events.map((e) => e.type);
-    expect(types).not.toContain("turn_truncated");
+    expect(events.at(-1)).toEqual({ type: "turn_finished", stopReason: "end_turn" });
 
     await rm(tmp, { recursive: true, force: true });
   });
