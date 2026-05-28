@@ -3,11 +3,10 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "tsx src/cli.ts",
+    "dev": "tsx src/app-main.ts",
     "test": "vitest run",
     "format": "prettier --write .",
-    "check": "prettier --check .",
-    "live:scenario": "tsx scripts/live-scenario.ts"
+    "check": "prettier --check ."
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.77",
@@ -15,9 +14,7 @@
     "@ai-sdk/openai-compatible": "^2.0.47",
     "ai": "^6.0.180",
     "better-sqlite3": "^12.9.0",
-    "commander": "^13.0.0",
     "esbuild": "^0.28.0",
-    "ink": "^5.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
