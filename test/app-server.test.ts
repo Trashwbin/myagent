@@ -170,6 +170,31 @@ function throwingProvider(error: unknown): Provider {
   };
 }
 
+function partialThrowProvider(error: unknown): Provider {
+  return {
+    name: "test",
+    async *stream() {
+      yield { type: "text" as const, delta: "partial answer before failure" };
+      throw error;
+    },
+  };
+}
+
+function toolCallThrowProvider(error: unknown): Provider {
+  return {
+    name: "test",
+    async *stream() {
+      yield {
+        type: "tool-call" as const,
+        id: "call_1",
+        name: "Read",
+        input: { path: "a.txt" },
+      };
+      throw error;
+    },
+  };
+}
+
 async function waitForCondition(check: () => boolean, message: string): Promise<void> {
   for (let i = 0; i < 100; i++) {
     if (check()) return;
@@ -820,7 +845,7 @@ describe("WebSocket", () => {
     expect(messages.some((msg) => msg.type === "ready")).toBe(true);
     expect(
       messages.some(
-        (msg) => msg.type === "turn_event" && msg.event.type === "assistant_text_delta",
+        (msg) => msg.type === "turn_event" && msg.event.type === "part_delta",
       ),
     ).toBe(true);
     expect(store.getSession(session.id)?.messages.some((m) => m.role === "user")).toBe(
@@ -923,17 +948,17 @@ describe("WebSocket", () => {
       firstTurn.some(
         (msg) =>
           msg.type === "turn_event" &&
-          msg.event.type === "assistant_text_delta" &&
-          msg.event.text.includes(
+          msg.event.type === "part_delta" &&
+          msg.event.delta.includes(
             "tools:Read,grep,edit_file,write_file,bash,list_dir,apply_patch,glob",
           ),
       ),
     ).toBe(true);
     const firstText = firstTurn
       .filter(
-        (msg) => msg.type === "turn_event" && msg.event.type === "assistant_text_delta",
+        (msg) => msg.type === "turn_event" && msg.event.type === "part_delta",
       )
-      .map((msg) => msg.event.text)
+      .map((msg) => msg.event.delta)
       .join("");
     expect(firstText.split(",")).not.toContain("skill");
 
@@ -960,16 +985,17 @@ describe("WebSocket", () => {
       secondTurn.some(
         (msg) =>
           msg.type === "turn_event" &&
-          msg.event.type === "tool_call" &&
-          msg.event.name === "skill",
+          msg.event.type === "part_started" &&
+          msg.event.partType === "tool-call" &&
+          msg.event.toolName === "skill",
       ),
     ).toBe(true);
     expect(
       secondTurn.some(
         (msg) =>
           msg.type === "turn_event" &&
-          msg.event.type === "assistant_text_delta" &&
-          msg.event.text === "loaded changed-skill",
+          msg.event.type === "part_delta" &&
+          msg.event.delta === "loaded changed-skill",
       ),
     ).toBe(true);
     expect(createProviderCalls).toBe(providerCallsBeforeSkillRefreshTurn);
@@ -1086,8 +1112,8 @@ describe("WebSocket", () => {
       runMessages.some(
         (msg) =>
           msg.type === "turn_event" &&
-          msg.event.type === "assistant_text_delta" &&
-          msg.event.text === "second provider",
+          msg.event.type === "part_delta" &&
+          msg.event.delta === "second provider",
       ),
     ).toBe(true);
   });
@@ -1193,8 +1219,8 @@ describe("WebSocket", () => {
       runMessages.some(
         (msg) =>
           msg.type === "turn_event" &&
-          msg.event.type === "assistant_text_delta" &&
-          msg.event.text === "second provider",
+          msg.event.type === "part_delta" &&
+          msg.event.delta === "second provider",
       ),
     ).toBe(true);
   });
@@ -1450,6 +1476,96 @@ describe("SessionManager", () => {
         message: "Turn failed: boom",
       }),
     );
+  });
+
+  it("persists partial assistant output when provider stream fails", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/test" });
+    const events: unknown[] = [];
+    const manager = new SessionManager({
+      provider: partialThrowProvider(new Error("terminated")),
+      registry: new ToolRegistry(),
+      approval: "auto",
+      store,
+      sendEvent: (_sessionId, event) => events.push(event),
+    });
+    manager.registerSession(session);
+
+    expect(manager.handleUserMessage(session.id, "hi")).toEqual({ ok: true });
+    await waitForCondition(
+      () => !manager.hasActiveTurn(session.id),
+      "turn did not finish",
+    );
+
+    const restored = store.getSession(session.id)!;
+    expect(restored.messages).toHaveLength(2);
+    expect(restored.messages[0]).toEqual({ role: "user", content: "hi" });
+    expect(restored.messages[1]).toMatchObject({
+      role: "assistant",
+      content: "partial answer before failure",
+      status: "failed",
+      error: "terminated",
+      parts: [
+        {
+          type: "text",
+          text: "partial answer before failure",
+          phase: "commentary",
+          status: "interrupted",
+        },
+      ],
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "turn_finished", sessionId: session.id }),
+    );
+    expect(manager.handleUserMessage(session.id, "continue")).toEqual({ ok: true });
+    await waitForCondition(
+      () => !manager.hasActiveTurn(session.id),
+      "second turn did not finish",
+    );
+  });
+
+  it("writes synthetic tool results for interrupted provider tool calls", async () => {
+    const base = await tmpBaseDir();
+    const store = openTestStore(base);
+    const session = store.createSession({ workspaceRoot: "/test" });
+    const manager = new SessionManager({
+      provider: toolCallThrowProvider(new Error("terminated")),
+      registry: new ToolRegistry(),
+      approval: "auto",
+      store,
+      sendEvent: () => {},
+    });
+    manager.registerSession(session);
+
+    expect(manager.handleUserMessage(session.id, "read")).toEqual({ ok: true });
+    await waitForCondition(
+      () => !manager.hasActiveTurn(session.id),
+      "turn did not finish",
+    );
+
+    const restored = store.getSession(session.id)!;
+    expect(restored.messages).toHaveLength(3);
+    expect(restored.messages[1]).toMatchObject({
+      role: "assistant",
+      status: "failed",
+      toolCalls: [{ id: "call_1", name: "Read", input: { path: "a.txt" } }],
+      parts: [
+        {
+          type: "tool-call",
+          id: "call_1",
+          name: "Read",
+          status: "interrupted",
+        },
+      ],
+    });
+    expect(restored.messages[2]).toMatchObject({
+      role: "tool_result",
+      status: "interrupted",
+      toolCallId: "call_1",
+      toolName: "Read",
+      content: "Tool call interrupted before execution: terminated",
+    });
   });
 
   it("formats provider turn failures for the web app", async () => {

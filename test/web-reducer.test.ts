@@ -163,6 +163,50 @@ describe("web timeline reducer", () => {
     expect("streaming" in textParts[0]!).toBe(false);
   });
 
+  it("consumes durable part lifecycle events for streaming assistant text", () => {
+    const initial = buildTimelineFromMessages([{ role: "user", content: "hi" }]);
+    const events: TurnEvent[] = [
+      {
+        type: "message_started",
+        messageId: "m1",
+        role: "assistant",
+        status: "running",
+      },
+      {
+        type: "part_started",
+        messageId: "m1",
+        partId: "p1",
+        partType: "text",
+        phase: "commentary",
+        status: "running",
+      },
+      { type: "part_delta", partId: "p1", delta: "Hello" },
+      { type: "part_delta", partId: "p1", delta: " there" },
+      {
+        type: "part_finished",
+        partId: "p1",
+        status: "completed",
+        phase: "final",
+      },
+    ];
+
+    const result = events.reduce(
+      (timeline, event) => applyTurnEvent(timeline, event),
+      initial,
+    );
+
+    expect(result[0]?.assistantParts).toMatchObject([
+      {
+        id: "p1",
+        kind: "text",
+        text: "Hello there",
+        phase: "final",
+        status: "completed",
+        streaming: false,
+      },
+    ]);
+  });
+
   it("stores context usage by session from provider usage events", () => {
     const result = appReducer(initialAppState, {
       type: "server_message",
@@ -294,6 +338,40 @@ describe("web timeline reducer", () => {
     expect(textParts).toMatchObject([
       { text: "I will inspect first.", phase: "commentary" },
       { text: "The final answer.", phase: "final" },
+    ]);
+  });
+
+  it("hydrates failed partial assistant output with an error status", () => {
+    const turns = buildTimelineFromMessages([
+      { role: "user", content: "hi" },
+      {
+        role: "assistant",
+        content: "partial answer",
+        status: "failed",
+        error: "terminated",
+        parts: [
+          {
+            type: "text",
+            text: "partial answer",
+            phase: "commentary",
+            status: "interrupted",
+          },
+        ],
+      },
+    ]);
+
+    expect(turns[0]?.assistantParts).toMatchObject([
+      {
+        kind: "text",
+        text: "partial answer",
+        phase: "commentary",
+        status: "interrupted",
+      },
+      {
+        kind: "status",
+        level: "error",
+        text: "Turn failed: terminated",
+      },
     ]);
   });
 

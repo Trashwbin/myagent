@@ -471,6 +471,7 @@ function appendAssistantMessage(
           kind: "text",
           text: part.text,
           phase: part.phase,
+          status: part.status,
         });
       }
     } else if (message.content.trim()) {
@@ -479,6 +480,7 @@ function appendAssistantMessage(
         kind: "text",
         text: message.content,
         phase: message.toolCalls?.length ? "commentary" : undefined,
+        status: message.status,
       });
     }
 
@@ -486,6 +488,17 @@ function appendAssistantMessage(
       nextParts.push(
         createToolPart(call.id, call.name, call.input, "queued", call.display),
       );
+    }
+
+    if (message.status === "failed" || message.status === "interrupted") {
+      nextParts.push({
+        id: `${turn.id}:status:${nextParts.length}`,
+        kind: "status",
+        level: "error",
+        text: message.error
+          ? `Turn failed: ${message.error}`
+          : "Turn failed before it completed.",
+      });
     }
 
     return { ...turn, assistantParts: nextParts };
@@ -497,6 +510,20 @@ export function applyTurnEvent(
   event: TurnEvent,
 ): TimelineTurn[] {
   switch (event.type) {
+    case "turn_started":
+      return ensureActiveTimelineTurn(timeline);
+    case "message_started":
+      return ensureActiveTimelineTurn(timeline);
+    case "message_finished":
+      return ensureActiveTimelineTurn(timeline);
+    case "message_failed":
+      return ensureActiveTimelineTurn(timeline);
+    case "part_started":
+      return applyPartStarted(timeline, event);
+    case "part_delta":
+      return applyPartDelta(timeline, event.partId, event.delta);
+    case "part_finished":
+      return applyPartFinished(timeline, event);
     case "provider_stream_started":
     case "provider_step_started":
     case "provider_step_finished":
@@ -561,6 +588,7 @@ export function applyTurnEvent(
                 kind: "text" as const,
                 text: part.text,
                 phase: part.phase,
+                status: part.status,
               })),
             );
           } else {
@@ -570,6 +598,7 @@ export function applyTurnEvent(
                 kind: "text",
                 text: part.text,
                 phase: part.phase,
+                status: part.status,
               });
             }
           }
@@ -645,6 +674,8 @@ export function applyTurnEvent(
         "warning",
         "Turn stopped because the model hit its output token limit.",
       );
+    case "turn_failed":
+      return ensureActiveTimelineTurn(timeline);
     case "turn_finished":
       return finishTimelineTurn(timeline);
     default:
@@ -652,22 +683,118 @@ export function applyTurnEvent(
   }
 }
 
+function applyPartStarted(
+  timeline: TimelineTurn[],
+  event: Extract<TurnEvent, { type: "part_started" }>,
+): TimelineTurn[] {
+  if (event.partType === "text" || event.partType === "reasoning") {
+    return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => ({
+      ...turn,
+      assistantParts: [
+        ...turn.assistantParts,
+        {
+          id: event.partId,
+          kind: "text",
+          text: event.text ?? "",
+          phase: event.phase,
+          status: event.status,
+          streaming: event.status !== "completed",
+        },
+      ],
+    }));
+  }
+
+  if (event.partType === "tool-call") {
+    const id = event.toolCallId ?? event.partId;
+    const name = event.toolName ?? "tool";
+    return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => ({
+      ...turn,
+      assistantParts: upsertToolPart(
+        [...turn.assistantParts],
+        createToolPart(
+          id,
+          name,
+          event.input ?? {},
+          toolStatusFromLifecycle(event.status, "queued"),
+          event.display,
+        ),
+      ),
+    }));
+  }
+
+  if (event.partType === "tool-result") {
+    return appendToolResult(
+      ensureActiveTimelineTurn(timeline),
+      event.toolCallId,
+      event.toolName,
+      outputText(event.output),
+      event.display,
+    );
+  }
+
+  return timeline;
+}
+
+function applyPartDelta(
+  timeline: TimelineTurn[],
+  partId: string,
+  delta: string,
+): TimelineTurn[] {
+  return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => {
+    const parts = [...turn.assistantParts];
+    const index = parts.findIndex((part) => part.kind === "text" && part.id === partId);
+    if (index >= 0) {
+      const existing = parts[index] as Extract<TimelinePart, { kind: "text" }>;
+      parts[index] = { ...existing, text: existing.text + delta };
+    } else {
+      parts.push({
+        id: partId,
+        kind: "text",
+        text: delta,
+        phase: "commentary",
+        streaming: true,
+      });
+    }
+    return { ...turn, assistantParts: parts };
+  });
+}
+
+function applyPartFinished(
+  timeline: TimelineTurn[],
+  event: Extract<TurnEvent, { type: "part_finished" }>,
+): TimelineTurn[] {
+  return updateLastTurn(ensureActiveTimelineTurn(timeline), (turn) => ({
+    ...turn,
+    assistantParts: turn.assistantParts.map((part) => {
+      if (part.kind !== "text" || part.id !== event.partId) return part;
+      return {
+        ...part,
+        text: typeof event.text === "string" ? event.text : part.text,
+        phase: event.phase ?? part.phase,
+        status: event.status ?? part.status,
+        streaming: false,
+      };
+    }),
+  }));
+}
+
 function assistantTextPartsFromMessage(
   message: Message,
-): Array<{ text: string; phase?: MessagePhase }> {
+): Array<{ text: string; phase?: MessagePhase; status?: MessagePart["status"] }> {
   const parts = message.parts
     ?.filter(
       (part): part is Extract<MessagePart, { type: "text" | "reasoning" }> =>
         part.type === "text" || part.type === "reasoning",
     )
     .filter((part) => part.text.trim())
-    .map((part) => ({ text: part.text, phase: part.phase }));
+    .map((part) => ({ text: part.text, phase: part.phase, status: part.status }));
   if (parts?.length) return parts;
   if (!message.content.trim()) return [];
   return [
     {
       text: message.content,
       phase: message.toolCalls?.length ? "commentary" : undefined,
+      status: message.status,
     },
   ];
 }
@@ -930,8 +1057,28 @@ function addUnique(list: string[], value: string): string[] {
 function resultStatus(content: string): TimelineToolStatus {
   if (content.startsWith("Patch validation failed before execution:")) return "invalid";
   if (content.startsWith("Tool call denied and was not executed:")) return "denied";
+  if (content.startsWith("Tool call interrupted before execution:")) return "failed";
   if (content.startsWith("Error:")) return "failed";
   return "ok";
+}
+
+function toolStatusFromLifecycle(
+  status: MessagePart["status"] | undefined,
+  fallback: TimelineToolStatus,
+): TimelineToolStatus {
+  if (status === "running") return "running";
+  if (status === "failed" || status === "interrupted") return "failed";
+  return fallback;
+}
+
+function outputText(output: unknown): string {
+  if (typeof output === "string") return output;
+  if (output === undefined || output === null) return "";
+  try {
+    return JSON.stringify(output);
+  } catch {
+    return String(output);
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

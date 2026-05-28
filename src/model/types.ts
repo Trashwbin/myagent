@@ -91,17 +91,25 @@ export type ModelEvent = CanonicalModelEvent;
 
 export type MessagePhase = "commentary" | "final";
 
+export type MessageLifecycleStatus =
+  | "running"
+  | "completed"
+  | "failed"
+  | "interrupted";
+
 export type MessagePart =
   | {
       type: "text";
       text: string;
       phase?: MessagePhase;
+      status?: MessageLifecycleStatus;
       providerMetadata?: ProviderMetadata;
     }
   | {
       type: "reasoning";
       text: string;
       phase?: MessagePhase;
+      status?: MessageLifecycleStatus;
       providerMetadata?: ProviderMetadata;
     }
   | {
@@ -110,6 +118,7 @@ export type MessagePart =
       name: string;
       input: unknown;
       display?: ToolDisplay;
+      status?: MessageLifecycleStatus;
       providerMetadata?: ProviderMetadata;
     }
   | {
@@ -119,6 +128,7 @@ export type MessagePart =
       result: unknown;
       isError?: boolean;
       display?: ToolDisplay;
+      status?: MessageLifecycleStatus;
       providerMetadata?: ProviderMetadata;
     }
   | {
@@ -131,6 +141,7 @@ export type MessagePart =
       beforeTokens?: number;
       afterTokens?: number;
       createdAt?: number;
+      status?: MessageLifecycleStatus;
       providerMetadata?: ProviderMetadata;
     };
 
@@ -145,6 +156,8 @@ export type MessageToolCall = {
 export type Message = {
   role: "user" | "assistant" | "tool_result" | "summary";
   content: string;
+  status?: MessageLifecycleStatus;
+  error?: string;
   toolCallId?: string;
   toolName?: string;
   toolCalls?: MessageToolCall[];

@@ -16,6 +16,13 @@ export function eventToRows(
 ): TranscriptRow[] {
   switch (event.type) {
     case "provider_stream_started":
+    case "turn_started":
+    case "message_started":
+    case "message_finished":
+    case "message_failed":
+    case "part_started":
+    case "part_delta":
+    case "part_finished":
     case "provider_step_started":
     case "provider_step_finished":
     case "provider_usage":
@@ -24,6 +31,7 @@ export function eventToRows(
     case "assistant_reasoning_started":
     case "assistant_reasoning_finished":
     case "assistant_text_delta":
+    case "turn_failed":
       return [];
     case "assistant_message": {
       const text = typeof event.message.content === "string" ? event.message.content : "";

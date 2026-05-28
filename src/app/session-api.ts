@@ -4,13 +4,19 @@ import type { Provider } from "../model/provider.js";
 import { formatProviderError, ProviderRuntimeError } from "../model/errors.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { TranscriptStore } from "../storage/store.js";
-import type { SessionState, ApprovalRequest, TurnEvent } from "../session/loop.js";
+import type {
+  DurableTurnSink,
+  SessionState,
+  ApprovalRequest,
+  TurnEvent,
+} from "../session/loop.js";
 import { runTurn } from "../session/loop.js";
 import { ReadStateTracker } from "../tools/file-mutation.js";
 import type { ServerMessage } from "./protocol.js";
 import { randomUUID } from "node:crypto";
 import type { Message } from "../model/types.js";
 import type { SkillSummary } from "../skill/types.js";
+import type { ToolDisplay } from "../session/tool-display.js";
 import { compactSession } from "../session/compact.js";
 import type { CompactResult } from "../session/compact.js";
 import { decideAutoCompact } from "../session/auto-compact.js";
@@ -168,6 +174,7 @@ export class SessionManager {
     };
 
     const onEvent = (event: TurnEvent) => {
+      if (isDurableReplacedEvent(event)) return;
       this.sendEvent(sessionId, {
         type: "turn_event",
         sessionId,
@@ -188,7 +195,7 @@ export class SessionManager {
           messages: messagesBeforeCurrentUser(active.session.messages),
         };
 
-        const { session: updated, newMessages } = await runTurn(
+        const { session: updated } = await runTurn(
           active.provider,
           active.registry,
           sessionForRun,
@@ -197,6 +204,7 @@ export class SessionManager {
             approval: active.approval,
             approvalHandler,
             onEvent,
+            durableSink: this.createDurableSink(sessionId),
             sessionApprovalRules: active.approvalRules,
             store: this.store,
             readState: active.readState,
@@ -204,12 +212,14 @@ export class SessionManager {
           },
         );
         Object.assign(active.session, updated);
-        const followupMessages = newMessages.slice(1);
-        if (followupMessages.length > 0) {
-          this.store.appendMessages(active.session.id, followupMessages);
-        }
       } catch (err) {
         const message = formatTurnError(err);
+        try {
+          const restored = this.store.getSession(sessionId);
+          if (restored) Object.assign(active.session, restored);
+        } catch {
+          // The app/test harness may have closed the store while an async turn unwinds.
+        }
         this.sendEvent(sessionId, {
           type: "error",
           sessionId,
@@ -403,6 +413,107 @@ export class SessionManager {
     this.store.appendMessages(active.session.id, [message]);
   }
 
+  private createDurableSink(sessionId: string): DurableTurnSink {
+    return {
+      messageStarted: (input) => {
+        const messageId = this.store.startMessage(sessionId, input);
+        this.sendEvent(sessionId, {
+          type: "turn_event",
+          sessionId,
+          event: {
+            type: "message_started",
+            messageId,
+            role: input.role,
+            status: input.status,
+          },
+        });
+        return messageId;
+      },
+      messageFinished: (messageId, message) => {
+        this.store.finishMessage(messageId, message);
+        this.sendEvent(sessionId, {
+          type: "turn_event",
+          sessionId,
+          event: { type: "message_finished", messageId, message },
+        });
+      },
+      messageFailed: (messageId, input) => {
+        this.store.failMessage(messageId, input);
+        this.sendEvent(sessionId, {
+          type: "turn_event",
+          sessionId,
+          event: {
+            type: "message_failed",
+            messageId,
+            message: input.message,
+            error: input.error,
+          },
+        });
+      },
+      partStarted: (input) => {
+        const partId = this.store.startMessagePart({
+          sessionId,
+          messageId: input.messageId,
+          type: input.type,
+          phase: input.phase,
+          status: input.status,
+          text: input.text,
+          toolCallId: input.toolCallId,
+          toolName: input.toolName,
+          input: input.input,
+          output: input.output,
+          display: input.display,
+          metadata: input.metadata,
+        });
+        this.sendEvent(sessionId, {
+          type: "turn_event",
+          sessionId,
+          event: {
+            type: "part_started",
+            messageId: input.messageId,
+            partId,
+            partType: input.type,
+            phase: input.phase,
+            status: input.status,
+            text: input.text,
+            toolCallId: input.toolCallId,
+            toolName: input.toolName,
+            input: input.input,
+            output: input.output,
+            display: input.display as ToolDisplay | undefined,
+            metadata: input.metadata,
+          },
+        });
+        return partId;
+      },
+      partDelta: (partId, delta) => {
+        this.store.appendMessagePartDelta(partId, delta);
+        this.sendEvent(sessionId, {
+          type: "turn_event",
+          sessionId,
+          event: { type: "part_delta", partId, delta },
+        });
+      },
+      partFinished: (partId, input) => {
+        this.store.finishMessagePart(partId, input);
+        this.sendEvent(sessionId, {
+          type: "turn_event",
+          sessionId,
+          event: {
+            type: "part_finished",
+            partId,
+            status: input?.status,
+            phase: input?.phase,
+            text: input?.text,
+            output: input?.output,
+            display: input?.display as ToolDisplay | undefined,
+            metadata: input?.metadata,
+          },
+        });
+      },
+    };
+  }
+
   private defaultRuntime(): SessionRuntime {
     return {
       provider: this.defaultProvider,
@@ -525,4 +636,20 @@ function messagesBeforeCurrentUser(messages: Message[]): Message[] {
   const last = messages[messages.length - 1];
   if (last?.role !== "user") return [...messages];
   return messages.slice(0, -1);
+}
+
+function isDurableReplacedEvent(event: TurnEvent): boolean {
+  switch (event.type) {
+    case "assistant_text_started":
+    case "assistant_text_delta":
+    case "assistant_text_finished":
+    case "assistant_reasoning_started":
+    case "assistant_reasoning_finished":
+    case "tool_call":
+    case "tool_result":
+    case "assistant_message":
+      return true;
+    default:
+      return false;
+  }
 }

@@ -1,6 +1,7 @@
 import type { Provider } from "../model/provider.js";
 import type {
   CanonicalModelEvent,
+  MessageLifecycleStatus,
   MessagePhase,
   ModelEvent,
   ModelUsage,
@@ -82,6 +83,7 @@ export type TurnOptions = {
   store?: PermissionStore;
   readState?: ReadStateTracker;
   availableSkills?: SkillSummary[];
+  durableSink?: DurableTurnSink;
 };
 
 export type SessionResult = {
@@ -91,6 +93,46 @@ export type SessionResult = {
 };
 
 export type TurnEvent =
+  | { type: "turn_started" }
+  | {
+      type: "message_started";
+      messageId: string;
+      role: Message["role"];
+      status?: MessageLifecycleStatus;
+    }
+  | { type: "message_finished"; messageId: string; message: Message }
+  | {
+      type: "message_failed";
+      messageId: string;
+      message: Message;
+      error: string;
+    }
+  | {
+      type: "part_started";
+      messageId: string;
+      partId: string;
+      partType: "text" | "reasoning" | "tool-call" | "tool-result";
+      phase?: MessagePhase;
+      status?: MessageLifecycleStatus;
+      text?: string;
+      toolCallId?: string;
+      toolName?: string;
+      input?: unknown;
+      output?: unknown;
+      display?: ToolDisplay;
+      metadata?: ProviderMetadata;
+    }
+  | { type: "part_delta"; partId: string; delta: string }
+  | {
+      type: "part_finished";
+      partId: string;
+      status?: MessageLifecycleStatus;
+      phase?: MessagePhase;
+      text?: string;
+      output?: unknown;
+      display?: ToolDisplay;
+      metadata?: ProviderMetadata;
+    }
   | { type: "provider_stream_started" }
   | { type: "provider_step_started" }
   | { type: "provider_step_finished" }
@@ -126,7 +168,49 @@ export type TurnEvent =
     }
   | { type: "tool_result"; message: Message; display?: ToolDisplay }
   | { type: "turn_truncated" }
+  | { type: "turn_failed"; error: string }
   | { type: "turn_finished" };
+
+export type DurableTurnSink = {
+  messageStarted(input: {
+    role: Message["role"];
+    content?: string;
+    status?: MessageLifecycleStatus;
+  }): Promise<string> | string;
+  messageFinished(
+    messageId: string,
+    message: Message,
+  ): Promise<void> | void;
+  messageFailed(
+    messageId: string,
+    input: { message: Message; error: string },
+  ): Promise<void> | void;
+  partStarted(input: {
+    messageId: string;
+    type: "text" | "reasoning" | "tool-call" | "tool-result";
+    phase?: MessagePhase;
+    status?: MessageLifecycleStatus;
+    text?: string;
+    toolCallId?: string;
+    toolName?: string;
+    input?: unknown;
+    output?: unknown;
+    display?: unknown;
+    metadata?: ProviderMetadata;
+  }): Promise<string> | string;
+  partDelta(partId: string, delta: string): Promise<void> | void;
+  partFinished(
+    partId: string,
+    input?: {
+      status?: MessageLifecycleStatus;
+      phase?: MessagePhase;
+      text?: string;
+      output?: unknown;
+      display?: unknown;
+      metadata?: ProviderMetadata;
+    },
+  ): Promise<void> | void;
+};
 
 function buildToolSchemas(registry: ToolRegistry): ToolSchema[] {
   return registry.list().map((t) => {
@@ -155,12 +239,52 @@ function blockedMsg(
   };
 }
 
+function interruptedToolResult(
+  tc: {
+    id: string;
+    name: string;
+    input: unknown;
+    providerMetadata?: ProviderMetadata;
+  },
+  reason: string,
+): Message {
+  const content = `Tool call interrupted before execution: ${reason}`;
+  return {
+    role: "tool_result",
+    toolCallId: tc.id,
+    toolName: tc.name,
+    content,
+    toolDisplay: buildToolResultDisplay(tc.name, tc.input, content),
+    providerMetadata: tc.providerMetadata,
+    parts: [
+      {
+        type: "tool-result",
+        id: tc.id,
+        name: tc.name,
+        result: content,
+        isError: true,
+        display: buildToolResultDisplay(tc.name, tc.input, content),
+        status: "interrupted",
+        providerMetadata: tc.providerMetadata,
+      },
+    ],
+    status: "interrupted",
+    error: reason,
+  };
+}
+
 function providerRawFromMetadata(metadata: ProviderMetadata | undefined): unknown {
   if (!metadata) return undefined;
   if ("raw" in metadata) return metadata.raw;
   if ("openaiCompatible" in metadata) return metadata.openaiCompatible;
   if ("anthropic" in metadata) return metadata.anthropic;
   return undefined;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error && error.message.trim()
+    ? error.message
+    : String(error || "Turn failed");
 }
 
 function mutationDisplayFiles(
@@ -192,6 +316,28 @@ async function runAgentLoop(
   const sessionRules = options.sessionApprovalRules ?? [];
   const store = options.store;
   const readState = options.readState ?? new ReadStateTracker();
+  if (options.durableSink && onEvent) await onEvent({ type: "turn_started" });
+  const persistDurableToolResult = async (msg: Message, display?: ToolDisplay) => {
+    const durableSink = options.durableSink;
+    if (!durableSink || msg.role !== "tool_result") return;
+    const messageId = await durableSink.messageStarted({
+      role: "tool_result",
+      content: msg.content,
+      status: msg.status ?? "completed",
+    });
+    const partId = await durableSink.partStarted({
+      messageId,
+      type: "tool-result",
+      status: msg.status ?? "completed",
+      toolCallId: msg.toolCallId,
+      toolName: msg.toolName,
+      output: msg.content,
+      display: display ?? msg.toolDisplay,
+      metadata: msg.providerMetadata,
+    });
+    await durableSink.partFinished(partId, { status: msg.status ?? "completed" });
+    await durableSink.messageFinished(messageId, msg);
+  };
 
   let lastStopReason: "end_turn" | "tool_use" | "length" | undefined;
   // eslint-disable-next-line no-constant-condition
@@ -209,11 +355,54 @@ async function runAgentLoop(
       display?: ToolDisplay;
       providerMetadata?: ProviderMetadata;
     }> = [];
+    const durableSink = options.durableSink;
+    let assistantMessageId: string | undefined;
+    let activeTextPartId: string | undefined;
+    let activeReasoningPartId: string | undefined;
 
-    for await (const canonical of provider.stream([...messages], toolSchemas, {
-      systemPrompt,
-    })) {
-      switch (canonical.type) {
+    const ensureDurableAssistantMessage = async () => {
+      if (!durableSink) return undefined;
+      if (!assistantMessageId) {
+        assistantMessageId = await durableSink.messageStarted({
+          role: "assistant",
+          content: "",
+          status: "running",
+        });
+      }
+      return assistantMessageId;
+    };
+
+    const startDurableTextPart = async (phase: MessagePhase) => {
+      if (!durableSink || activeTextPartId) return;
+      const messageId = await ensureDurableAssistantMessage();
+      if (!messageId) return;
+      activeTextPartId = await durableSink.partStarted({
+        messageId,
+        type: "text",
+        phase,
+        status: "running",
+        text: "",
+      });
+    };
+
+    const startDurableReasoningPart = async () => {
+      if (!durableSink || activeReasoningPartId) return;
+      const messageId = await ensureDurableAssistantMessage();
+      if (!messageId) return;
+      activeReasoningPartId = await durableSink.partStarted({
+        messageId,
+        type: "reasoning",
+        phase: "commentary",
+        status: "running",
+        text: "",
+      });
+    };
+
+    try {
+      for await (const canonical of provider.stream([...messages], toolSchemas, {
+        systemPrompt,
+      })) {
+        switch (canonical.type) {
         case "start":
           if (onEvent) await onEvent({ type: "provider_stream_started" });
           break;
@@ -235,11 +424,16 @@ async function runAgentLoop(
                 : "end_turn";
           break;
         case "text-start":
+          await startDurableTextPart("commentary");
           if (onEvent)
             await onEvent({ type: "assistant_text_started", phase: "commentary" });
           break;
         case "text":
+          await startDurableTextPart("commentary");
           assistantText += canonical.delta;
+          if (durableSink && activeTextPartId) {
+            await durableSink.partDelta(activeTextPartId, canonical.delta);
+          }
           if (onEvent)
             await onEvent({
               type: "assistant_text_delta",
@@ -248,14 +442,25 @@ async function runAgentLoop(
             });
           break;
         case "text-end":
+          if (durableSink && activeTextPartId) {
+            await durableSink.partFinished(activeTextPartId, {
+              status: "completed",
+              phase: "commentary",
+            });
+          }
           if (onEvent)
             await onEvent({ type: "assistant_text_finished", phase: "commentary" });
           break;
         case "reasoning-start":
+          await startDurableReasoningPart();
           if (onEvent) await onEvent({ type: "assistant_reasoning_started" });
           break;
         case "reasoning":
+          await startDurableReasoningPart();
           reasoningText += canonical.delta;
+          if (durableSink && activeReasoningPartId) {
+            await durableSink.partDelta(activeReasoningPartId, canonical.delta);
+          }
           reasoningMetadata = {
             ...(reasoningMetadata ?? {}),
             ...(canonical.providerMetadata ?? {}),
@@ -264,25 +469,50 @@ async function runAgentLoop(
             assistantRaw = providerRawFromMetadata(canonical.providerMetadata);
           break;
         case "reasoning-end":
+          if (durableSink && activeReasoningPartId) {
+            await durableSink.partFinished(activeReasoningPartId, {
+              status: "completed",
+              metadata: reasoningMetadata,
+            });
+          }
           if (onEvent) await onEvent({ type: "assistant_reasoning_finished" });
           break;
         case "tool-call":
-          toolCalls.push({
-            id: canonical.id,
-            name: canonical.name,
-            input: canonical.input,
-            display: buildToolInputDisplay(canonical.name, canonical.input),
-            providerMetadata: canonical.providerMetadata,
-          });
-          if (onEvent)
-            await onEvent({
-              type: "tool_call",
+          {
+            const display = buildToolInputDisplay(canonical.name, canonical.input);
+            toolCalls.push({
               id: canonical.id,
               name: canonical.name,
               input: canonical.input,
-              display: buildToolInputDisplay(canonical.name, canonical.input),
+              display,
+              providerMetadata: canonical.providerMetadata,
             });
-          break;
+            if (durableSink) {
+              const messageId = await ensureDurableAssistantMessage();
+              if (messageId) {
+                const partId = await durableSink.partStarted({
+                  messageId,
+                  type: "tool-call",
+                  status: "completed",
+                  toolCallId: canonical.id,
+                  toolName: canonical.name,
+                  input: canonical.input,
+                  display,
+                  metadata: canonical.providerMetadata,
+                });
+                await durableSink.partFinished(partId, { status: "completed" });
+              }
+            }
+            if (onEvent)
+              await onEvent({
+                type: "tool_call",
+                id: canonical.id,
+                name: canonical.name,
+                input: canonical.input,
+                display,
+              });
+            break;
+          }
         case "tool-result":
           break;
         case "finish":
@@ -301,7 +531,97 @@ async function runAgentLoop(
         case "abort":
           lastStopReason = "end_turn";
           break;
+        }
       }
+    } catch (err) {
+      const failure = errorMessage(err);
+      const interruptedParts = [
+        ...(reasoningText
+          ? [
+              {
+                type: "reasoning" as const,
+                text: reasoningText,
+                phase: "commentary" as const,
+                status: "interrupted" as const,
+                providerMetadata: reasoningMetadata,
+              },
+            ]
+          : []),
+        ...(assistantText
+          ? [
+              {
+                type: "text" as const,
+                text: assistantText,
+                phase: "commentary" as const,
+                status: "interrupted" as const,
+              },
+            ]
+          : []),
+        ...toolCalls.map((tc) => ({
+          type: "tool-call" as const,
+          id: tc.id,
+          name: tc.name,
+          input: tc.input,
+          display: tc.display,
+          status: "interrupted" as const,
+          providerMetadata: tc.providerMetadata,
+        })),
+      ];
+      if (durableSink && activeTextPartId) {
+        await durableSink.partFinished(activeTextPartId, {
+          status: "interrupted",
+          phase: "commentary",
+        });
+      }
+      if (durableSink && activeReasoningPartId) {
+        await durableSink.partFinished(activeReasoningPartId, {
+          status: "interrupted",
+          metadata: reasoningMetadata,
+        });
+      }
+      if (assistantMessageId || interruptedParts.length > 0) {
+        const failedMessage: Message = {
+          role: "assistant",
+          content: assistantText,
+          status: "failed",
+          error: failure,
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          parts: interruptedParts.length > 0 ? interruptedParts : undefined,
+          usage: latestUsage,
+          providerMetadata,
+          providerRaw: assistantRaw ?? providerRawFromMetadata(providerMetadata),
+        };
+        messages.push(failedMessage);
+        newMessages.push(failedMessage);
+        if (durableSink) {
+          const messageId =
+            assistantMessageId ?? (await durableSink.messageStarted({
+              role: "assistant",
+              content: assistantText,
+              status: "failed",
+            }));
+          await durableSink.messageFailed(messageId, {
+            message: failedMessage,
+            error: failure,
+          });
+        }
+        if (onEvent)
+          await onEvent({ type: "assistant_message", message: failedMessage });
+      }
+      for (const tc of toolCalls) {
+        const synthetic = interruptedToolResult(tc, failure);
+        messages.push(synthetic);
+        newMessages.push(synthetic);
+        await persistDurableToolResult(synthetic, synthetic.toolDisplay);
+        if (onEvent)
+          await onEvent({
+            type: "tool_result",
+            message: synthetic,
+            display: synthetic.toolDisplay,
+          });
+      }
+      if (onEvent) await onEvent({ type: "turn_failed", error: failure });
+      throw err;
     }
 
     const messagePhase: MessagePhase = toolCalls.length > 0 ? "commentary" : "final";
@@ -338,6 +658,32 @@ async function runAgentLoop(
       providerMetadata,
       providerRaw: assistantRaw ?? providerRawFromMetadata(providerMetadata),
     };
+    if (durableSink) {
+      if (activeTextPartId) {
+        await durableSink.partFinished(activeTextPartId, {
+          status: "completed",
+          phase: messagePhase,
+          text: assistantText,
+        });
+      }
+      if (activeReasoningPartId) {
+        await durableSink.partFinished(activeReasoningPartId, {
+          status: "completed",
+          text: reasoningText,
+          metadata: reasoningMetadata,
+        });
+      }
+      if (assistantMessageId) {
+        await durableSink.messageFinished(assistantMessageId, assistantMsg);
+      } else if (parts.length > 0 || assistantText) {
+        const messageId = await durableSink.messageStarted({
+          role: "assistant",
+          content: assistantText,
+          status: "completed",
+        });
+        await durableSink.messageFinished(messageId, assistantMsg);
+      }
+    }
     messages.push(assistantMsg);
     newMessages.push(assistantMsg);
     if (onEvent) await onEvent({ type: "assistant_message", message: assistantMsg });
@@ -367,6 +713,7 @@ async function runAgentLoop(
         };
         messages.push(msg);
         newMessages.push(msg);
+        await persistDurableToolResult(msg, toolDisplay);
         if (onEvent)
           await onEvent({
             type: "tool_result",
@@ -468,6 +815,7 @@ async function runAgentLoop(
           };
           messages.push(msg);
           newMessages.push(msg);
+          await persistDurableToolResult(msg, toolDisplay);
           if (onEvent)
             await onEvent({
               type: "tool_result",
@@ -517,6 +865,7 @@ async function runAgentLoop(
             msg.toolDisplay = toolDisplay;
             messages.push(msg);
             newMessages.push(msg);
+            await persistDurableToolResult(msg, toolDisplay);
             if (onEvent)
               await onEvent({
                 type: "tool_result",
@@ -600,6 +949,7 @@ async function runAgentLoop(
         };
         messages.push(msg);
         newMessages.push(msg);
+        await persistDurableToolResult(msg, toolDisplay);
         if (onEvent)
           await onEvent({
             type: "tool_result",
@@ -619,6 +969,7 @@ async function runAgentLoop(
         msg.toolDisplay = toolDisplay;
         messages.push(msg);
         newMessages.push(msg);
+        await persistDurableToolResult(msg, toolDisplay);
         if (onEvent)
           await onEvent({
             type: "tool_result",
@@ -649,6 +1000,7 @@ async function runAgentLoop(
             };
             messages.push(msg);
             newMessages.push(msg);
+            await persistDurableToolResult(msg, toolDisplay);
             if (onEvent)
               await onEvent({
                 type: "tool_result",
@@ -693,6 +1045,7 @@ async function runAgentLoop(
       };
       messages.push(resultMsg);
       newMessages.push(resultMsg);
+      await persistDurableToolResult(resultMsg, toolDisplay);
       if (onEvent)
         await onEvent({
           type: "tool_result",
