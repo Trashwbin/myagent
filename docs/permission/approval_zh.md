@@ -4,6 +4,8 @@
 
 当 `checkToolPermission()` 返回 `ask` 时，会话循环会先检查审批记忆，然后再决定是否提示用户确认。已经批准过的操作可以被记住，记忆范围可以是当前会话，也可以是当前工作区。但敏感请求不能被记住。
 
+当审批模式是 `never` 时，`checkToolPermission()` 会把每个 `ask` 决策转换成 `deny`，原因会保留原始原因并追加 `approval mode is never`。`invalid` 仍然是单独状态，会作为校验失败上报，而不是作为被拒绝的审批请求。
+
 ## auto 模式下的自动允许
 
 在 `approval: "auto"` 模式下，下面这些发生在工作区内部、并且不敏感的修改操作，会自动允许，不弹确认：
@@ -40,7 +42,13 @@
 **`command`**：Shell 命令审批，也就是 bash：
 
 ```ts
-{ kind: "command", prompt: "Create directory?", subject: "test-01/js", intent?: "filesystem" }
+{
+  kind: "command",
+  prompt: "Create directory?",
+  subject: "test-01/js",
+  intent?: "filesystem",
+  allowPatternLabel?: "git diff *"
+}
 ```
 
 **`mutation`**：文件修改审批，包括 `edit_file`、`write_file`、`apply_patch`：
@@ -64,6 +72,8 @@
 ```ts
 { kind: "access", prompt: "Allow access outside the workspace?", subject: "/etc/passwd", scope?: "/ext/project/*" }
 ```
+
+`skill` 工具也会渲染成 `access`，提示文案是 `Load skill?`。
 
 ### 展示数据流向
 
@@ -93,8 +103,16 @@
 | `Read` / `list_dir` / `grep` / `glob` / `find_up` | metadata 中的 `realPath` |
 | `edit_file` / `write_file` | metadata 中的 `absolutePath` |
 | `apply_patch` | 排序后的 `affectedPaths` |
+| `skill` | metadata 中的 `approvalPattern`，如果没有则使用 skill 名称 |
 
 匹配使用 `(toolName, pattern)` 精确匹配。
+
+对于同时请求外部目录访问的 bash 命令，审批记忆是双层的：
+
+- `external_directory` 覆盖路径或项目根目录
+- `bash` 覆盖命令族 pattern，例如 `git diff *`
+
+两个规则都匹配时，后续同类外部只读 bash 命令才会被自动允许。
 
 ## 敏感请求
 
@@ -107,6 +125,8 @@
 - 不会有外部目录自动允许
 
 敏感修改不会在 `ApprovalDisplay` 里包含 diff 内容。UI 只展示文件名和 `+N -M` 行数。
+
+即使已经存在匹配的会话规则或工作区规则，敏感请求也不会通过审批记忆自动允许。
 
 ## invalid 和 denied 的区别
 

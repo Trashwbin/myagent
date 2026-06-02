@@ -15,6 +15,14 @@ type ToolPermissionDecision = {
 
 `invalid` 当前用于 `apply_patch` 预检查，它不是一种权限状态。
 
+内置权限 switch 当前覆盖：
+
+- 读取类工具：`Read`、`list_dir`、`grep`、`glob`、`find_up`
+- 修改类工具：`edit_file`、`write_file`、`apply_patch`
+- 执行和上下文类工具：`bash`、`skill`
+
+未知工具会被拒绝。在 `approval: "never"` 模式下，任何原本会是 `ask` 的决策都会被转换成 `deny`。
+
 ## 读取类工具
 
 当前读取类工具包括：
@@ -39,6 +47,8 @@ type ToolPermissionDecision = {
 | 工作区外路径 | ask | file/path is outside workspace |
 
 工作区外的非敏感读取，也会收到 `externalDirectoryPattern` metadata，用于可复用的项目级审批。
+
+metadata 还会携带规范化后的路径字段：`inputPath`、`absolutePath`、`realPath`、`insideWorkspace`，以及 `sensitive`。工作区外的非敏感读取还会添加 `externalDirectoryRoot` 和 `externalDirectoryReason`。
 
 ## `Read`
 
@@ -124,6 +134,19 @@ type ToolPermissionDecision = {
 - 读取类工具 -> 读取类
 
 修改类工具只能操作工作区内部。读取类工具可以在审批后读取工作区外路径。
+
+在 `approval: "auto"` 模式下，非敏感的工作区内修改会在校验通过后自动允许。在 `approval: "on-request"` 模式下会询问。在 `approval: "never"` 模式下会拒绝。敏感的工作区内修改在交互模式下仍然会询问，并且不会得到可复用审批记忆。
+
+## `skill`
+
+`skill` 工具也由同一个权限入口管理：
+
+- 缺少 skill 名称或 skill 未知时会拒绝
+- `approval: "never"` 会拒绝加载 skill
+- `approval: "on-request"` 会对所有 skill 加载进行询问
+- `approval: "auto"` 会允许工作区作用域的 skill，并对非工作区 skill 进行询问
+
+Skill 审批记忆按 skill 名称匹配。
 
 ## 敏感路径检测
 

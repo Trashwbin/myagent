@@ -32,6 +32,8 @@ shell string
 - CLI 展示，例如 `bash (content_search)`
 - transcript 捕获
 
+`intentKind` 是描述性 metadata。最终权限决策仍然由 `analyzeCommand()` 在危险模式、链式命令、管道、路径和敏感性检查之后给出。
+
 ## 支持识别的模式
 
 ### file discovery
@@ -60,12 +62,15 @@ shell string
 - `mv`
 - `mkdir`
 
+这些会被识别成 `fs_primitive` intent，但策略仍然把它们视为有写入效果的命令，需要审批。
+
 ### git read
 
 - `git status`
 - `git diff`
 - `git log`
 - `git show`
+- `git rev-parse`
 - 只读的 `git branch`
 
 ### exec
@@ -80,7 +85,10 @@ shell string
 - `make`
 - `cargo`
 - `go`
+- `dotnet`
 - 常见的只读 shell 工具，但它们不会被提升成更具体的 intent
+
+`npm test`、`pnpm test`、`yarn test`、`npm run test` 这类包管理器测试命令会被视为只读测试命令，除非它们同时包含 install/add 行为。包安装仍然是有写入效果的命令。
 
 ## 危险模式或降级模式
 
@@ -96,21 +104,27 @@ shell string
 - 输出重定向，也就是 `>`、`>>` 等
 - 命令替换
 - 管道进入 shell
+- 把远程内容通过管道传给 `python` 或 `node` 这类解释器
+- 解释器 eval 形式，例如 `node -e`、`python -c`、`perl -e`、`ruby -e`
 - 远程脚本执行模式，例如 `curl | sh`
 
 根据具体命令，它们会变成 `ask` 或 `deny`。
+
+`touch`、`mkdir`、`mv`、`cp`、`rm`、`chmod`、`chown`、`tee`、`curl`、`wget` 这类有写入效果或网络效果的命令通常会变成 `ask`。某些危险形式会直接 `deny`，例如 `rm -rf`、`sudo`、递归 `chmod -R`、管道进入 shell、远程脚本执行。
 
 ## 决策层级
 
 `analyzeCommand()` 按下面顺序应用策略：
 
-1. 危险模式 deny
-2. 命令替换 ask
-3. 输出重定向 ask
-4. 受控链式命令处理
-5. 管道和解释器安全检查
-6. 单元分类
-7. 路径边界和敏感性检查
+1. 受控的 `cd <dir> && <readonly-cmd>` 处理
+2. 危险模式 deny
+3. 命令替换 ask
+4. 输出重定向 ask
+5. 不支持的链式命令 ask
+6. 管道和解释器安全检查
+7. 单元分类
+8. 路径边界和敏感性检查
+9. 只读命令的外部有效工作目录检查
 
 ## `cd <dir> && <readonly-cmd>`
 
@@ -147,6 +161,15 @@ cd <dir> && <readonly-cmd>
 - `externalDirectoryRoot`
 - `externalDirectoryReason`
 - 可选的可复用 `approvalPattern`
+
+当前支持生成的可复用 bash 审批 pattern 包括：
+
+- `git <subcommand> *`
+- `rg *`
+- `grep *`
+- 包管理器命令族，例如 `npm test *`
+
+外部只读 bash 需要同时满足外部目录规则和 bash 命令族规则，审批记忆才会自动允许。
 
 ## 输出预算
 
