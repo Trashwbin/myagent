@@ -13,7 +13,9 @@ This is the sole store for session metadata and full transcripts. It lives outsi
 Tables:
 
 - `sessions` — session metadata (id, workspace_root, provider, model, title, timestamps)
-- `messages` — ordered transcript rows (seq, role, content, tool_call_id, tool_name, tool_calls_json)
+- `messages` — ordered transcript rows and durable message lifecycle data, including role/content, status, tool calls, tool display data, message parts, usage, provider metadata/raw payloads, checkpoint id, errors, and timestamps
+- `message_parts` — durable normalized message parts for text, reasoning, tool calls, and tool results
+- `permission_rules` — workspace-scoped reusable approval rules
 
 ## Workspace root
 
@@ -37,8 +39,25 @@ Rules are scoped by `workspace_root`. A rule created in one workspace does not a
 
 ## Checkpoints
 
-Checkpoints (file snapshots before edits) are still stored under the workspace directory in `<workspace>/.myagent/checkpoints/`. This is intentional — checkpoints contain copies of the workspace's own files and should travel with the project.
+Checkpoints (file snapshots before edits) are stored outside the workspace by default under:
+
+```text
+$MYAGENT_HOME/checkpoints/<workspaceHash>/
+```
+
+If `MYAGENT_HOME` is unset, this resolves to `~/.myagent/checkpoints/<workspaceHash>/`. `MYAGENT_CHECKPOINT_HOME` can override only the checkpoint root.
+
+The default backend is `shadow-git`:
+
+- `<checkpointRoot>/repo.git` stores git objects and commits for snapshots.
+- `<checkpointRoot>/checkpoints/<checkpointId>.json` stores checkpoint metadata.
+- `workspaceHash` is derived from the resolved workspace path, so checkpoint metadata is scoped to one workspace.
+- New checkpoints do not write into `<workspace>/.myagent/checkpoints/`.
+
+Legacy `copy-v1` checkpoints under `<workspace>/.myagent/checkpoints/` are still readable for restore compatibility. They are only written when `MYAGENT_CHECKPOINT_BACKEND=copy-v1`, which is primarily useful for tests or explicit fallback.
 
 ## History
 
 Earlier versions stored `myagent.sqlite` inside `<workspace>/.myagent/`. This was changed because session data is agent runtime state, not project state, and should not pollute user project directories. No automatic migration is provided.
+
+Earlier checkpoint snapshots also used `<workspace>/.myagent/checkpoints/`. The current shadow-git backend moved new checkpoint data into the agent data directory for the same reason: runtime recovery state should not be committed, deleted, or modified as part of the user's project files.

@@ -258,7 +258,7 @@ Current rules:
 - read-only bash commands: classified by command-policy v2, including `cd <dir> && <cmd>` and `git -C <dir>` effective cwd handling
 - bash has an internal `CommandIntent` semantic model: every command is parsed into an intent kind (`file_discovery`, `content_search`, `partial_read`, `fs_primitive`, `git_read`, `exec`, `unknown`) and this intent flows through policy/approval/transcript/CLI display
 - reusable bash approval patterns: `git diff *`, `git status *`, `rg *`, `npm test *`, etc.
-- file writes inside workspace: ask in interactive modes, deny in `approval: "never"`
+- file writes inside workspace: auto-allow non-sensitive writes in `approval: "auto"`, ask in `approval: "on-request"`, deny in `approval: "never"`
 - destructive commands: deny by default
 - write/network/unknown commands: ask or deny based on policy and approval mode
 
@@ -275,12 +275,26 @@ Current tables:
 ```text
 sessions
 messages
+message_parts
 permission_rules
 ```
 
 The `messages` table stores assistant tool calls and tool result metadata inline.
-Checkpoint snapshots are stored under `<workspace>/.myagent/checkpoints/`, not in
-SQLite.
+`message_parts` stores durable normalized parts for text, reasoning, tool calls,
+and tool results. Checkpoint ids are stored on successful tool-result messages;
+checkpoint snapshot data itself is not stored in SQLite.
+
+Default checkpoints use a shadow-git backend under:
+
+```text
+$MYAGENT_HOME/checkpoints/<workspaceHash>/
+```
+
+That directory contains `repo.git` plus per-checkpoint JSON metadata. Legacy
+`copy-v1` checkpoints under `<workspace>/.myagent/checkpoints/` remain readable
+for restore compatibility and can still be written explicitly with
+`MYAGENT_CHECKPOINT_BACKEND=copy-v1`, but new default checkpoints no longer
+pollute the workspace.
 
 The store exists so the project can demonstrate real agent runtime behavior,
 not just a prompt wrapper. Future schema work may split tool calls, permission
@@ -291,20 +305,21 @@ inspection or replay.
 
 Use local filesystem plus git commands:
 
-- checkpoint: copy touched files before write
+- checkpoint: snapshot touched files before write using the shadow-git backend
 - rewind: restore checkpointed files
 - diff: `git diff --stat` and `git diff`
 
-Do not require the target workspace to be a git repo for v0, but if it is a git
-repo, use git diff as the primary output.
+The target workspace does not need to be a git repo. The shadow-git checkpoint
+backend keeps its own bare repo outside the workspace and runs git with explicit
+`--git-dir` / `--work-tree` arguments. If the user workspace is a git repo,
+normal `git diff` remains the primary workspace diff output.
 
 ## Compaction
 
-Implement simple local compaction after the base loop works.
-
-Status: not implemented yet. File mutation tools v1 (`write_file`, stronger
-`edit_file`, `apply_patch`, shared mutation policy) came first because
-compaction should not be built on top of a thin write surface.
+Manual and automatic compaction are implemented in `src/session/compact.ts` and
+`src/session/auto-compact.ts`. The app/session layer decides when to compact
+based on context usage, while slash-command/manual entry points can request
+compaction explicitly.
 
 v0 strategy:
 
