@@ -384,7 +384,7 @@ Implemented:
    - Move File rejected; `*** Move to:` supported after `*** Update File:` with hunk application.
    - Standard unified diff (`---`/`+++`) detected and rejected with clear guidance.
    - Atomic pre-flight validation, rollback on execution failure.
-   - Approval-stage hunk dry-run: non-sensitive path failures are denied before user approval.
+   - Approval-stage hunk dry-run: non-sensitive path failures are reported as validation failures before user approval.
    - Approval metadata with combined diff, checkpoint coverage for all affected paths.
 5. Unified session-loop checkpoint via `isMutationTool` / `getCheckpointPaths`.
 
