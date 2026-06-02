@@ -15,6 +15,14 @@ type ToolPermissionDecision = {
 
 `invalid` is currently used by `apply_patch` preflight and is not a permission state.
 
+The built-in permission switch currently covers:
+
+- read-class tools: `Read`, `list_dir`, `grep`, `glob`, `find_up`
+- mutation tools: `edit_file`, `write_file`, `apply_patch`
+- execution/context tools: `bash`, `skill`
+
+Unknown tools are denied. In `approval: "never"` mode, any decision that would otherwise be `ask` is converted to `deny`.
+
 ## Read-class tools
 
 The current read-class tools are:
@@ -39,6 +47,8 @@ For ordinary read targets:
 | outside workspace | ask | file/path is outside workspace |
 
 Outside-workspace non-sensitive reads also receive `externalDirectoryPattern` metadata for reusable project-scoped approvals.
+
+The metadata also carries normalized path fields (`inputPath`, `absolutePath`, `realPath`, `insideWorkspace`) and `sensitive`. External non-sensitive reads add `externalDirectoryRoot` and `externalDirectoryReason`.
 
 ## `Read`
 
@@ -124,6 +134,19 @@ Current split:
 - read-class tools → read family
 
 Mutation tools are workspace-only; read-class tools can read outside the workspace with approval.
+
+In `approval: "auto"` mode, non-sensitive workspace mutations are allowed automatically after validation. In `approval: "on-request"` they ask. In `approval: "never"` they deny. Sensitive workspace mutations still ask in interactive modes and never get reusable approval memory.
+
+## `skill`
+
+The `skill` tool is governed by the same permission entry point:
+
+- missing or unknown skill name is denied
+- `approval: "never"` denies skill loads
+- `approval: "on-request"` asks for all skill loads
+- `approval: "auto"` allows workspace-scoped skills and asks for non-workspace skills
+
+Skill approval memory matches by skill name.
 
 ## Sensitive path detection
 

@@ -15,6 +15,8 @@ It applies to:
 
 Once approved for a project root, later read-class access under that root can auto-allow without per-file prompts.
 
+Approval mode still applies. In `approval: "never"` mode, requests that would ask for external-directory approval are denied instead.
+
 ## Project root detection
 
 `src/workspace/project-root.ts` implements `findProjectRoot(startPath, isDirectory?)`.
@@ -71,6 +73,8 @@ Read-only bash outside the workspace needs two layers:
 Both must be satisfied for auto-allow.
 
 Read-class tools other than bash only need the path layer.
+
+Sensitive paths never use external-directory auto-allow. If a sensitive file lives under an already approved external project, it still prompts again and the sensitive approval is not remembered.
 
 ## `find_up` note
 

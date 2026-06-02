@@ -4,6 +4,8 @@
 
 When `checkToolPermission()` returns `ask`, the session loop checks approval memory before prompting. Approved actions can be remembered at session or workspace scope unless the request is sensitive.
 
+When approval mode is `never`, `checkToolPermission()` converts every `ask` decision to `deny` with the original reason plus `approval mode is never`. `invalid` stays separate and is reported as validation failure, not as a denied approval request.
+
 ## Auto-allow in auto mode
 
 In `approval: "auto"` mode, the following workspace-internal, non-sensitive mutations are auto-allowed without prompting:
@@ -38,7 +40,13 @@ The `ApprovalDisplay` type (in `src/permission/display.ts`) provides structured,
 
 **`command`** — Shell command approval (bash):
 ```ts
-{ kind: "command", prompt: "Create directory?", subject: "test-01/js", intent?: "filesystem" }
+{
+  kind: "command",
+  prompt: "Create directory?",
+  subject: "test-01/js",
+  intent?: "filesystem",
+  allowPatternLabel?: "git diff *"
+}
 ```
 
 **`mutation`** — File mutation approval (edit_file, write_file, apply_patch):
@@ -59,6 +67,8 @@ The `ApprovalDisplay` type (in `src/permission/display.ts`) provides structured,
 ```ts
 { kind: "access", prompt: "Allow access outside the workspace?", subject: "/etc/passwd", scope?: "/ext/project/*" }
 ```
+
+The `skill` tool also renders as `access` with the prompt `Load skill?`.
 
 ### Where display flows
 
@@ -88,8 +98,16 @@ The four approval buttons are always: Allow once, Always this session, Always in
 | `Read` / `list_dir` / `grep` / `glob` / `find_up` | `realPath` from metadata |
 | `edit_file` / `write_file` | `absolutePath` from metadata |
 | `apply_patch` | sorted `affectedPaths` |
+| `skill` | `approvalPattern` from metadata when present; otherwise skill name |
 
 Matching is exact by `(toolName, pattern)`.
+
+For bash commands that also request external-directory access, approval memory is two-layered:
+
+- `external_directory` covers the path/project root
+- `bash` covers the command-family pattern, such as `git diff *`
+
+Both rules must match before a later external read-only bash command is auto-allowed.
 
 ## Sensitive requests
 
@@ -101,6 +119,8 @@ That means:
 - no external-directory auto-allow
 
 Sensitive mutations do not include diff content in the `ApprovalDisplay`. The UI only shows file name and `+N -M` counts.
+
+Sensitive requests are also excluded from approval-memory auto-allow even when a matching session or workspace rule already exists.
 
 ## Invalid vs denied
 

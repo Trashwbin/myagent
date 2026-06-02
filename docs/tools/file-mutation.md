@@ -60,7 +60,7 @@ What was **not** extracted (and why):
 
 `edit_file`, `write_file`, and `apply_patch` all use the same write permission family:
 
-- Workspace path: ask in interactive modes, deny in `approval: "never"`.
+- Workspace path: auto-allow non-sensitive writes in `approval: "auto"`, ask in `approval: "on-request"`, deny in `approval: "never"`.
 - Outside workspace: deny.
 - Sensitive path writes: ask like other writes; secret-read restrictions still apply to reading contents.
 
@@ -87,6 +87,8 @@ Every successful mutation creates a checkpoint before writing, even when approva
 
 - `edit_file` / `write_file`: single path from `resolvedPath ?? path`.
 - `apply_patch`: all paths from `resolvedPaths` keys.
+
+For moves, `resolvedPaths` includes both the source and destination path, so the checkpoint covers both sides of the rename.
 
 Failed mutations do not expose checkpoint IDs.
 
@@ -323,7 +325,7 @@ Behavior:
 - `apply_patch` performs a **preflight validation** (parse, path resolution, dry-run hunk application) before any approval or execution.
 - **Preflight failures are validation errors, not permission denials.** Hunk mismatch, update target not found, move destination conflict, and parse errors are all reported as `Patch validation failed` — they never enter the approval flow.
 - True permission denials (outside workspace, `approval: "never"`) remain distinct from validation failures.
-- For non-sensitive paths, the permission system performs a dry-run hunk application before approval. If any hunk cannot apply or the target file does not exist, the patch is reported as a validation failure — the user sees the specific file and hunk that would fail.
+- For non-sensitive paths, the permission system performs a dry-run hunk application before approval. If any hunk cannot apply or the target file does not exist, the patch is reported as a validation failure before the approval prompt — the user sees the specific file and hunk that would fail.
 - Sensitive paths cannot be validated (content is not accessible to the permission system), so they still require approval and may fail at execution time.
 - Both the approval metadata path and the execution path use the same `tryApplyHunks` helper for hunk application, ensuring consistent line-ending handling and matching semantics.
 - Checkpoint covers every affected path before mutation.
@@ -345,7 +347,7 @@ After a `Read` triggered by patch failure, the model is expected to continue the
 
 `edit_file`, `write_file`, and `apply_patch` should all use the same write permission family:
 
-- Workspace path: ask in interactive modes, deny in `approval: "never"`.
+- Workspace path: auto-allow non-sensitive writes in `approval: "auto"`, ask in `approval: "on-request"`, deny in `approval: "never"`.
 - Outside workspace: deny.
 - Sensitive path writes: ask like other writes; secret-read restrictions still apply to reading contents.
 - Session/workspace approval memory should match by tool and resolved path or by a future shared `edit` capability, but it must not bypass checkpoints.
